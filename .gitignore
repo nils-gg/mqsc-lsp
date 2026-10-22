@@ -1,0 +1,17 @@
+# Rust build artifacts
+server/target/
+
+# IBM copyrighted reference material — NOT redistributed in this repository
+# (see ATTRIBUTION.md). Keep a local copy of the markdown at this path so
+# tools/extract_model.py can regenerate model/mqsc-model.json.
+MQSC_ScriptCommandReference.pdf
+MQSC_ScriptCommandReference.md
+MQSC_ScriptCommandReference-rag.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+__pycache__/
+*.pyc

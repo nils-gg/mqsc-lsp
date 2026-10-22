@@ -1,0 +1,29 @@
+# Example Helix config for mqsc-lsp.
+# Merge into ~/.config/helix/languages.toml and adjust paths.
+#
+# Helix requires a tree-sitter grammar (for parsing/highlighting) IN ADDITION
+# to the language server. Install the mqsc grammar first:
+#
+#   # on helix >= 24.03, with the grammar published (or use a local source):
+#   :grammar install mqsc
+#
+#   # manual alternative: symlink/copy grammars/tree-sitter-mqsc into
+#   #   ~/.config/helix/runtime/grammars/sources/mqsc
+#   # and run  :grammar install  — helix compiles parser.c + scanner.c itself.
+#   # The queries live in grammars/tree-sitter-mqsc/queries/highlights.scm;
+#   # copy them into that folder as helix expects queries/highlights.scm.
+
+[[language]]
+name = "mqsc"
+scope = "source.mqsc"
+injection-regex = "mqsc"
+file-types = ["mqsc"]
+comment-token = "*"
+block-comment-tokens = { start = "*", end = "*" }
+roots = []
+indent-tabs = false
+language-server = { command = "/path/to/mqsc-lsp/server/target/release/mqsc-lsp" }  # EDIT ME
+
+[[grammar]]
+name = "mqsc"
+source = { path = "/path/to/mqsc-lsp/grammars/tree-sitter-mqsc" }  # EDIT ME

@@ -1,0 +1,15 @@
+{
+  "name": "tree-sitter-mqsc",
+  "version": "0.1.0",
+  "description": "MQSC (IBM MQ Script Commands) grammar for tree-sitter",
+  "license": "MIT",
+  "author": "Nils Gerstner",
+  "keywords": ["parser", "mqsc", "ibm-mq", "tree-sitter", "lsp"],
+  "tree-sitter": [
+    {
+      "scope": "source.mqsc",
+      "file-types": ["mqsc", "mqsc.txt"],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+	// mqsc-lsp options for the VS Code LSP ecosystem.
+	//
+	// VS Code does not register arbitrary language servers from user settings
+	// alone. Two supported ways to plug mqsc-lsp in:
+	//
+	// 1) A ~40-line wrapper extension built on microsoft/vscode-languageclient.
+	//    The client-side pieces you need are exactly the `serverOptions` and
+	//    `clientOptions` objects below; use "mqsc" as the languageId and
+	//    register an `onLanguage:mqsc` activation event, and associate the
+	//    `mqsc` file extension with it in package.json (contributes.languages).
+	//
+	// 2) A generic "bring your own server" extension — e.g. Practical LSP,
+	//    which lets you register custom servers from a small Python script, or
+	//    similar multi-client extensions. Point it at the binary, map file
+	//    extension `mqsc` to language id `mqsc`, stdio transport; exact settings
+	//    keys differ per extension, so check its own docs.
+	//
+	// Release build required for editor use: cargo build --release (in server/).
+	"serverOptions": {
+		"run": {
+			"command": "${workspaceFolder}/server/target/release/mqsc-lsp",
+			"transport": { "kind": "stdio" }
+		},
+		"debug": {
+			"command": "${workspaceFolder}/server/target/debug/mqsc-lsp",
+			"transport": { "kind": "stdio" }
+		}
+	},
+	"clientOptions": {
+		"documentSelector": [
+			{ "language": "mqsc" },
+			{ "scheme": "file", "pattern": "**/*.mqsc" }
+		]
+	}
+}

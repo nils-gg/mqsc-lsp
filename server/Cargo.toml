@@ -1,0 +1,26 @@
+[package]
+name = "mqsc-lsp"
+version = "0.1.0"
+edition = "2021"
+description = "Language server for IBM MQ MQSC scripts, powered by a tree-sitter grammar"
+license = "MIT"
+
+[dependencies]
+tree-sitter = "0.24"
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lsp-types = "0.94"
+idna_adapter = "=1.2.0"
+hashbrown = "=0.15.2"
+indexmap = "=2.7.1"
+zerofrom = "=0.1.4"
+zerofrom-derive = "=0.1.4"
+anyhow = "1"
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+lto = true

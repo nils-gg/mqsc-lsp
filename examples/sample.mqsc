@@ -1,0 +1,111 @@
+*********************************************************************
+* Sample MQSC script exercising many language features
+* Run with: runmqsc QMGR < sample.mqsc
+*
+* NOTE: this file deliberately mixes valid commands with ones that
+* the mqsc-lsp diagnostics should flag: typos (DESC, NOMSGDISP),
+* invalid values, duplicates, missing continuations, and lines that
+* use MQ 8/9.x parameters absent from the 2011 Script (MQSC)
+* Command Reference this tool is modelled on (ACTREC, NAMELIST ADD,
+* ALTER QMGR LOGPAGE/LOGPRIMARY/MAXCHANNELS, MOVE ... FROM/TO).
+*********************************************************************
+
+* ------------------------------------------------------------------
+* Queues
+* ------------------------------------------------------------------
+DEFINE QLOCAL (LOCAL1) +
+      DESCR('A local queue with a continuation, and an embedded '' quote') +
+      REPLACE +
+
+      MAXDEPTH(999999999) +
+      MAXMSGL(4194304) +
+      DEFPSIST(YES) +
+      TRIGGER TRIGTYPE(FIRST) TRIGDATA(INIT1) +
+      ACTREC(SYSTEM.MOVE.INITIATION.LOCAL1)
+
+DEFINE QLOCAL (DEAD.LETTER.QUEUE) +
+      REPLACE +
+      DESCR('Dead letter queue') +
+      MAXMSGL(10485760)
+
+DEFINE QALIAS (ALIAS1) TARGET(LOCAL1) QSGDISP(QMGR)
+
+DEFINE QREMOTE (RQ1) +
+      RNAME(Q1.SYSB) RQMNAME(SYSB) XMITQ(SYSA.TO.SYSB) +
+      DEFBIND(NOTFIXED) CLUSTER(CLUS1)
+
+DEFINE QMODEL (MODEL1.*) +
+      DESC('Dynamic queue template') +
+      MAXMSGL(4194304) +
+      PUT(ENABLED) GET(ENABLED)
+
+ALTER QLOCAL (LOCAL1) -
+    MAXDEPTH(100) MAXMSGL(2500) -
+    SHARE NOSHARE SHARE
+
+* Multiple commas are one comma
+ALTER NAMELIST (MYNL) ADD (Q1,,Q2,,Q3,)
+
+DELETE QALIAS (OLD.ALIAS) NOMSGDISP(NORMAL) FORCE
+
+* ------------------------------------------------------------------
+* Channels
+* ------------------------------------------------------------------
+DEFINE CHANNEL (SYSTEM.DEF.SVRCONN) CHLTYPE(SVRCONN) TRPTYPE(TCP) MAXMSGL(4194304)
+
+DEFINE CHANNEL (SYSA.TO.SYSB) CHLTYPE(SDR) TRPTYPE(TCP) -
+  CONNAME('9.20.40.10(1414)') -
+  XMITQ(SYSA.TO.SYSB) DISCINT(0) PUT(ENABLED) GET(ENABLED)
+
+ALTER CHANNEL (SYSTEM.DEF.SVRCONN) MCAUSER('mqm') +
+  SSLCIPH('TLS_RSA_WITH_AES_256_CBC_SHA256')
+
+START CHINIT (SYSTEM.CHANNEL.INITQ) RECONNECT
+STOP CHINIT (SYSTEM.CHANNEL.INITQ) QUIESCE
+
+* ------------------------------------------------------------------
+* Queue manager
+* ------------------------------------------------------------------
+ALTER QMGR LOGPAGE(32768) LOGPRIMARY(100) LOGSECOND(20) +
+  MAXDEPTH(999999999) +
+  MAXMSGL(104857600) +
+  MONCHL(OFF) +
+  SECURITY(NONE)
+
+SET CHLOFFICE (SYSTEM.CHANNEL.INITQ)
+RESET QMGR TYPE(PUB)
+
+DISPLAY QLOCAL (*) MAXDEPTH MAXMSGL DESCR
+DISPLAY QLOCAL (PAY*) MAXDEPTH
+DISPLAY CHANNEL (SYSTEM.DEF.SVRCONN) *
+
+RESET QSTATS (LOCAL1) TYPE(HIST)
+MOVE QLOCAL (LOCAL1) FROM(ALL) TO(DEAD.LETTER.QUEUE) NOMSGDISP(NORMAL) REPLACE
+
+* ------------------------------------------------------------------
+* Publish/Subscribe
+* ------------------------------------------------------------------
+DEFINE TOPIC (SPORT.TOPIC) +
+     TOPICSTR (sport/running/#) +
+     DESC ('All running news')
+
+DEFINE SUB (MY.SUB) +
+     TOPICSTR ('sport/running/marathon') +
+     DEST (LOCAL1) +
+     DURSUB (YES) +
+     PERSIST (PROTECTED)
+
+* ------------------------------------------------------------------
+* z/OS style (also accepted by some tooling): NAME=value
+* ------------------------------------------------------------------
+ALTER QMGR MAXACTIVE=100 MAXCHANNELS=200
+
+TRACE (1:5,10,24:30) CLASS(1)
+
+DEFINE LISTENER (L1) -
+  DESC('Listener') -
+  TRPTYPE(TCP) -
+  PORT(1414) -
+  BACKLOG(10)
+
+END
