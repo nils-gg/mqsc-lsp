@@ -53,7 +53,7 @@ so the binary is standalone.
 
 ## Building
 
-Prerequisites: tree-sitter CLI **0.26.x**, a C compiler, `python3`, and Rust
+Prerequisites: tree-sitter CLI **0.27.x** (verified on 0.27.1), a C compiler, `python3`, and Rust
 **1.75** (the pinned toolchain here — see the pinning note below).
 
 ```sh
@@ -125,7 +125,7 @@ cd grammars/tree-sitter-mqsc && tree-sitter test    # grammar corpus (23 tests)
 python3 tools/lsp_smoke_test.py                      # full LSP session: diagnostics, hover,
                                                      # completion, symbols, folding, tokens
 cd server
-cargo run --example probe -- 0                       # analyze one line without the protocol
+echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol
 cargo run --example complete                         # completion behaviour matrix
 cargo run --example fold                             # folding ranges
 ```
