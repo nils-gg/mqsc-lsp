@@ -252,7 +252,13 @@ fn command_items(cmd: Node<'_>) -> Vec<Item<'_>> {
     items
 }
 
-pub fn analyze(text: &str, tree: &Tree, m: &Model, _uri: &Url) -> Vec<Diagnostic> {
+pub fn analyze(
+    text: &str,
+    tree: &Tree,
+    m: &Model,
+    _uri: &Url,
+    extra_defs: &Definitions,
+) -> Vec<Diagnostic> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
     let mut d = Diags { items: Vec::new() };
@@ -331,7 +337,8 @@ pub fn analyze(text: &str, tree: &Tree, m: &Model, _uri: &Url) -> Vec<Diagnostic
     }
 
     // ---- same-script object knowledge (shared by all semantic checks)
-    let defs = collect_definitions(tree, src, m);
+    let mut defs = collect_definitions(tree, src, m);
+    defs.add_external(extra_defs);
 
     // ---- semantic checks per command
     let mut cursor = root.walk();
@@ -385,6 +392,7 @@ fn command_before<'t>(tree: &'t Tree, byte_off: usize) -> Option<Node<'t>> {
 /// known names in completion and to hint at references that are never
 /// DEFINEd in this file (code 12). Whole-file and order-independent: an
 /// object DEFINEd later in the script counts as defined.
+#[derive(Debug, Clone, Default)]
 pub struct Definitions {
     /// every defined name, uppercase
     pub names: HashSet<String>,
@@ -392,10 +400,15 @@ pub struct Definitions {
     pub by_obj: BTreeMap<String, Vec<String>>,
     /// whether the script contains at least one resolvable DEFINE
     pub any_defines: bool,
+    /// names merged in from OTHER open documents (T-17); code-12 messages
+    /// widen their scope wording accordingly
+    pub from_other_files: bool,
 }
 
-fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
-    let mut defs = Definitions { names: HashSet::new(), by_obj: BTreeMap::new(), any_defines: false };
+/// Every `DEFINE` in the tree. `pub` so the server can cache one per open
+/// document and merge them into a workspace-wide view (T-17).
+pub fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
+    let mut defs = Definitions::default();
     let root = tree.root_node();
     let mut cursor = root.walk();
     for cmd in root.named_children(&mut cursor) {
@@ -508,6 +521,28 @@ fn names_for<'a>(defs: &'a Definitions, r: Option<ObjRef>, cmd_obj: &str) -> Vec
 }
 
 impl Definitions {
+    /// Merge the defined names of other open documents into this view
+    /// (T-17). A name defined in a sibling script stops the code-12 hint and
+    /// appears in completions, exactly as if it were DEFINEd here — the
+    /// gate (arming) widens the same way, which is the whole point for
+    /// per-object-type dump scripts.
+    pub fn add_external(&mut self, other: &Definitions) {
+        if other.names.is_empty() {
+            return;
+        }
+        self.from_other_files = true;
+        self.any_defines = true;
+        self.names.extend(other.names.iter().cloned());
+        for (obj, ns) in &other.by_obj {
+            let entry = self.by_obj.entry(obj.clone()).or_default();
+            for n in ns {
+                if !entry.contains(n) {
+                    entry.push(n.clone());
+                }
+            }
+        }
+    }
+
     /// Whether code 12 may fire at all for a reference family in this script:
     /// only when the script DEFINEs at least one object of a matching type.
     /// A dump that only contains, say, QALIAS definitions never gets TARGET
@@ -552,8 +587,9 @@ fn check_obj_ref(
                 DiagnosticSeverity::HINT,
                 CODE_UNDEFINED_OBJECT,
                 format!(
-                    "'{name}' is not DEFINEd in this script; it must already exist in the \
-                     queue manager (or is a typo)"
+                    "'{name}' is not DEFINEd in {}; it must already exist in the \
+                     queue manager (or is a typo)",
+                    if defs.from_other_files { "this script or the other open documents" } else { "this script" }
                 ),
             );
         }
@@ -561,6 +597,10 @@ fn check_obj_ref(
 }
 
 // ---------------------- object-name sites (navigation: T-16, hover: T-18)
+
+/// Where a name is DEFINEd in the OTHER open documents (T-17 cross-file
+/// hover): UPPERCASE name -> (display file name, 0-based line, object type).
+pub type ExternalDefs = BTreeMap<String, Vec<(String, u32, String)>>;
 
 /// One appearance of an object name in the script: the name introduced by
 /// `DEFINE <TYPE>(NAME)` or a place that uses it (the positional object
@@ -1187,7 +1227,13 @@ fn command_context<'t>(cmd: Node<'t>, src: &'t [u8], m: &'t Model) -> Option<(&'
     Some((verb, obj, e))
 }
 
-pub fn hover(text: &str, tree: &Tree, m: &Model, pos: Position) -> Option<Hover> {
+pub fn hover(
+    text: &str,
+    tree: &Tree,
+    m: &Model,
+    pos: Position,
+    ext_defs: &ExternalDefs,
+) -> Option<Hover> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
     let off = lines.offset(pos);
@@ -1215,11 +1261,29 @@ pub fn hover(text: &str, tree: &Tree, m: &Model, pos: Position) -> Option<Hover>
         let uses = idx.sites_of(&site.name).filter(|s| s.defines.is_none()).count();
         let defs = idx.definitions_of(&site.name);
         let md = if defs.is_empty() {
-            format!(
-                "**`{}`** — an object name, but not DEFINEd in this script.\n\n\
-                 It must already exist in the queue manager.",
-                site.name
-            )
+            // not defined in this document — is it DEFINEd in another open
+            // one? (T-17)
+            match ext_defs.get(&site.name) {
+                Some(ext) if !ext.is_empty() => {
+                    let types: Vec<&str> = ext.iter().map(|(_, _, t)| t.as_str()).collect();
+                    format!(
+                        "**{} `{}`** — DEFINEd at line {} of `{}` (another open document){}\n\n\
+                         {} {} in this script.",
+                        types.join("/"),
+                        site.name,
+                        ext[0].1 + 1,
+                        ext[0].0,
+                        if ext.len() > 1 { format!(" — {} DEFINE locations there", ext.len()) } else { String::new() },
+                        uses,
+                        if uses == 1 { "use" } else { "uses" },
+                    )
+                }
+                _ => format!(
+                    "**`{}`** — an object name, but not DEFINEd in this script.\n\n\
+                     It must already exist in the queue manager.",
+                    site.name
+                ),
+            }
         } else {
             let mut types: Vec<&str> = Vec::new();
             for d in &defs {
@@ -1362,6 +1426,7 @@ pub fn completions(
     m: &Model,
     pos: Position,
     snippet: bool,
+    extra_defs: &Definitions,
 ) -> Vec<CompletionItem> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
@@ -1382,9 +1447,11 @@ pub fn completions(
                         let p = &e.params[pi];
                         let mut out = value_completions(p, &frag);
                         // queue/object reference parameter: also offer names
-                        // this very script already DEFINEd
+                        // this very script already DEFINEd (plus the other
+                        // open documents, T-17)
                         if let Some(r) = object_ref_param(&w, e.object) {
-                            let defs = collect_definitions(tree, src, m);
+                            let mut defs = collect_definitions(tree, src, m);
+                            defs.add_external(extra_defs);
                             out.extend(name_items(&names_for(&defs, Some(r), e.object)));
                         }
                         // (value_completions already filtered its items;
@@ -1407,7 +1474,8 @@ pub fn completions(
                 ..Default::default()
             }];
             if let Some((_, _, e)) = command_context(cmd, src, m) {
-                let defs = collect_definitions(tree, src, m);
+                let mut defs = collect_definitions(tree, src, m);
+                defs.add_external(extra_defs);
                 let pairs: Vec<(&str, &str)> = defs
                     .by_obj
                     .iter()
@@ -2056,7 +2124,7 @@ mod tests {
         let m = Model::load();
         let tree = parse(text);
         let uri = Url::parse("file:///fixture.mqsc").unwrap();
-        analyze(text, &tree, m, &uri)
+        analyze(text, &tree, m, &uri, &Definitions::default())
             .into_iter()
             .filter_map(|d| match d.code {
                 Some(lsp::NumberOrString::Number(c)) => Some(c),
@@ -2166,6 +2234,7 @@ mod tests {
             &parse("DESCR REPLACE\n"),
             Model::load(),
             &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
         );
         let d = diags.iter().find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)));
         assert!(d.is_some(), "expected MISSING_CONT, got {:?}", codes("DESCR REPLACE\n"));
@@ -2241,6 +2310,7 @@ mod tests {
             &parse("DEFINE QLOCAL(A) DISTL(yesx)\n"),
             Model::load(),
             &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
         );
         let d = lower
             .iter()
@@ -2258,6 +2328,7 @@ mod tests {
             &parse("DEFINE QLOCAL(A) DISTL(YESX)\n"),
             Model::load(),
             &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
         );
         let d = upper
             .iter()
@@ -2291,7 +2362,7 @@ mod tests {
             "DESCR('a''b''c",
         ] {
             let tree = parse(text);
-            let _ = analyze(text, &tree, m, &uri);
+            let _ = analyze(text, &tree, m, &uri, &Definitions::default());
         }
     }
 
@@ -2350,14 +2421,77 @@ mod tests {
             _ => panic!("expected markup"),
         };
         // on the definition itself
-        let h = hover(text, &tree, m, Position::new(0, 15)).expect("hover def");
+        let h = hover(text, &tree, m, Position::new(0, 15), &Default::default()).expect("hover def");
         let md = md_of(h);
         assert!(md.contains("QLOCAL") && md.contains("this is the definition"), "{md}");
         // on the reference: names the defining line (1-based) and use count
-        let h = hover(text, &tree, m, Position::new(1, 29)).expect("hover use");
+        let h = hover(text, &tree, m, Position::new(1, 29), &Default::default()).expect("hover use");
         let md = md_of(h);
         assert!(md.contains("DEFINEd at line 1"), "{md}");
         assert!(md.contains("1 use"), "{md}");
+    }
+
+    // ------------------------------------------- cross-file knowledge (T-17)
+
+    /// A sibling document that defines `name` as a QLOCAL.
+    fn sibling_defining(name: &str) -> Definitions {
+        let mut d = Definitions::default();
+        d.names.insert(name.to_string());
+        d.by_obj
+            .entry("QLOCAL".to_string())
+            .or_default()
+            .push(name.to_string());
+        d.any_defines = true;
+        d
+    }
+
+    #[test]
+    fn external_definitions_silence_the_undefined_hint() {
+        let text = "DEFINE QALIAS(A) TARGET(GHOST)\n";
+        let tree = parse(text);
+        let uri = Url::parse("file:///a.mqsc").unwrap();
+        let m = Model::load();
+        let is12 = |d: &Diagnostic| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT));
+        // alone: the hint fires on TARGET(GHOST)
+        assert!(codes(text).contains(&CODE_UNDEFINED_OBJECT));
+        // with a sibling document DEFINing GHOST: gone
+        let diags = analyze(text, &tree, m, &uri, &sibling_defining("GHOST"));
+        assert!(!diags.iter().any(is12), "{:?}", diags.iter().map(|d| &d.message));
+        // still hinted when the sibling defines something else — and then the
+        // message widens its scope to the other documents
+        let diags = analyze(text, &tree, m, &uri, &sibling_defining("OTHER"));
+        let d = diags.iter().find(|d| is12(*d)).expect("GHOST must still be hinted");
+        assert!(
+            d.message.contains("this script or the other open documents"),
+            "{}",
+            d.message
+        );
+    }
+
+    #[test]
+    fn hover_points_at_a_definition_in_another_document() {
+        let text = "DEFINE QALIAS(A) TARGET(GHOST)\n";
+        let tree = parse(text);
+        let m = Model::load();
+        let mut ext: ExternalDefs = Default::default();
+        ext.insert("GHOST".into(), vec![("sibling.mqsc".to_string(), 7, "QLOCAL".to_string())]);
+        // cursor inside GHOST (TARGET( sits at col 22, G at 24)
+        let h = hover(text, &tree, m, Position::new(0, 25), &ext).expect("hover");
+        let md = match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        assert!(
+            md.contains("sibling.mqsc") && md.contains("line 8") && md.contains("another open document"),
+            "{md}"
+        );
+        // without the sibling it falls back to the plain "not DEFINEd" text
+        let h = hover(text, &tree, m, Position::new(0, 25), &Default::default()).expect("hover");
+        let md = match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        assert!(md.contains("not DEFINEd in this script"), "{md}");
     }
 
     #[test]

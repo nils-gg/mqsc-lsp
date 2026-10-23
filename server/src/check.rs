@@ -41,7 +41,7 @@ fn check_one(display: &str, text: &str, settings: Option<&Value>, out: &mut Stri
     let uri = Url::from_directory_path(if display == "-" { "<stdin>" } else { display })
         .unwrap_or_else(|_| Url::parse("file:///-").unwrap());
     let tree = analysis::parse(text);
-    let mut diags = analysis::analyze(text, &tree, m, &uri);
+    let mut diags = analysis::analyze(text, &tree, m, &uri, &analysis::Definitions::default());
     if let Some(root) = settings {
         if let Some(map) = diagnostic_settings(root) {
             apply_diagnostic_settings(&mut diags, map);

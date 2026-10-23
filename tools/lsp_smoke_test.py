@@ -246,6 +246,90 @@ prefs = {t for t, p in pairs if p}
 check("each diagnostic's first suggestion is preferred",
       prefs == {"Change to `YES`", "Change to `MAXMSGL`"}, str(pairs))
 
+print("\n== cross-file (T-17): open sibling that DEFINEs NO.SUCH.Q ==")
+DOC2 = "DEFINE QLOCAL(NO.SUCH.Q) DESCR('defined in sibling')\nDEFINE QALIAS(A9) TARGET(Q1)\n"
+uri2 = "file:///tmp/other.mqsc"
+send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+    "textDocument": {"uri": uri2, "languageId": "mqsc", "version": 1, "text": DOC2}}})
+d_other = d_sample = None
+while True:
+    m = pump(2)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics":
+        if m["params"]["uri"] == uri2:
+            d_other = m["params"]["diagnostics"]
+        elif m["params"]["uri"] == uri:
+            d_sample = m["params"]["diagnostics"]
+check("sibling's defines silence the code-12 hint in the first doc (republished)",
+      d_sample is not None and not any(d.get("code") == 12 for d in d_sample),
+      str([(d.get("code"), d["message"][:40]) for d in (d_sample or [])]))
+check("the definition itself gets no undefined-object noise",
+      d_other is not None and not any(d.get("code") == 12 for d in d_other))
+
+m = request(22, "textDocument/definition", {"textDocument": {"uri": uri},
+                                           "position": {"line": 7, "character": 25}})
+res = (m or {}).get("result")
+locs = res if isinstance(res, list) else ([res] if res else [])
+got = [(l["uri"], l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs]
+check("definition jumps from DOC's TARGET(NO.SUCH.Q) into the sibling",
+      got == [(uri2, 0, 14)], str(got))
+
+m = request(23, "textDocument/references", {"textDocument": {"uri": uri},
+                                           "position": {"line": 7, "character": 25},
+                                           "context": {"includeDeclaration": True}})
+locs = (m or {}).get("result") or []
+rs = sorted((l["uri"], l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs)
+check("references span both documents (sorted by uri)",
+      rs == [(uri2, 0, 14), (uri, 7, 25)], str(rs))
+
+m = request(24, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 7, "character": 25}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+print("   cross hover:", v.replace("\n", " ")[:120])
+check("hover names the sibling file and line",
+      "another open document" in v and "other.mqsc" in v and "line 1" in v, v[:80])
+
+m = request(25, "textDocument/completion", {"textDocument": {"uri": uri},
+                                           "position": {"line": 7, "character": 25},
+                                           "context": {"triggerKind": 2}})
+labels = []
+if m and m.get("result"):
+    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
+    labels = [i["label"] for i in items]
+check("completion offers the sibling's QLOCAL name", "NO.SUCH.Q" in labels, str(labels[:12]))
+
+m = request(26, "textDocument/rename", {"textDocument": {"uri": uri},
+                                        "position": {"line": 7, "character": 25},
+                                        "newName": "RENAMED.Q"})
+ch = (((m or {}).get("result") or {}).get("changes") or {})
+edits = {u: sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"])
+                   for e in el) for u, el in ch.items()}
+print("  ", edits)
+check("rename edits both documents",
+      edits.get(uri) == [(7, 25, "RENAMED.Q")] and edits.get(uri2) == [(0, 14, "RENAMED.Q")],
+      str(edits))
+
+print("\n== cross-file teardown: close the sibling ==")
+send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
+    "textDocument": {"uri": uri2}}})
+d_sample = None
+while True:
+    m = pump(2)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
+        d_sample = m["params"]["diagnostics"]
+check("closing the sibling republishes the hint in the first doc",
+      d_sample is not None and any(d.get("code") == 12 and "NO.SUCH.Q" in d["message"] for d in d_sample),
+      str([(d.get("code"), d["message"][:40]) for d in (d_sample or []) if d.get("code") == 12]))
+m = request(27, "textDocument/references", {"textDocument": {"uri": uri},
+                                           "position": {"line": 7, "character": 25},
+                                           "context": {"includeDeclaration": True}})
+locs = (m or {}).get("result") or []
+check("references shrink back to one document",
+      [(l["uri"], l["range"]["start"]["line"]) for l in locs] == [(uri, 7)], str(locs))
+
 print("\n== settings: UNDEFINED_OBJECT off ==")
 before = sum(1 for d in diags if d.get("code") == 12)
 print("   code-12 hints before:", before)

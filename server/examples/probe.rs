@@ -8,7 +8,7 @@ fn main() {
     eprintln!("parsed in {:?}", now.elapsed());
     let m = mqsc_lsp::model::Model::load();
     let uri: Url = "file:///t.mqsc".parse().unwrap();
-    let diags = mqsc_lsp::analysis::analyze(&text, &tree, m, &uri);
+    let diags = mqsc_lsp::analysis::analyze(&text, &tree, m, &uri, &mqsc_lsp::analysis::Definitions::default());
     eprintln!("analyzed in {:?}: {} diagnostics", now.elapsed(), diags.len());
     for d in &diags {
         let code = match &d.code {

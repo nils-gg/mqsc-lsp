@@ -14,11 +14,14 @@ use crate::settings::{apply_diagnostic_settings, diagnostic_settings};
 
 /// A document opened in the editor: its text and the parse tree built for
 /// that text. All requests reuse the cached tree instead of re-parsing.
+/// `defs` is this document's own DEFINE index, cached so the cross-file
+/// workspace view (T-17) is a cheap merge.
 struct Doc {
     text: String,
     // tree_sitter::Tree is Send but not Sync, so it needs a lock for shared
     // handler access; handlers only ever use &Tree (analysis never edits).
     tree: Mutex<tree_sitter::Tree>,
+    defs: analysis::Definitions,
 }
 
 pub struct MqscServer {
@@ -43,13 +46,22 @@ impl MqscServer {
 
     /// Publish diagnostics for an open document, applying severity overrides.
     /// Uses the document's cached parse tree (callers must have stored it).
+    /// Diagnostics see the DEFINEs of every OTHER open document too (T-17):
+    /// a name defined in a sibling script stops the code-12 hint.
     async fn refresh(&self, uri: &Url) {
         let diags = {
             let docs = self.docs.read().unwrap();
             match docs.get(uri) {
                 Some(doc) => {
+                    let mut extra = analysis::Definitions::default();
+                    for (u, other) in docs.iter() {
+                        if u != uri {
+                            extra.add_external(&other.defs);
+                        }
+                    }
                     let tree = doc.tree.lock().unwrap();
-                    let mut diags = analysis::analyze(&doc.text, &tree, Model::load(), uri);
+                    let mut diags =
+                        analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
                     let cfg = self.settings.read().unwrap();
                     if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
                         apply_diagnostic_settings(&mut diags, map);
@@ -60,6 +72,74 @@ impl MqscServer {
             }
         }; // guards dropped before the await
         self.client.publish_diagnostics(uri.clone(), diags, None).await;
+    }
+
+    /// Definitions from all open documents except `uri` (cached per doc, so
+    /// this merge is cheap).
+    fn external_defs(&self, uri: &Url) -> analysis::Definitions {
+        let mut merged = analysis::Definitions::default();
+        for (u, doc) in self.docs.read().unwrap().iter() {
+            if u != uri {
+                merged.add_external(&doc.defs);
+            }
+        }
+        merged
+    }
+
+    /// Cross-file definitions for hover: name -> (file display name,
+    /// 0-based line, object type), scanned from the other open documents.
+    fn external_defs_map(&self, uri: &Url) -> analysis::ExternalDefs {
+        let mut map: analysis::ExternalDefs = Default::default();
+        let docs = self.docs.read().unwrap();
+        for (u, doc) in docs.iter() {
+            if u == uri {
+                continue;
+            }
+            let tree = doc.tree.lock().unwrap();
+            let idx = analysis::object_index(&doc.text, &tree, Model::load());
+            for s in idx.definitions() {
+                map.entry(s.name.clone()).or_default().push((
+                    display_file(u),
+                    s.range.start.line,
+                    s.defines.clone().unwrap_or_else(|| "OBJECT".into()),
+                ));
+            }
+        }
+        map
+    }
+
+    /// Re-publish diagnostics for every open document except `skip`. Called
+    /// on did_open/did_close (T-17): the set of cross-file definitions just
+    /// changed for every other document. Not called on did_change — that
+    /// would be O(open documents) per keystroke.
+    async fn refresh_others(&self, skip: &Url) {
+        let others: Vec<Url> =
+            self.docs.read().unwrap().keys().filter(|u| *u != skip).cloned().collect();
+        for u in others {
+            self.refresh(&u).await;
+        }
+    }
+
+    /// Collect name sites over every open document (T-17). `definitions_only:
+    /// Some(true)` keeps only DEFINE sites, `Some(false)` only uses.
+    fn sites_of_name(&self, name: &str, definitions_only: Option<bool>) -> Vec<Location> {
+        let mut out = Vec::new();
+        let docs = self.docs.read().unwrap();
+        for (u, doc) in docs.iter() {
+            let tree = doc.tree.lock().unwrap();
+            let idx = analysis::object_index(&doc.text, &tree, Model::load());
+            for s in idx.sites_of(name) {
+                let keep = match definitions_only {
+                    Some(true) => s.defines.is_some(),
+                    Some(false) => s.defines.is_none(),
+                    None => true,
+                };
+                if keep {
+                    out.push(Location { uri: u.clone(), range: s.range });
+                }
+            }
+        }
+        out
     }
 
     fn with_doc<T>(
@@ -77,6 +157,16 @@ impl MqscServer {
                 "document not open: {uri}"
             ))),
         }
+    }
+}
+
+/// Last path segment of a URI (or the whole path when it has none), for
+/// user-visible "defined in file X" text.
+fn display_file(uri: &Url) -> String {
+    let p = uri.path();
+    match p.rsplit('/').next() {
+        Some(seg) if !seg.is_empty() => seg.to_string(),
+        _ => p.to_string(),
     }
 }
 
@@ -186,11 +276,15 @@ impl LanguageServer for MqscServer {
         let uri = p.text_document.uri;
         let text = p.text_document.text;
         let tree = analysis::parse(&text);
-        self.docs
-            .write()
-            .unwrap()
-            .insert(uri.clone(), Doc { text, tree: Mutex::new(tree) });
+        let defs = analysis::collect_definitions(&tree, text.as_bytes(), Model::load());
+        self.docs.write().unwrap().insert(
+            uri.clone(),
+            Doc { text, tree: Mutex::new(tree), defs },
+        );
         self.refresh(&uri).await;
+        // T-17: this document's DEFINEs change the hints of every other
+        // open document too; opening is rare enough to refresh all of them.
+        self.refresh_others(&uri).await;
     }
 
     async fn did_change(&self, p: DidChangeTextDocumentParams) {
@@ -200,22 +294,29 @@ impl LanguageServer for MqscServer {
             None => return,
         };
         let tree = analysis::parse(&text);
-        self.docs
-            .write()
-            .unwrap()
-            .insert(uri.clone(), Doc { text, tree: Mutex::new(tree) });
+        let defs = analysis::collect_definitions(&tree, text.as_bytes(), Model::load());
+        self.docs.write().unwrap().insert(
+            uri.clone(),
+            Doc { text, tree: Mutex::new(tree), defs },
+        );
+        // Sibling documents are deliberately NOT re-analysed on every keystroke
+        // (O(open documents) per change); their cross-file hints refresh on
+        // their own next change and on open/close events.
         self.refresh(&uri).await;
     }
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
         self.docs.write().unwrap().remove(&p.text_document.uri);
+        // the remaining documents lost their external definitions (T-17)
+        self.refresh_others(&p.text_document.uri).await;
     }
 
     async fn hover(&self, p: HoverParams) -> RpcResult<Option<Hover>> {
         let uri = &p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
+        let ext = self.external_defs_map(uri);
         self.with_doc(uri, |text, tree| {
-            Ok(analysis::hover(text, tree, Model::load(), pos))
+            Ok(analysis::hover(text, tree, Model::load(), pos, &ext))
         })
     }
 
@@ -223,8 +324,9 @@ impl LanguageServer for MqscServer {
         let uri = &p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
         let snippet = self.snippet_support.load(Ordering::Relaxed);
+        let extra = self.external_defs(uri);
         self.with_doc(uri, |text, tree| {
-            let items = analysis::completions(text, tree, Model::load(), pos, snippet);
+            let items = analysis::completions(text, tree, Model::load(), pos, snippet, &extra);
             Ok(Some(CompletionResponse::Array(items)))
         })
     }
@@ -307,80 +409,86 @@ impl LanguageServer for MqscServer {
         self.with_doc(uri, |text, tree| Ok(Some(analysis::highlights(text, tree, pos))))
     }
 
-    /// T-16: jump from any use of an object name to its DEFINE. Duplicate
-    /// names (same name under several object types exist in real dumps) all
-    /// come back as locations.
+    /// T-16/T-17: jump from any use of an object name to its DEFINE — across
+    /// ALL open documents. Duplicate names (same name under several object
+    /// types exist in real dumps) all come back as locations, sorted for a
+    /// stable pick list.
     async fn goto_definition(
         &self,
         p: GotoDefinitionParams,
     ) -> RpcResult<Option<GotoDefinitionResponse>> {
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
-        let uri2 = uri.clone();
-        self.with_doc(&uri, move |text, tree| {
+        let name = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            let Some(site) = idx.site_at(pos) else { return Ok(None) };
-            let defs = idx.definitions_of(&site.name);
-            match defs.len() {
-                0 => Ok(None),
-                1 => Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                    uri: uri2,
-                    range: defs[0].range,
-                }))),
-                _ => Ok(Some(GotoDefinitionResponse::Array(
-                    defs.iter()
-                        .map(|d| Location { uri: uri2.clone(), range: d.range })
-                        .collect(),
-                ))),
-            }
-        })
+            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+        })?;
+        let Some(name) = name else { return Ok(None) };
+        let mut locs = self.sites_of_name(&name, Some(true));
+        if locs.is_empty() {
+            return Ok(None);
+        }
+        locs.sort_by_key(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character));
+        let response = if locs.len() == 1 {
+            GotoDefinitionResponse::Scalar(locs.pop().unwrap())
+        } else {
+            GotoDefinitionResponse::Array(locs)
+        };
+        Ok(Some(response))
     }
 
     async fn references(&self, p: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
-        let uri2 = uri.clone();
-        self.with_doc(&uri, move |text, tree| {
+        let name = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            let Some(site) = idx.site_at(pos) else { return Ok(None) };
-            // definition first (clients honour includeDeclaration themselves)
-            Ok(Some(
-                idx.sites_of(&site.name)
-                    .map(|s| Location { uri: uri2.clone(), range: s.range })
-                    .collect(),
-            ))
-        })
+            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+        })?;
+        let Some(name) = name else { return Ok(None) };
+        // every site of the name, definitions included (clients honour
+        // includeDeclaration themselves)
+        let mut locs = self.sites_of_name(&name, None);
+        locs.sort_by_key(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character));
+        Ok(Some(locs))
     }
 
-    /// Rename every occurrence of the object name under the cursor, keeping
-    /// each site's quoting style (quoted sites stay quoted; a name that no
-    /// longer fits the bare-word syntax is quoted everywhere).
+    /// Rename every occurrence of the object name under the cursor in every
+    /// open document, keeping each site's quoting style (quoted sites stay
+    /// quoted; a name that no longer fits the bare-word syntax is quoted
+    /// everywhere).
     async fn rename(&self, p: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
         let new_name = p.new_name;
-        let uri2 = uri.clone();
         if new_name.is_empty() {
             return Err(tower_lsp::jsonrpc::Error::invalid_params("new name is empty"));
         }
-        self.with_doc(&uri, move |text, tree| {
+        let name = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            let Some(site) = idx.site_at(pos) else {
-                return Err(tower_lsp::jsonrpc::Error::invalid_params(
-                    "rename needs the cursor on an object name",
-                ));
-            };
+            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+        })?;
+        let Some(name) = name else {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "rename needs the cursor on an object name",
+            ));
+        };
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let docs = self.docs.read().unwrap();
+        for (u, doc) in docs.iter() {
+            let tree = doc.tree.lock().unwrap();
+            let idx = analysis::object_index(&doc.text, &tree, Model::load());
             let edits: Vec<TextEdit> = idx
-                .sites_of(&site.name)
+                .sites_of(&name)
                 .map(|s| TextEdit {
                     range: s.range,
                     new_text: rename_text(&new_name, s.quoted),
                 })
                 .collect();
-            let mut changes = HashMap::new();
-            changes.insert(uri2, edits);
-            Ok(Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }))
-        })
+            if !edits.is_empty() {
+                changes.insert(u.clone(), edits);
+            }
+        }
+        Ok(Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }))
     }
 
     /// T-20: every object DEFINEd in every open document, grouped in the
