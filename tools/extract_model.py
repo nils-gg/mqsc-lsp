@@ -526,8 +526,9 @@ def main():
                         param_docs.setdefault(cur, []).append([context, " ".join(buf)])
                     cur, buf = m.group(1), []
                     continue
-                if ln.startswith("Parent topic"):
-                    break
+                # NOTE: page footers ("Parent topic:", "Page N of M", ...) are
+                # *not* region ends in this conversion — content continues
+                # after them; they are dropped by the junk filter below.
                 s = ln.strip()
                 if s and cur is not None and not s.startswith(("*", "|", "+", "#", ">", "[")):
                     if re.match(r"^\d{1,2}\.\s", s) or SYNTAX_ECHO_RE.match(s):
