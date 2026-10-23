@@ -401,6 +401,10 @@
       "value": "[ \\t\\r]+"
     },
     {
+      "type": "STRING",
+      "value": "+"
+    },
+    {
       "type": "SYMBOL",
       "name": "comment"
     }

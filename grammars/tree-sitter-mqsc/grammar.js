@@ -24,6 +24,15 @@
  * break), '...' strings with '' escapes and in-string continuations, and
  * '+'/'-' end-of-line continuations (the continuation token absorbs its line
  * break and any blank lines that follow, per §1.1.3).
+ *
+ * Real-world tolerance: IBM's own `dmpmqcfg` config dumps wrap long commands
+ * and mark the wrap with a '+'. When those wrapped lines are later joined
+ * into one physical line the '+' survives mid-line (e.g. `DEST('X') +
+ * DESTCORL('Y')`). Such a bare '+' is not valid MQSC text, but it carries no
+ * meaning beyond the removed line break, so the grammar accepts and ignores
+ * it as an extra. A '+'/'-' at *end of line* is still the external scanner's
+ * continuation (the scanner runs before the internal lexer, so it wins there);
+ * this extra only ever matches a '+' the scanner did not consume.
  */
 
 'use strict';
@@ -31,7 +40,10 @@
 module.exports = grammar({
   name: 'mqsc',
 
-  extras: ($) => [/[ \t\r]+/, $.comment],
+  // '+' is an ignored stray-continuation marker (see note above); it can only
+  // ever match a '+' no other token can start (word excludes it, integer is
+  // '-?[0-9]', string is external), so it never splits another token.
+  extras: ($) => [/[ \t\r]+/, '+', $.comment],
 
   externals: ($) => [$.comment, $._continuation, $.string],
 

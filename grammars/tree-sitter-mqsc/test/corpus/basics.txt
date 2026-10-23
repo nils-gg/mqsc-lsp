@@ -472,3 +472,28 @@ END
 (program
   (command
     (verb)))
+
+================================================================================
+Stray mid-line plus continuation marker from joined dmpmqcfg dump lines
+================================================================================
+
+DEFINE SUB('S1') DEST('D1') + DESTCORL('X') REPLACE
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (string)))
+    (word)
+    (argument
+      (value
+        (string)))
+    (word)
+    (argument
+      (value
+        (string)))
+    (word)))
