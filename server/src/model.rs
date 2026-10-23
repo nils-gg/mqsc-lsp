@@ -479,3 +479,129 @@ pub fn suggest<'a, I: IntoIterator<Item = &'a str>>(word: &str, pool: I, max: us
     hits.truncate(max);
     hits.into_iter().map(|(_, c)| c).collect()
 }
+
+// ---------------------------------------------------------------- tests (T-10)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model() -> &'static Model {
+        Model::load()
+    }
+
+    fn param(verb: &str, object: &str, name: &str) -> &'static Param {
+        let m = model();
+        let idx = m
+            .resolve(verb, Some(object))
+            .unwrap_or_else(|| panic!("{verb} {object} not in model"));
+        m.entry(idx)
+            .params
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("{verb} {object} has no param {name}"))
+    }
+
+    fn enum_values(p: &Param) -> Vec<String> {
+        match &p.kind {
+            ValueKind::Enum(v) => v.clone(),
+            other => panic!("{} is {:?}, not Enum", p.name, other),
+        }
+    }
+
+    // ------------------------------------------------------------- suggestions
+
+    #[test]
+    fn distance_is_levenshtein() {
+        assert_eq!(distance("MAXMSGL", "MAXMSGS"), 1);
+        assert_eq!(distance("A", "ABC"), 2);
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("", "xy"), 2);
+        assert_eq!(distance("SAME", "SAME"), 0);
+    }
+
+    #[test]
+    fn suggest_picks_near_words_case_insensitively() {
+        let pool = ["MAXMSGL", "MAXDEPTH", "DESCR"];
+        assert_eq!(suggest("MAXMSGS", pool, 3), vec!["MAXMSGL"]);
+        assert_eq!(suggest("maxmsgs", pool, 3), vec!["MAXMSGL"]);
+        // far-away words are not suggested (threshold = max(2, len/3))
+        assert!(suggest("ZZZZZZZ", pool, 3).is_empty());
+        // near miss survives, other candidates are out of range
+        assert_eq!(suggest("MAXDEPT", ["MAXDEPTH", "MAXMSGL", "MAXDATA"], 2), vec!["MAXDEPTH"]);
+        // equal-distance hits come back alphabetical and respect the cap
+        assert_eq!(suggest("MAXMSGX", ["MAXMSGL", "MAXMSGX1", "MAXDEPTH"], 2), vec!["MAXMSGL", "MAXMSGX1"]);
+    }
+
+    // ------------------------------------------------------------ model lookup
+
+    #[test]
+    fn verbs_and_objects_resolve() {
+        let m = model();
+        assert_eq!(m.canon_verb("define"), Some("DEFINE"));
+        assert_eq!(m.canon_verb("Define"), Some("DEFINE"));
+        assert_eq!(m.canon_verb("FROBNIC"), None);
+        assert!(m.resolve("DEFINE", Some("QLOCAL")).is_some());
+        assert!(m.resolve("DEFINE", Some("NOPE")).is_none());
+        assert!(m.objects_for("DEFINE").contains(&"QLOCAL"));
+    }
+
+    // --------------------------------------- curated model invariants (T-1..T-9)
+
+    #[test]
+    fn overlay_custom_field_is_permissive_string() {
+        // z/OS dumps store CUSTOM('DeployID(123)'); integer kind would warn
+        assert_eq!(param("DEFINE", "QLOCAL", "CUSTOM").kind, ValueKind::Str);
+    }
+
+    #[test]
+    fn overlay_set_authrec_objtype_has_modern_values() {
+        let v = enum_values(param("SET", "AUTHREC", "OBJTYPE"));
+        // QUEUE is from the base; CLNTCONN/COMMINFO/RQMNAME were added by the
+        // overlay so SET AUTHREC OBJTYPE(...) (the corpus value set) validates
+        for want in ["QUEUE", "CLNTCONN", "COMMINFO", "RQMNAME"] {
+            assert!(v.iter().any(|x| x == want), "OBJTYPE missing {want}: {v:?}");
+        }
+    }
+
+    #[test]
+    fn overlay_setchlauth_has_warn_and_chckclnt() {
+        let m = model();
+        let idx = m.resolve("SET", Some("CHLAUTH")).unwrap();
+        let names: Vec<_> = m.entry(idx).params.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"WARN"), "SET CHLAUTH params: {names:?}");
+        assert!(names.contains(&"CHCKCLNT"));
+    }
+
+    #[test]
+    fn rebuilt_define_sub_has_modern_parameters() {
+        assert!(param("DEFINE", "SUB", "TOPICSTR").kind == ValueKind::Str);
+        let e = enum_values(param("DEFINE", "SUB", "EXPIRY"));
+        assert!(e.contains(&"UNLIMITED".to_string()), "EXPIRY: {e:?}");
+    }
+
+    #[test]
+    fn extracted_integer_alternatives_are_marked() {
+        // T-3 (railroad) and T-7 (merge) fixes, directly from the base model
+        let appltype = param("DEFINE", "PROCESS", "APPLTYPE");
+        assert!(appltype.alt_integer, "APPLTYPE lost its integer alternative");
+        assert!(enum_values(appltype).contains(&"CICS".to_string()));
+        assert!(param("DEFINE", "TOPIC", "DEFPRTY").alt_integer, "DEFPRTY lost its integer alternative");
+        assert!(param("ALTER", "TRACE", "TNO").alt_integer);
+    }
+
+    #[test]
+    fn enum_extensions_present() {
+        let propctl = enum_values(param("DEFINE", "QLOCAL", "PROPCTL"));
+        assert!(propctl.contains(&"V6COMPAT".to_string()), "PROPCTL: {propctl:?}");
+        let acctq = enum_values(param("DEFINE", "QMODEL", "ACCTQ"));
+        assert!(acctq.contains(&"OFF".to_string()) && acctq.contains(&"QMGR".to_string()), "ACCTQ: {acctq:?}");
+    }
+
+    #[test]
+    fn model_loaded_nontrivially() {
+        let m = model();
+        assert!(m.all_verbs().contains(&"DEFINE"));
+        assert!(m.all_verbs().len() >= 15);
+    }
+}

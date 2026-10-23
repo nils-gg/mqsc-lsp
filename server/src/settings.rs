@@ -65,3 +65,74 @@ pub fn apply_diagnostic_settings(diags: &mut Vec<Diagnostic>, map: &Value) {
         }
     });
 }
+
+// ---------------------------------------------------------------- tests (T-10)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// mirrors analysis::diag_name(12) — the code constants are private to
+    /// analysis; the settings layer addresses codes by number or by name
+    const UNDEFINED_OBJECT: i32 = 12;
+
+    fn diag(code: i32, sev: DiagnosticSeverity) -> Diagnostic {
+        Diagnostic {
+            code: Some(NumberOrString::Number(code)),
+            severity: Some(sev),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn settings_map_extracted_at_both_levels() {
+        let flat = json!({"diagnostics": {"12": "off"}});
+        let nested = json!({"mqsc": {"diagnostics": {"12": "off"}}});
+        assert!(diagnostic_settings(&flat).is_some());
+        assert!(diagnostic_settings(&nested).is_some());
+        assert!(diagnostic_settings(&json!({})).is_none());
+        assert!(diagnostic_settings(&json!({"diagnostics": "nonsense"})).is_none());
+    }
+
+    #[test]
+    fn off_by_number_and_by_name() {
+        let mut d = vec![diag(UNDEFINED_OBJECT, DiagnosticSeverity::HINT)];
+        apply_diagnostic_settings(&mut d, &json!({"12": "off"}));
+        assert!(d.is_empty(), "numeric key off failed");
+
+        let mut d = vec![diag(UNDEFINED_OBJECT, DiagnosticSeverity::HINT)];
+        apply_diagnostic_settings(&mut d, &json!({"UNDEFINED_OBJECT": "off"}));
+        assert!(d.is_empty(), "name key off failed");
+    }
+
+    #[test]
+    fn severity_remap_and_aliases() {
+        let mut d = vec![diag(UNDEFINED_OBJECT, DiagnosticSeverity::HINT)];
+        apply_diagnostic_settings(&mut d, &json!({"UNDEFINED_OBJECT": "error"}));
+        assert_eq!(d[0].severity, Some(DiagnosticSeverity::ERROR));
+
+        let mut d = vec![diag(UNDEFINED_OBJECT, DiagnosticSeverity::HINT)];
+        apply_diagnostic_settings(&mut d, &json!({"UNDEFINED_OBJECT": "WARN"}));
+        assert_eq!(d[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn unknown_keys_and_values_are_no_ops() {
+        let mut d = vec![diag(UNDEFINED_OBJECT, DiagnosticSeverity::HINT)];
+        apply_diagnostic_settings(&mut d, &json!({"NOT_A_CODE": "off"}));
+        assert_eq!(d.len(), 1);
+        apply_diagnostic_settings(&mut d, &json!({"12": "purple"}));
+        assert_eq!(d[0].severity, Some(DiagnosticSeverity::HINT), "bad severity must not mutate");
+    }
+
+    #[test]
+    fn non_numeric_code_diagnostics_are_left_alone() {
+        let mut d = vec![Diagnostic {
+            code: Some(NumberOrString::String("other".into())),
+            ..Default::default()
+        }];
+        apply_diagnostic_settings(&mut d, &json!({"12": "off"}));
+        assert_eq!(d.len(), 1);
+    }
+}

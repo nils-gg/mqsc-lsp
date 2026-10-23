@@ -1826,3 +1826,256 @@ fn emit(
         out.push((p.line as usize, p.character as usize, len, ty, mods));
     }
 }
+
+// ---------------------------------------------------------------- tests (T-10)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Analyze a standalone snippet and return the diagnostic codes emitted.
+    /// Every MQSC behavior fixture goes through here — one snippet, one
+    /// isolated parse, so a broken line cannot derail neighboring cases.
+    fn codes(text: &str) -> Vec<i32> {
+        let m = Model::load();
+        let tree = parse(text);
+        let uri = Url::parse("file:///fixture.mqsc").unwrap();
+        analyze(text, &tree, m, &uri)
+            .into_iter()
+            .filter_map(|d| match d.code {
+                Some(lsp::NumberOrString::Number(c)) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn has(text: &str, code: i32) -> bool {
+        codes(text).contains(&code)
+    }
+
+    // ------------------------------------------------------------ text index
+
+    #[test]
+    fn lines_ascii_and_crlf_positions() {
+        let l = Lines::new("AB\r\nCD\nEF");
+        assert_eq!(l.pos(0), Position::new(0, 0));
+        assert_eq!(l.pos(4), Position::new(1, 0)); // after "\r\n"
+        assert_eq!(l.pos(5), Position::new(1, 1));
+        assert_eq!(l.pos(7), Position::new(2, 0));
+        assert_eq!(l.line_start(1), 4);
+        assert_eq!(l.range(4, 6), Range::new(Position::new(1, 0), Position::new(1, 2)));
+    }
+
+    #[test]
+    fn lines_counts_utf16_columns() {
+        // 'a' = 1 unit, U+1F600 = 2 UTF-16 units (4 UTF-8 bytes), 'b' = 1
+        let l = Lines::new("a\u{1F600}b");
+        assert_eq!(l.pos(1), Position::new(0, 1));
+        assert_eq!(l.pos(5), Position::new(0, 3));
+        // LSP positions inside a surrogate pair snap to its edges
+        assert_eq!(l.offset(Position::new(0, 3)), 5);
+        assert_eq!(l.offset(Position::new(0, 4)), 6);
+    }
+
+    #[test]
+    fn lines_offset_roundtrips_ascii() {
+        let text = "DEFINE QLOCAL(A)\nDISPLAY QLOCAL(A)\n";
+        let l = Lines::new(text);
+        for off in 0..=text.len() {
+            assert_eq!(l.offset(l.pos(off)), off, "roundtrip at byte {off}");
+        }
+    }
+
+    #[test]
+    fn lines_clamps_out_of_range_positions() {
+        let l = Lines::new("AB\nCD");
+        assert_eq!(l.offset(Position::new(99, 99)), text_len("AB\nCD"));
+        assert_eq!(l.pos(usize::MAX / 2).line, 1); // clamped into last line
+    }
+
+    fn text_len(s: &str) -> usize {
+        s.len()
+    }
+
+    #[test]
+    fn quickfix_text_mirrors_typed_case() {
+        assert_eq!(mirror_case("maxmsgs", "MAXMSGL"), "maxmsgl");
+        assert_eq!(mirror_case("MAXMSGS", "MAXMSGL"), "MAXMSGL");
+        assert_eq!(mirror_case("MaxMsgs", "MAXMSGL"), "MAXMSGL"); // mixed stays upper
+    }
+
+    // ------------------------------------------------------------- codes 1..12
+
+    #[test]
+    fn code01_parse_error() {
+        assert!(has("DEFINE QLOCAL(A) #oops 1\n", CODE_PARSE));
+    }
+
+    #[test]
+    fn code02_unknown_verb() {
+        let diags_codes = codes("FIND QLOCAL(A)\n");
+        assert!(diags_codes.contains(&CODE_UNKNOWN_VERB));
+    }
+
+    #[test]
+    fn code03_unknown_object() {
+        assert!(has("DEFINE FROBNIC(A)\n", CODE_UNKNOWN_OBJECT));
+    }
+
+    #[test]
+    fn code04_unknown_param() {
+        assert!(has("DEFINE QLOCAL(A) BOGUSPARM(1)\n", CODE_UNKNOWN_PARAM));
+    }
+
+    #[test]
+    fn code05_bad_enum_value() {
+        assert!(has("DEFINE QLOCAL(A) DISTL(BOGUS)\n", CODE_BAD_VALUE));
+    }
+
+    #[test]
+    fn code06_duplicate_param() {
+        assert!(has("DEFINE QLOCAL(A) MAXDEPTH(1) MAXDEPTH(2)\n", CODE_DUPLICATE));
+    }
+
+    #[test]
+    fn code06_does_not_flag_bare_display_attributes() {
+        // T-8 acceptance: repeated bare positional names are legal MQSC
+        assert!(!has("DISPLAY QLOCAL(A) B B\n", CODE_DUPLICATE));
+    }
+
+    #[test]
+    fn code07_param_word_used_as_command() {
+        let diags = analyze(
+            "DESCR REPLACE\n",
+            &parse("DESCR REPLACE\n"),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+        );
+        let d = diags.iter().find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)));
+        assert!(d.is_some(), "expected MISSING_CONT, got {:?}", codes("DESCR REPLACE\n"));
+        assert!(d.unwrap().message.contains("parameter"));
+    }
+
+    #[test]
+    fn code08_tab_character() {
+        assert!(has("DEFINE\tQLOCAL(A)\n", CODE_LEXICAL));
+    }
+
+    #[test]
+    fn code09_missing_required_param() {
+        assert!(has("MOVE QLOCAL(A)\n", CODE_MISSING_REQUIRED));
+    }
+
+    #[test]
+    fn code10_missing_object_name() {
+        assert!(has("DEFINE QLOCAL REPLACE\n", CODE_MISSING_NAME));
+    }
+
+    #[test]
+    fn code11_wildcard_outside_display() {
+        assert!(has("ALTER QLOCAL(A?B)\n", CODE_WILDCARD));
+        assert!(!has("DISPLAY QLOCAL(A?)\n", CODE_WILDCARD));
+    }
+
+    #[test]
+    fn code12_hint_only_for_scripts_that_define_the_type() {
+        // T-24: the hint arms only when a matching object is DEFINEd here
+        assert!(has(
+            "DEFINE QLOCAL(X)\nDEFINE CHANNEL(A) CHLTYPE(SDR) TRPTYPE(TCP) XMITQ(NOTDEF)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        assert!(!has(
+            "DEFINE CHANNEL(A) CHLTYPE(SDR) TRPTYPE(TCP) XMITQ(NOTDEF)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+    }
+
+    // ------------------------------------------------- enum + integer alts (T-3/T-7)
+
+    #[test]
+    fn enum_params_with_integer_alternative_accept_both() {
+        for src in [
+            "DEFINE PROCESS(P) APPLTYPE(CICS)\n",
+            "DEFINE PROCESS(P) APPLTYPE(7)\n",
+            "DEFINE TOPIC(T) DEFPRTY(0)\n",
+            "DEFINE TOPIC(T) DEFPRTY(ASPARENT)\n",
+            "DEFINE QMODEL(M) ACCTQ(OFF)\n",
+            "SET AUTHREC OBJTYPE(CLNTCONN) PROFILE('X')\n",
+            "DEFINE CHANNEL(C) CHLTYPE(SDR) TRPTYPE(TCP) KAINT(AUTO)\n",
+            "DEFINE CHANNEL(C) CHLTYPE(SDR) TRPTYPE(TCP) KAINT(360)\n",
+            "DEFINE SUB(S) TOPICSTR(a/b) EXPIRY(UNLIMITED)\n",
+            "DEFINE SUB(S) TOPICSTR(a/b) EXPIRY(120)\n",
+        ] {
+            assert!(!has(src, CODE_BAD_VALUE), "unexpected BAD_VALUE for {src:?}: {:?}", codes(src));
+        }
+    }
+
+    #[test]
+    fn enum_validation_still_fires_next_to_integer_alts() {
+        assert!(has("DEFINE PROCESS(P) APPLTYPE(BOGUS)\n", CODE_BAD_VALUE));
+        assert!(has("DEFINE TOPIC(T) DEFPRTY(BOGUS)\n", CODE_BAD_VALUE));
+    }
+
+    #[test]
+    fn quickfix_values_mirror_typed_case() {
+        // mirror_case is wired to enum-value suggestions (check_values):
+        // the replacement must fit what the user typed, MQSC is CI
+        let lower = analyze(
+            "DEFINE QLOCAL(A) DISTL(yesx)\n",
+            &parse("DEFINE QLOCAL(A) DISTL(yesx)\n"),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+        );
+        let d = lower
+            .iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE)))
+            .expect("DISTL(yesx) must produce BAD_VALUE");
+        assert_eq!(
+            d.data.as_ref().and_then(|v| v.pointer("/quickfixes/0")).and_then(|v| v.as_str()),
+            Some("yes"),
+            "quickfix must mirror the typed lowercase (data = {:?})",
+            d.data
+        );
+
+        let upper = analyze(
+            "DEFINE QLOCAL(A) DISTL(YESX)\n",
+            &parse("DEFINE QLOCAL(A) DISTL(YESX)\n"),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+        );
+        let d = upper
+            .iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE)))
+            .expect("DISTL(YESX) must produce BAD_VALUE");
+        assert_eq!(
+            d.data.as_ref().and_then(|v| v.pointer("/quickfixes/0")).and_then(|v| v.as_str()),
+            Some("YES")
+        );
+    }
+
+    // -------------------------------------------------------------- robustness
+
+    #[test]
+    fn analyze_and_parse_survive_garbage() {
+        let uri = Url::parse("file:///g.mqsc").unwrap();
+        let m = Model::load();
+        for text in [
+            "",
+            "\n\n",
+            "(((",
+            "'''",
+            "'unclosed",
+            "\u{1}\u{2}x",
+            "DEFINE",
+            "DEFINE ()",
+            "DISPLAY ?? ** //",
+            "+ + + +",
+            &"A".repeat(4096),
+            &"ALTER QMGR ( ".repeat(100),
+            "DESCR('a''b''c",
+        ] {
+            let tree = parse(text);
+            let _ = analyze(text, &tree, m, &uri);
+        }
+    }
+}
