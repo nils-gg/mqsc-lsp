@@ -36,7 +36,7 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   node toolchain was available at authoring time)
 
 ### Changed
-- Corpus false positives reduced 260,522 -> 18,865 (-92.8%) on the 324-file
+- Corpus false positives reduced 260,522 -> 19,613 (-92.5%) on the 324-file
   acceptance corpus: model fixes for railroad-chip parameter values (T-3),
   enum + integer parameter merges (T-7), overlay corrections for the
   remaining extractor gaps (T-2, T-4..T-8), grammar accepts mid-line `+`
@@ -47,6 +47,10 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   `-D warnings`; CI enforces both
 
 ### Fixed
+- Non-UTF-8 bytes in real dumps (stray characters in `DESCR` text) no
+  longer abort the `probe` example or make `--check` skip the whole file:
+  both lint a lossy decode (a corpus file's 748 hints had silently
+  vanished from measurements because of the panic)
 - Hint 12 message wording follows the cross-file view ("this script or the
   other open documents")
 - Quickfix `isPreferred`, quoted-name rename/rehover spans, and the
