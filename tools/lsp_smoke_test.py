@@ -77,7 +77,11 @@ print("== initialize: hover", bool(caps.get("hoverProvider")),
       "| completion", bool(caps.get("completionProvider")),
       "| symbols", caps.get("documentSymbolProvider"),
       "| folding", bool(caps.get("foldingRangeProvider")),
-      "| semtokens", bool(caps.get("semanticTokensProvider")))
+      "| semtokens", bool(caps.get("semanticTokensProvider")),
+      "| definition", bool(caps.get("definitionProvider")),
+      "| references", bool(caps.get("referencesProvider")),
+      "| rename", bool(caps.get("renameProvider")),
+      "| workspace/symbol", bool(caps.get("workspaceSymbolProvider")))
 send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri, "languageId": "mqsc", "version": 1, "text": DOC}}})
@@ -134,6 +138,9 @@ m = request(8, "textDocument/documentSymbol", {"textDocument": {"uri": uri}})
 if m:
     for sy in m["result"]:
         print(f"   {sy['name']!r} kind={sy['kind']} L{sy['range']['start']['line']}")
+    names = [sy["name"] for sy in m["result"]]
+    check("documentSymbol labels carry object type + name",
+          any(n == "DEFINE QLOCAL (DEAD.QUEUE)" for n in names), str(names[:2]))
 
 print("\n== foldingRange ==")
 m = request(9, "textDocument/foldingRange", {"textDocument": {"uri": uri}})
@@ -167,6 +174,77 @@ else:
     titles = [a.get("title") for a in acts]
     print("  ", titles)
     check("quickfix 'Change to `MAXMSGL`' offered", any("MAXMSGL" in (t or "") for t in titles))
+
+print("\n== definition: TARGET(Q1) on line 6 -> DEFINE QLOCAL(Q1) on line 5 ==")
+m = request(13, "textDocument/definition", {"textDocument": {"uri": uri},
+                                           "position": {"line": 6, "character": 25}})
+res = (m or {}).get("result")
+locs = res if isinstance(res, list) else ([res] if res else [])
+starts = [(l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs]
+check("definition resolves Q1 to its DEFINE at (5,14)", starts == [(5, 14)], str(starts))
+
+print("\n== references on Q1 (line 5) ==")
+m = request(14, "textDocument/references", {"textDocument": {"uri": uri},
+                                           "position": {"line": 5, "character": 14},
+                                           "context": {"includeDeclaration": True}})
+locs = (m or {}).get("result") or []
+rs = sorted((l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs)
+print("  ", rs)
+check("references finds Q1 at (5,14) definition and (6,25) use", rs == [(5, 14), (6, 25)], str(rs))
+
+print("\n== rename Q1 -> QNEW from the TARGET use ==")
+m = request(15, "textDocument/rename", {"textDocument": {"uri": uri},
+                                        "position": {"line": 6, "character": 25},
+                                        "newName": "QNEW"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri, [])
+ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"]) for e in ch)
+print("  ", ed)
+check("rename rewrites both Q1 sites", ed == [(5, 14, "QNEW"), (6, 25, "QNEW")], str(ed))
+
+print("\n== hover on object names (T-18) ==")
+m = request(16, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 5, "character": 14}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+print("   def hover:", v.replace("\n", " ")[:110])
+check("hover on the DEFINE name marks the definition", "this is the definition" in v, v[:60])
+m = request(17, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 6, "character": 25}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on the use names the defining line (1-based 6)", "DEFINEd at line 6" in v, v[:80])
+m = request(18, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 7, "character": 25}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on NO.SUCH.Q says it is not DEFINEd", "not DEFINEd" in v, v[:80])
+
+print("\n== workspace/symbol ==")
+m = request(19, "workspace/symbol", {"query": "Q1"})
+syms = (m or {}).get("result") or []
+print("  ", [(s["name"], s.get("containerName")) for s in syms])
+check("workspace/symbol finds Q1 grouped under QLOCAL at line 5",
+      any(s["name"] == "Q1" and s.get("containerName") == "QLOCAL"
+          and s["location"]["range"]["start"]["line"] == 5 for s in syms))
+m = request(20, "workspace/symbol", {"query": ""})
+syms = (m or {}).get("result") or []
+got = sorted(s["name"] for s in syms)
+print("   all symbols:", got)
+check("workspace/symbol lists all DEFINEd objects (X counts via DEF/QL synonyms)",
+      got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "X"]), str(got))
+
+print("\n== codeAction is_preferred is per diagnostic (T-20) ==")
+d_a = {"range": {"start": {"line": 5, "character": 18}, "end": {"line": 5, "character": 23}},
+       "severity": 2, "code": 5, "source": "mqsc", "message": "value must be one of YES, NO",
+       "data": {"quickfixes": ["YES", "NO"]}}
+d_b = {"range": {"start": {"line": 3, "character": 18}, "end": {"line": 3, "character": 25}},
+       "severity": 1, "code": 4, "source": "mqsc", "message": "'MAXMSGS' is not a parameter",
+       "data": {"quickfixes": ["MAXMSGL"]}}
+m = request(21, "textDocument/codeAction", {"textDocument": {"uri": uri}, "range": d_a["range"],
+                                           "context": {"diagnostics": [d_a, d_b]}})
+acts = ((m or {}).get("result") or [])
+pairs = [(a.get("title"), a.get("isPreferred")) for a in acts]
+print("  ", pairs)
+prefs = {t for t, p in pairs if p}
+check("each diagnostic's first suggestion is preferred",
+      prefs == {"Change to `YES`", "Change to `MAXMSGL`"}, str(pairs))
 
 print("\n== settings: UNDEFINED_OBJECT off ==")
 before = sum(1 for d in diags if d.get("code") == 12)

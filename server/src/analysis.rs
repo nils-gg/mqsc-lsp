@@ -560,6 +560,157 @@ fn check_obj_ref(
     }
 }
 
+// ---------------------- object-name sites (navigation: T-16, hover: T-18)
+
+/// One appearance of an object name in the script: the name introduced by
+/// `DEFINE <TYPE>(NAME)` or a place that uses it (the positional object
+/// name, `TARGET(...)`, `XMITQ(...)`, ...). Ranges cover the token itself,
+/// quotes included for quoted names.
+#[derive(Debug, Clone)]
+pub struct NameSite {
+    /// uppercased, normalised name — the join key across sites
+    pub name: String,
+    /// the name text as written (quotes removed)
+    pub word: String,
+    pub range: Range,
+    /// written in `'quoted'` form (rename must re-quote such sites)
+    pub quoted: bool,
+    /// canonical model object type for a DEFINE site; `None` for uses
+    pub defines: Option<String>,
+}
+
+/// Every name site in one document. A name counts only where the command
+/// resolves against the model and only at the positions the code-12 hint
+/// also treats as references (positional name + curated `object_ref_param`
+/// table), so navigation and the hint never disagree about what a
+/// reference is.
+#[derive(Debug, Default)]
+pub struct ObjectIndex {
+    pub sites: Vec<NameSite>,
+}
+
+impl ObjectIndex {
+    /// The name site containing `pos` (name tokens never overlap).
+    pub fn site_at(&self, pos: Position) -> Option<&NameSite> {
+        self.sites.iter().find(|s| {
+            let after_start = pos.line > s.range.start.line
+                || (pos.line == s.range.start.line && pos.character >= s.range.start.character);
+            let before_end = pos.line < s.range.end.line
+                || (pos.line == s.range.end.line && pos.character < s.range.end.character);
+            after_start && before_end
+        })
+    }
+
+    pub fn sites_of<'a>(&'a self, name_upper: &'a str) -> impl Iterator<Item = &'a NameSite> {
+        self.sites.iter().filter(move |s| s.name == name_upper)
+    }
+
+    pub fn definitions_of<'a>(&'a self, name_upper: &'a str) -> Vec<&'a NameSite> {
+        self.sites_of(name_upper).filter(|s| s.defines.is_some()).collect()
+    }
+
+    pub fn definitions(&self) -> impl Iterator<Item = &NameSite> {
+        self.sites.iter().filter(|s| s.defines.is_some())
+    }
+}
+
+/// The name token of a value node: `(UPPERCASE, as-written, node)` or None
+/// when the value is not exactly one name (wildcard patterns, integers,
+/// multi-token values). Mirrors `value_name_words`, but keeps the node so
+/// callers get a range.
+fn name_value_node<'t>(v: Node<'t>, src: &[u8]) -> Option<(String, String, Node<'t>)> {
+    let mut out: Option<(String, String, Node<'_>)> = None;
+    let mut multi = false;
+    let mut vc = v.walk();
+    for c in v.named_children(&mut vc) {
+        match c.kind() {
+            "wildcard" | "integer" => multi = true,
+            "word" => {
+                if out.is_some() {
+                    multi = true;
+                } else {
+                    let t = node_text(c, src);
+                    out = Some((t.to_ascii_uppercase(), t.to_string(), c));
+                }
+            }
+            "string" => {
+                if out.is_some() {
+                    multi = true;
+                } else {
+                    let t = node_text(c, src);
+                    let inner = t.trim_matches('\'').replace("''", "'");
+                    out = Some((inner.to_ascii_uppercase(), inner, c));
+                }
+            }
+            _ => {}
+        }
+    }
+    if multi {
+        None
+    } else {
+        out
+    }
+}
+
+/// Build the name-site index for a document (per-request: MQSC files are
+/// line-per-command small, and this keeps the index perfectly in sync with
+/// the cached tree).
+pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
+    let src = text.as_bytes();
+    let lines = Lines::new(text);
+    let mut idx = ObjectIndex::default();
+    let mut cursor = tree.root_node().walk();
+    for cmd in tree.root_node().named_children(&mut cursor) {
+        if cmd.kind() != "command" {
+            continue;
+        }
+        let Some((verb, obj_txt, e)) = command_context(cmd, src, m) else { continue };
+        let is_define = m.canon_verb(verb) == Some("DEFINE");
+        let _ = obj_txt;
+        let items = command_items(cmd);
+        // track the last parameter word for object-ref parameters
+        let mut owner: Option<String> = None;
+        for (i, it) in items.iter().enumerate() {
+            match it {
+                Item::Word(n) => owner = Some(node_text(*n, src).to_ascii_uppercase()),
+                Item::Verb(_) => owner = None,
+                Item::Arg(g) => {
+                    // The object-name group sits directly after the object
+                    // word (items[1] word, items[2] arg); any other group is
+                    // a parameter's, taken from its owner word.
+                    let positional = i == 2 && matches!(items.get(1), Some(Item::Word(_)));
+                    let ref_param = !positional
+                        && owner.as_deref().and_then(|w| object_ref_param(w, e.object)).is_some();
+                    if !(positional || ref_param) {
+                        continue;
+                    }
+                    for v in value_nodes(*g) {
+                        if let Some((name, word, node)) = name_value_node(v, src) {
+                            if name.trim().is_empty() {
+                                continue; // blank string values are data, not names
+                            }
+                            let quoted = node.kind() == "string";
+                            idx.sites.push(NameSite {
+                                name,
+                                word,
+                                range: lines.range(node.start_byte(), node.end_byte()),
+                                quoted,
+                                defines: if positional && is_define {
+                                    Some(e.object.to_string())
+                                } else {
+                                    None
+                                },
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    idx
+}
+
 fn check_command(
     cmd: Node<'_>,
     src: &[u8],
@@ -1055,6 +1206,52 @@ pub fn hover(text: &str, tree: &Tree, m: &Model, pos: Position) -> Option<Hover>
         range: Some(lines.range(node.start_byte(), node.end_byte())),
     };
 
+    // Object name itself: definition/usage summary (T-18). Checked before
+    // the command card and parameter-doc matches below — a name token is
+    // more specific than the generic parameter-word lookup, which would
+    // otherwise misread names that collide with attribute words.
+    let idx = object_index(text, tree, m);
+    if let Some(site) = idx.site_at(pos) {
+        let uses = idx.sites_of(&site.name).filter(|s| s.defines.is_none()).count();
+        let defs = idx.definitions_of(&site.name);
+        let md = if defs.is_empty() {
+            format!(
+                "**`{}`** — an object name, but not DEFINEd in this script.\n\n\
+                 It must already exist in the queue manager.",
+                site.name
+            )
+        } else {
+            let mut types: Vec<&str> = Vec::new();
+            for d in &defs {
+                if let Some(t) = &d.defines {
+                    if !types.contains(&t.as_str()) {
+                        types.push(t.as_str());
+                    }
+                }
+            }
+            let where_ = if site.defines.is_some() {
+                "**this is the definition**".to_string()
+            } else {
+                format!("DEFINEd at line {}", defs[0].range.start.line + 1)
+            };
+            let more = if defs.len() > 1 {
+                format!(" — {} DEFINE locations", defs.len())
+            } else {
+                String::new()
+            };
+            format!(
+                "**{} `{}`** — {}\n\n{} {} in this script{}",
+                types.join("/"),
+                site.name,
+                where_,
+                uses,
+                if uses == 1 { "use" } else { "uses" },
+                more
+            )
+        };
+        return Some(mk(md));
+    }
+
     let items = command_items(cmd);
     let obj_node = match items.get(1) {
         Some(Item::Word(n)) => Some(*n),
@@ -1533,21 +1730,40 @@ pub fn symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
             continue;
         }
         let items = command_items(cmd);
-        let mut label = String::new();
-        let mut detail = String::new();
-        for it in &items {
+        // Informative label: "DEFINE QLOCAL (A)" — verb, object type and the
+        // object name; the parameter groups move to `detail`. A verb-only
+        // label made the outline a useless wall of "DEFINE".
+        let text_of = |it: &Item| -> String {
             let n = match it {
                 Item::Verb(n) | Item::Word(n) => *n,
                 Item::Arg(n) | Item::Wild(n) | Item::Val(n) => *n,
             };
-            let t = node_text(n, src);
-            if label.is_empty() {
-                label = t.to_ascii_uppercase();
-            } else {
-                detail.push_str(t);
-                detail.push(' ');
+            node_text(n, src).to_string()
+        };
+        let mut label = match items.len() {
+            0 => continue,
+            1 => text_of(&items[0]),
+            2 => format!("{} {}", text_of(&items[0]), text_of(&items[1])),
+            _ => {
+                let name: String = text_of(&items[2]).chars().take(32).collect();
+                format!(
+                    "{} {} {}",
+                    text_of(&items[0]),
+                    text_of(&items[1]),
+                    name.trim()
+                )
             }
-        }
+        };
+        label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+        let detail: String = items
+            .iter()
+            .skip(3.min(items.len()))
+            .map(text_of)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         let range = lines.range(cmd.start_byte(), cmd.end_byte());
         out.push(DocumentSymbol {
             name: label,
@@ -2077,5 +2293,80 @@ mod tests {
             let tree = parse(text);
             let _ = analyze(text, &tree, m, &uri);
         }
+    }
+
+    // ------------------------------------------ name sites / navigation (T-16, T-18)
+
+    fn index_of(text: &str) -> ObjectIndex {
+        object_index(text, &parse(text), Model::load())
+    }
+
+    #[test]
+    fn object_index_marks_definitions_and_uses() {
+        let text = "DEFINE QLOCAL(A)\nALTER QLOCAL(A) MAXDEPTH(1)\nDEFINE QALIAS(B) TARGET(A)\nDISPLAY QLOCAL(B)\n";
+        let idx = index_of(text);
+        // A: the DEFINE plus the ALTER positional and the TARGET reference
+        let a: Vec<_> = idx.sites_of("A").collect();
+        assert_eq!(a.len(), 3, "{a:?}");
+        assert_eq!(a[0].defines.as_deref(), Some("QLOCAL"));
+        assert_eq!(a[0].range.start.line, 0);
+        assert!(a[1..].iter().all(|s| s.defines.is_none()));
+        assert_eq!(a[2].range.start.line, 2); // TARGET(A)
+        // B: defined as QALIAS, used by DISPLAY on the next line
+        let b: Vec<_> = idx.sites_of("B").collect();
+        assert_eq!(b.len(), 2, "{b:?}");
+        assert_eq!(b[0].defines.as_deref(), Some("QALIAS"));
+        assert_eq!(b[1].range.start.line, 3);
+    }
+
+    #[test]
+    fn object_index_skips_patterns_and_plain_string_values() {
+        let text = "DEFINE QLOCAL(A)\nDISPLAY QLOCAL(A*)\nDEFINE QLOCAL(B) DESCR('A')\n";
+        let idx = index_of(text);
+        // 'A*' is a pattern, not a name; DESCR('A') is not an object-ref
+        // parameter — only the two DEFINE names are indexed.
+        let names: Vec<String> = idx.sites.iter().map(|s| s.name.clone()).collect();
+        assert_eq!(names, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn quoted_name_site_spans_the_quotes() {
+        let text = "DEFINE QALIAS(B) TARGET('A')\n";
+        let idx = index_of(text);
+        let s = idx.site_at(Position::new(0, 25)).expect("cursor inside 'A'");
+        assert_eq!(s.name, "A");
+        assert!(s.quoted);
+        assert_eq!(s.word, "A");
+        assert_eq!(s.range, Range::new(Position::new(0, 24), Position::new(0, 27)));
+    }
+
+    #[test]
+    fn hover_on_names_reports_the_definition() {
+        let text = "DEFINE QLOCAL(SRC)\nDEFINE QALIAS(ALIAS1) TARGET(SRC)\n";
+        let m = Model::load();
+        let tree = parse(text);
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        // on the definition itself
+        let h = hover(text, &tree, m, Position::new(0, 15)).expect("hover def");
+        let md = md_of(h);
+        assert!(md.contains("QLOCAL") && md.contains("this is the definition"), "{md}");
+        // on the reference: names the defining line (1-based) and use count
+        let h = hover(text, &tree, m, Position::new(1, 29)).expect("hover use");
+        let md = md_of(h);
+        assert!(md.contains("DEFINEd at line 1"), "{md}");
+        assert!(md.contains("1 use"), "{md}");
+    }
+
+    #[test]
+    fn symbols_labels_carry_object_and_name() {
+        let text = "DEFINE QLOCAL(FUNNY)\nDISPLAY QLOCAL(FUNNY) DESCR\n";
+        let syms = symbols(text, &parse(text));
+        assert_eq!(syms.len(), 2);
+        assert_eq!(syms[0].name, "DEFINE QLOCAL (FUNNY)");
+        assert_eq!(syms[1].name, "DISPLAY QLOCAL (FUNNY)");
+        assert!(syms[1].detail.as_deref().unwrap().contains("DESCR"));
     }
 }

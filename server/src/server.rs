@@ -80,6 +80,25 @@ impl MqscServer {
     }
 }
 
+/// Replacement text for one rename site: quoted sites stay quoted; a name
+/// that no longer fits the grammar's bare-word token syntax
+/// (`[A-Za-z_#$@%/.][-A-Za-z0-9_#$@%/.]*`) must be written as a 'string'.
+fn rename_text(new_name: &str, site_quoted: bool) -> String {
+    let bare_ok = match new_name.chars().next() {
+        Some(c) if c.is_ascii_alphabetic() || "_#$@%/.".contains(c) => {
+            new_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_#$@%/.-".contains(c))
+        }
+        _ => false,
+    };
+    if site_quoted || !bare_ok {
+        format!("'{}'", new_name.replace('\'', "''"))
+    } else {
+        new_name.to_string()
+    }
+}
+
 #[async_trait]
 impl LanguageServer for MqscServer {
     async fn initialize(&self, params: InitializeParams) -> RpcResult<InitializeResult> {
@@ -119,6 +138,10 @@ impl LanguageServer for MqscServer {
                 }),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
@@ -232,6 +255,10 @@ impl LanguageServer for MqscServer {
                 Some(a) => a,
                 None => continue,
             };
+            // Each diagnostic gets its first suggestion marked preferred, so
+            // "quick fix" (alt+enter -> first) picks the nearest replacement
+            // for THAT diagnostic, not just for the first one reported.
+            let mut first_for_this_diag = true;
             for f in fixes {
                 let Some(new_text) = f.as_str() else { continue };
                 let mut changes = HashMap::new();
@@ -239,7 +266,8 @@ impl LanguageServer for MqscServer {
                     p.text_document.uri.clone(),
                     vec![TextEdit { range: d.range, new_text: new_text.to_string() }],
                 );
-                let preferred = actions.is_empty();
+                let preferred = first_for_this_diag;
+                first_for_this_diag = false;
                 actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title: format!("Change to `{new_text}`"),
                     kind: Some(CodeActionKind::QUICKFIX),
@@ -279,6 +307,112 @@ impl LanguageServer for MqscServer {
         self.with_doc(uri, |text, tree| Ok(Some(analysis::highlights(text, tree, pos))))
     }
 
+    /// T-16: jump from any use of an object name to its DEFINE. Duplicate
+    /// names (same name under several object types exist in real dumps) all
+    /// come back as locations.
+    async fn goto_definition(
+        &self,
+        p: GotoDefinitionParams,
+    ) -> RpcResult<Option<GotoDefinitionResponse>> {
+        let uri = p.text_document_position_params.text_document.uri;
+        let pos = p.text_document_position_params.position;
+        let uri2 = uri.clone();
+        self.with_doc(&uri, move |text, tree| {
+            let idx = analysis::object_index(text, tree, Model::load());
+            let Some(site) = idx.site_at(pos) else { return Ok(None) };
+            let defs = idx.definitions_of(&site.name);
+            match defs.len() {
+                0 => Ok(None),
+                1 => Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: uri2,
+                    range: defs[0].range,
+                }))),
+                _ => Ok(Some(GotoDefinitionResponse::Array(
+                    defs.iter()
+                        .map(|d| Location { uri: uri2.clone(), range: d.range })
+                        .collect(),
+                ))),
+            }
+        })
+    }
+
+    async fn references(&self, p: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
+        let uri = p.text_document_position.text_document.uri;
+        let pos = p.text_document_position.position;
+        let uri2 = uri.clone();
+        self.with_doc(&uri, move |text, tree| {
+            let idx = analysis::object_index(text, tree, Model::load());
+            let Some(site) = idx.site_at(pos) else { return Ok(None) };
+            // definition first (clients honour includeDeclaration themselves)
+            Ok(Some(
+                idx.sites_of(&site.name)
+                    .map(|s| Location { uri: uri2.clone(), range: s.range })
+                    .collect(),
+            ))
+        })
+    }
+
+    /// Rename every occurrence of the object name under the cursor, keeping
+    /// each site's quoting style (quoted sites stay quoted; a name that no
+    /// longer fits the bare-word syntax is quoted everywhere).
+    async fn rename(&self, p: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
+        let uri = p.text_document_position.text_document.uri;
+        let pos = p.text_document_position.position;
+        let new_name = p.new_name;
+        let uri2 = uri.clone();
+        if new_name.is_empty() {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params("new name is empty"));
+        }
+        self.with_doc(&uri, move |text, tree| {
+            let idx = analysis::object_index(text, tree, Model::load());
+            let Some(site) = idx.site_at(pos) else {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                    "rename needs the cursor on an object name",
+                ));
+            };
+            let edits: Vec<TextEdit> = idx
+                .sites_of(&site.name)
+                .map(|s| TextEdit {
+                    range: s.range,
+                    new_text: rename_text(&new_name, s.quoted),
+                })
+                .collect();
+            let mut changes = HashMap::new();
+            changes.insert(uri2, edits);
+            Ok(Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }))
+        })
+    }
+
+    /// T-20: every object DEFINEd in every open document, grouped in the
+    /// client's outline by their object type (container_name).
+    /// (tower-lsp names the `workspace/symbol` handler `symbol`.)
+    async fn symbol(
+        &self,
+        p: WorkspaceSymbolParams,
+    ) -> RpcResult<Option<Vec<SymbolInformation>>> {
+        let query = p.query.to_ascii_uppercase();
+        let mut out = Vec::new();
+        let docs = self.docs.read().unwrap();
+        for (uri, doc) in docs.iter() {
+            let tree = doc.tree.lock().unwrap();
+            let idx = analysis::object_index(&doc.text, &tree, Model::load());
+            for s in idx.definitions() {
+                if !query.is_empty() && !s.name.contains(&query) {
+                    continue;
+                }
+                out.push(SymbolInformation {
+                    name: s.word.clone(),
+                    kind: SymbolKind::METHOD, // matches the documentSymbol kinds
+                    tags: None,
+                    deprecated: None,
+                    location: Location { uri: uri.clone(), range: s.range },
+                    container_name: s.defines.clone(),
+                });
+            }
+        }
+        Ok(Some(out))
+    }
+
     async fn semantic_tokens_full(
         &self,
         p: SemanticTokensParams,
@@ -304,5 +438,26 @@ impl LanguageServer for MqscServer {
                 data: analysis::semantic_tokens_range(text, tree, range),
             })))
         })
+    }
+}
+
+// ---------------------------------------------------------------- tests (T-20)
+
+#[cfg(test)]
+mod tests {
+    use super::rename_text;
+
+    #[test]
+    fn quoted_sites_stay_quoted() {
+        assert_eq!(rename_text("NEW1", true), "'NEW1'");
+    }
+
+    #[test]
+    fn bare_sites_follow_grammar_syntax() {
+        assert_eq!(rename_text("NEW1", false), "NEW1");
+        assert_eq!(rename_text("NEW NAME", false), "'NEW NAME'"); // spaces need quotes
+        assert_eq!(rename_text("1BAD", false), "'1BAD'"); // conservative: quote digit start
+        assert_eq!(rename_text("IT'S", false), "'IT''S'"); // MQSC doubles embedded quotes
+        assert_eq!(rename_text("", true), "''"); // degenerate but never bare
     }
 }
