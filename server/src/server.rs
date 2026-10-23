@@ -10,6 +10,7 @@ use tower_lsp::{async_trait, Client, LanguageServer};
 
 use crate::analysis;
 use crate::model::Model;
+use crate::settings::{apply_diagnostic_settings, diagnostic_settings};
 
 /// A document opened in the editor: its text and the parse tree built for
 /// that text. All requests reuse the cached tree instead of re-parsing.
@@ -49,67 +50,16 @@ impl MqscServer {
                 Some(doc) => {
                     let tree = doc.tree.lock().unwrap();
                     let mut diags = analysis::analyze(&doc.text, &tree, Model::load(), uri);
-                    self.apply_settings(&mut diags);
+                    let cfg = self.settings.read().unwrap();
+                    if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
+                        apply_diagnostic_settings(&mut diags, map);
+                    }
                     diags
                 }
                 None => return,
             }
         }; // guards dropped before the await
         self.client.publish_diagnostics(uri.clone(), diags, None).await;
-    }
-
-    /// Apply `settings.diagnostics` per-code overrides: a severity string
-    /// replaces the published severity, `"off"` drops the diagnostic.
-    /// Accepts both `{"diagnostics": ...}` and the `{"mqsc": {...}}` section
-    /// shape (see README "Configuration").
-    fn apply_settings(&self, diags: &mut Vec<Diagnostic>) {
-        let cfg = self.settings.read().unwrap();
-        let root = match cfg.as_ref() {
-            Some(v) => v,
-            None => return,
-        };
-        let map = match root
-            .get("mqsc")
-            .and_then(|m| m.get("diagnostics"))
-            .or_else(|| root.get("diagnostics"))
-        {
-            Some(m) if m.is_object() => m,
-            _ => return,
-        };
-        diags.retain_mut(|d| {
-            let code = match d.code {
-                Some(NumberOrString::Number(c)) => c,
-                _ => return true,
-            };
-            let val = match map.get(analysis::diag_name(code)).or_else(|| map.get(&code.to_string()))
-            {
-                Some(v) => v,
-                None => return true,
-            };
-            match val.as_str() {
-                Some(s) => match s.to_ascii_lowercase().as_str() {
-                    "off" | "none" | "false" => false,
-                    "error" => {
-                        d.severity = Some(DiagnosticSeverity::ERROR);
-                        true
-                    }
-                    "warning" | "warn" => {
-                        d.severity = Some(DiagnosticSeverity::WARNING);
-                        true
-                    }
-                    "information" | "info" => {
-                        d.severity = Some(DiagnosticSeverity::INFORMATION);
-                        true
-                    }
-                    "hint" => {
-                        d.severity = Some(DiagnosticSeverity::HINT);
-                        true
-                    }
-                    _ => true, // unknown value: keep default
-                },
-                None => true,
-            }
-        });
     }
 
     fn with_doc<T>(
