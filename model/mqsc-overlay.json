@@ -864,12 +864,7 @@
           "optional": true
         }
       ],
-      "extend_enum": {
-        "DEFPRTY": [
-          "integer",
-          "ASPARENT"
-        ]
-      }
+      "extend_enum": {}
     },
     "ALTER TOPIC": {
       "add_params": [
@@ -899,12 +894,7 @@
           "optional": true
         }
       ],
-      "extend_enum": {
-        "DEFPRTY": [
-          "integer",
-          "ASPARENT"
-        ]
-      }
+      "extend_enum": {}
     },
     "DEFINE CHANNEL": {
       "add_params": [
@@ -941,11 +931,6 @@
         {
           "name": "CLNTAUTH",
           "kind": "string",
-          "optional": true
-        },
-        {
-          "name": "KAINT",
-          "kind": "integer",
           "optional": true
         }
       ],
@@ -999,11 +984,6 @@
         {
           "name": "CLNTAUTH",
           "kind": "string",
-          "optional": true
-        },
-        {
-          "name": "KAINT",
-          "kind": "integer",
           "optional": true
         }
       ],
@@ -1344,8 +1324,12 @@
         },
         {
           "name": "EXPIRY",
-          "kind": "integer",
-          "optional": true
+          "kind": "enum",
+          "optional": true,
+          "values": [
+            "integer",
+            "UNLIMITED"
+          ]
         },
         {
           "name": "PERSIST",

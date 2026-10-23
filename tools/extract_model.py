@@ -194,6 +194,18 @@ def merge_into(q, p):
     q["has_default"] = q["has_default"] or p["has_default"]
     if p["kind"] in ("integer", "string", "enum", "name") and q["kind"] in ("flag", "star"):
         q["kind"] = p["kind"]
+    elif {q["kind"], p["kind"]} == {"enum", "integer"}:
+        # One diagram shows NAME(ASPARENT) as enum, another NAME(integer):
+        # the value is the UNION of both alternatives. The old code kept q's
+        # kind and lost the integer branch (DEFINE TOPIC DEFPRTY parsed as
+        # enum[ASPARENT], so every DEFPRTY(0) warned). Keep enum kind — so
+        # the keywords still validate — and list "integer" as one more
+        # permitted value (model.rs turns that into alt_integer). Same
+        # convention as the railroad fix; values were unioned above, so the
+        # integer-first direction (empty q list) already carries the keywords.
+        q["kind"] = "enum"
+        if "integer" not in q["values"]:
+            q["values"].append("integer")
     q["footnotes"] = list(dict.fromkeys(q["footnotes"] + p["footnotes"]))
 
 

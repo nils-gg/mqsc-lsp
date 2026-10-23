@@ -6588,7 +6588,8 @@
       "name": "KAINT",
       "kind": "enum",
       "values": [
-       "AUTO"
+       "AUTO",
+       "integer"
       ],
       "default": "AUTO",
       "optional": true,
@@ -7379,7 +7380,8 @@
       "name": "NETPRTY",
       "kind": "enum",
       "values": [
-       "O"
+       "O",
+       "integer"
       ],
       "default": "O",
       "optional": true,
@@ -10356,7 +10358,8 @@
       "name": "EXPIRY",
       "kind": "enum",
       "values": [
-       "UNLIMITED"
+       "UNLIMITED",
+       "integer"
       ],
       "default": "UNLIMITED",
       "optional": true,
@@ -10620,7 +10623,8 @@
       "name": "DEFPRTY",
       "kind": "enum",
       "values": [
-       "ASPARENT"
+       "ASPARENT",
+       "integer"
       ],
       "default": "ASPARENT",
       "optional": true,
