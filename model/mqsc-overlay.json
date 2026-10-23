@@ -1100,48 +1100,6 @@
         }
       ]
     },
-    "DEFINE PROCESS": {
-      "extend_enum": {
-        "APPLTYPE": [
-          "CICS",
-          "DEF",
-          "DOS",
-          "IMS",
-          "MVS",
-          "NOTESAGENT",
-          "NSK",
-          "OPENVMS",
-          "OS2",
-          "OS400",
-          "UNIX",
-          "WINDOWS",
-          "WINDOWSNT",
-          "WLM",
-          "integer"
-        ]
-      }
-    },
-    "ALTER PROCESS": {
-      "extend_enum": {
-        "APPLTYPE": [
-          "CICS",
-          "DEF",
-          "DOS",
-          "IMS",
-          "MVS",
-          "NOTESAGENT",
-          "NSK",
-          "OPENVMS",
-          "OS2",
-          "OS400",
-          "UNIX",
-          "WINDOWS",
-          "WINDOWSNT",
-          "WLM",
-          "integer"
-        ]
-      }
-    },
     "DEFINE AUTHINFO": {
       "add_params": [
         {

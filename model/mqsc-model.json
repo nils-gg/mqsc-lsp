@@ -5906,8 +5906,12 @@
      },
      {
       "name": "TNO",
-      "kind": "integer",
-      "values": [],
+      "kind": "enum",
+      "values": [
+       "integer",
+       "STAT",
+       "ACCTG"
+      ],
       "default": null,
       "optional": true,
       "has_default": false,
@@ -7888,8 +7892,24 @@
      },
      {
       "name": "APPLTYPE",
-      "kind": "integer",
-      "values": [],
+      "kind": "enum",
+      "values": [
+       "integer",
+       "CICS",
+       "DEF",
+       "DOS",
+       "IMS",
+       "MVS",
+       "NOTESAGENT",
+       "NSK",
+       "OPENVMS",
+       "OS2",
+       "OS400",
+       "UNIX",
+       "WINDOWS",
+       "WINDOWSNT",
+       "WLM"
+      ],
       "default": null,
       "optional": true,
       "has_default": false,

@@ -379,20 +379,32 @@ def railroad_params(rail, cmd_obj=""):
                 break
         if nxt_pos is not None:
             region = region[:nxt_pos]
-        if re.search(r"\binteger\b", region):
+        # Collect this region's keyword chips FIRST, then decide the kind. The
+        # old order tested \binteger\b first and, when it matched, returned a
+        # bare `integer` kind and silently dropped the chips — so a parameter
+        # the reference shows as `( integer | CICS | MVS | ... )` came out
+        # `kind=integer, values=[]` and every keyword value then warned. Keep
+        # integer/string precedence, but when integer is mixed with keyword
+        # alternatives emit an enum that lists "integer" as one more value
+        # (model.rs maps that to alt_integer, accepting plain integers too).
+        vals = []
+        for cm in RAIL_CHIP_RE.finditer(region):
+            tok = cm.group(1) or cm.group(2)
+            if tok and tok != name and tok not in vals:
+                vals.append(tok)
+        vals = [v for v in vals if v not in ("integer", "string")]
+        has_int = bool(re.search(r"\binteger\b", region))
+        has_str = bool(re.search(r"\bstring\b", region) or re.search(r"'[^']*'", region))
+        if has_int and vals:
+            kind, values, default = "enum", ["integer"] + vals, None
+        elif has_int:
             kind, values, default = "integer", [], None
-        elif re.search(r"\bstring\b", region) or re.search(r"'[^']*'", region):
+        elif has_str:
             kind, values, default = "string", [], None
+        elif vals:
+            kind, values, default = "enum", vals, None
         else:
-            vals = []
-            for cm in RAIL_CHIP_RE.finditer(region):
-                tok = cm.group(1) or cm.group(2)
-                if tok and tok != name and tok not in vals:
-                    vals.append(tok)
-            if vals:
-                kind, values, default = "enum", vals, None
-            else:
-                kind, values, default = "flag", [], None
+            kind, values, default = "flag", [], None
         params[name] = new_param(name, kind, values, default, True, False, [])
     return params
 
