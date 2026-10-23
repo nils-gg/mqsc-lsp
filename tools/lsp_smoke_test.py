@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Reliable end-to-end test client for the MQSC language server (os.read-based framer)."""
-import subprocess, json, select, sys, time, os
+import subprocess, json, select, sys, time, os, tempfile
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else "server/target/debug/mqsc-lsp"  # run from repo root
-proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# T-14: run the server with file logging enabled (MQSC_LSP_LOG path); the
+# log is verified at the end. The default (no flag, no env) stays silent —
+# this proves the env-var activation and the content in one pass.
+LOGPATH = os.path.join(tempfile.gettempdir(), f"mqsc-smoke-{os.getpid()}.log")
+if os.path.exists(LOGPATH):
+    os.remove(LOGPATH)
+proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env={**os.environ, "MQSC_LSP_LOG": LOGPATH})
 buf = b""
 fd = proc.stdout.fileno()
 os.set_blocking(fd, False)
@@ -348,6 +356,28 @@ after = sum(1 for d in diags2 if d.get("code") == 12)
 print("   code-12 hints after:", after, "| total diags:", len(diags2))
 check("hint 12 present before config", before > 0)
 check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+
+print("\n== log file (T-14, via MQSC_LSP_LOG) ==")
+try:
+    with open(LOGPATH) as f:
+        logtext = f.read()
+except OSError as e:
+    logtext = ""
+    check("log file created", False, str(e))
+for needle, label in [
+    ("logging to", "startup line names the log file"),
+    ("client initialized", "initialized line"),
+    ("didOpen file:///tmp/sample.mqsc", "didOpen with uri"),
+    ("parse=", "parse duration"),
+    ("analyze file:///tmp/sample.mqsc", "analyze line with uri"),
+    ("diags=", "diagnostic count"),
+    ("req textDocument/hover -> ok", "per-request timing line"),
+]:
+    check(f"log contains {label}", needle in logtext, "" if needle in logtext else logtext[:120])
+if logtext:
+    print("   sample lines:")
+    for l in logtext.splitlines()[:4]:
+        print("   ", l[:110])
 
 print("\n== summary ==")
 if fails:

@@ -60,8 +60,16 @@ impl MqscServer {
                         }
                     }
                     let tree = doc.tree.lock().unwrap();
+                    let t0 = std::time::Instant::now();
                     let mut diags =
                         analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
+                    crate::tlog!(
+                        "analyze {uri} len={} diags={} open_docs={} in {}ms",
+                        doc.text.len(),
+                        diags.len(),
+                        docs.len(),
+                        t0.elapsed().as_millis()
+                    );
                     let cfg = self.settings.read().unwrap();
                     if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
                         apply_diagnostic_settings(&mut diags, map);
@@ -253,16 +261,19 @@ impl LanguageServer for MqscServer {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        crate::tlog!("client initialized — ready");
         self.client
             .log_message(MessageType::INFO, "MQSC language server ready")
             .await;
     }
 
     async fn shutdown(&self) -> RpcResult<()> {
+        crate::tlog!("shutdown requested");
         Ok(())
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        crate::tlog!("didChangeConfiguration: settings {}", params.settings);
         *self.settings.write().unwrap() =
             if params.settings.is_null() { None } else { Some(params.settings) };
         // severities may have changed: republish everything we know about
@@ -275,8 +286,15 @@ impl LanguageServer for MqscServer {
     async fn did_open(&self, p: DidOpenTextDocumentParams) {
         let uri = p.text_document.uri;
         let text = p.text_document.text;
+        let t0 = std::time::Instant::now();
         let tree = analysis::parse(&text);
         let defs = analysis::collect_definitions(&tree, text.as_bytes(), Model::load());
+        crate::tlog!(
+            "didOpen {uri} len={} defines={} parse={}ms",
+            text.len(),
+            defs.names.len(),
+            t0.elapsed().as_millis()
+        );
         self.docs.write().unwrap().insert(
             uri.clone(),
             Doc { text, tree: Mutex::new(tree), defs },
@@ -289,12 +307,20 @@ impl LanguageServer for MqscServer {
 
     async fn did_change(&self, p: DidChangeTextDocumentParams) {
         let uri = p.text_document.uri;
+        let version = p.text_document.version;
         let text = match p.content_changes.into_iter().last() {
             Some(c) => c.text,
             None => return,
         };
+        let t0 = std::time::Instant::now();
         let tree = analysis::parse(&text);
         let defs = analysis::collect_definitions(&tree, text.as_bytes(), Model::load());
+        crate::tlog!(
+            "didChange {uri} v{version} len={} defines={} parse={}ms",
+            text.len(),
+            defs.names.len(),
+            t0.elapsed().as_millis()
+        );
         self.docs.write().unwrap().insert(
             uri.clone(),
             Doc { text, tree: Mutex::new(tree), defs },
@@ -306,6 +332,7 @@ impl LanguageServer for MqscServer {
     }
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
+        crate::tlog!("didClose {}", p.text_document.uri);
         self.docs.write().unwrap().remove(&p.text_document.uri);
         // the remaining documents lost their external definitions (T-17)
         self.refresh_others(&p.text_document.uri).await;

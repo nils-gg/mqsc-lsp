@@ -18,6 +18,7 @@ async fn main() -> Result<()> {
     let mut check_files: Vec<String> = Vec::new();
     let mut diag_overrides: Vec<(String, String)> = Vec::new();
     let mut settings_file: Option<String> = None;
+    let mut log_file: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -37,6 +38,10 @@ async fn main() -> Result<()> {
                 settings_file =
                     Some(args.next().context("expected JSON file after --settings")?);
             }
+            "--log-file" => {
+                log_file =
+                    Some(args.next().context("expected file path after --log-file")?);
+            }
             "--version" | "-V" => {
                 println!("mqsc-lsp {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -53,7 +58,11 @@ async fn main() -> Result<()> {
                      --diag CODE=SEVERITY           per-code override (number or name; e.g.\n    \
                                                    UNDEFINED_OBJECT=off); repeatable\n    \
                      --settings FILE.json           same overrides as a JSON settings file\n    \
-                                                   ({{\"diagnostics\": {{...}}}} shape)",
+                                                   ({{\"diagnostics\": {{...}}}} shape)\n\n\
+                     SERVER OPTIONS:\n    \
+                     --log-file FILE                append request timings, parse/analyze\n    \
+                                                    durations and panics to FILE (also\n    \
+                                                    $MQSC_LSP_LOG; default: no logging)",
                     env!("CARGO_PKG_VERSION")
                 );
                 return Ok(());
@@ -90,6 +99,15 @@ async fn main() -> Result<()> {
         std::process::exit(mqsc_lsp::check::run(&check_files, settings.as_ref()));
     }
 
+    // Server-mode observability (T-14): --log-file wins over MQSC_LSP_LOG;
+    // with neither set the server stays completely silent.
+    let log_target =
+        log_file.or_else(|| std::env::var("MQSC_LSP_LOG").ok().filter(|s| !s.is_empty()));
+    if let Some(p) = &log_target {
+        mqsc_lsp::telemetry::init(std::path::Path::new(p))
+            .with_context(|| format!("cannot open log file {p}"))?;
+    }
+
     match tcp {
         None => serve_stdio().await,
         Some((host, port)) => serve_tcp(host, port).await,
@@ -107,7 +125,7 @@ fn parse_listen(spec: &str) -> Result<(IpAddr, u16)> {
 async fn serve_stdio() -> Result<()> {
     let (service, socket) = LspService::new(|client| MqscServer::new(client));
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
-        .serve(service)
+        .serve(mqsc_lsp::telemetry::Observed::new(service))
         .await;
     Ok(())
 }
@@ -123,7 +141,9 @@ async fn serve_tcp(host: IpAddr, port: u16) -> Result<()> {
         tokio::spawn(async move {
             let (read, write) = tokio::io::split(stream);
             let (service, socket) = LspService::new(|client| MqscServer::new(client));
-            Server::new(read, write, socket).serve(service).await;
+            Server::new(read, write, socket)
+                .serve(mqsc_lsp::telemetry::Observed::new(service))
+                .await;
         });
     }
 }

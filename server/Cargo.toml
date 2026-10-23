@@ -18,6 +18,7 @@ indexmap = "=2.7.1"
 zerofrom = "=0.1.4"
 zerofrom-derive = "=0.1.4"
 anyhow = "1"
+tower = "0.4"
 
 [build-dependencies]
 cc = "1"
