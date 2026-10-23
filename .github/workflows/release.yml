@@ -1,0 +1,46 @@
+name: Release
+
+# Tag convention (T-22): push a tag `vX.Y.Z` to publish a GitHub Release
+# with the prebuilt linux x86-64 binary — the "standalone binary" promise
+# from the README. Version numbers must match server/Cargo.toml and
+# editors/vscode/extension/package.json (CHANGELOG.md is updated in the
+# same commit as the version bumps).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: build and publish linux x86-64 binary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+
+      - name: Build release binary
+        working-directory: server
+        run: cargo build --release
+
+      - name: Smoke-test the exact artifact
+        run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
+
+      - name: Package
+        run: |
+          strip server/target/release/mqsc-lsp
+          tar -C server/target/release -czf "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-linux.tar.gz" mqsc-lsp
+          sha256sum "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-linux.tar.gz" > SHA256SUMS
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mqsc-lsp-*-x86_64-linux.tar.gz
+            SHA256SUMS
+          generate_release_notes: true

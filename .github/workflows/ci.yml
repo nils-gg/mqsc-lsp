@@ -1,0 +1,60 @@
+name: CI
+
+# The repo pins rustc 1.75 (MSRV, see AGENTS.md): dependency versions in
+# server/Cargo.toml carry `=` pins that only resolve on that toolchain, so
+# CI must not drift to a newer stable.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build, lint, test, smoke (ubuntu, rust 1.75)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: cargo fmt --check
+        working-directory: server
+        run: cargo fmt --check
+
+      - name: cargo clippy -D warnings
+        working-directory: server
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test (unit + grammar corpus through the linked parser)
+        working-directory: server
+        run: cargo test
+
+      - name: cargo build --release
+        working-directory: server
+        run: cargo build --release
+
+      - name: LSP smoke session against the release binary
+        run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
+
+      - name: model regeneration guard (skips without the IBM reference)
+        run: python3 tools/check_model.py
+
+      - name: --check CLI end-to-end
+        run: |
+          echo "DEFINE QLOCAL(A) MAXMSGS" > /tmp/w.mqsc
+          if server/target/release/mqsc-lsp --check /tmp/w.mqsc; then
+            echo "expected exit 1 for the MAXMSGS error"; exit 1
+          fi
+          server/target/release/mqsc-lsp --check --diag UNKNOWN_PARAM=off /tmp/w.mqsc
