@@ -1,0 +1,1551 @@
+{
+  "_comment": [
+    "CURATED MODERN-MQ OVERLAY — NOT IBM-REFERENCE DATA.",
+    "The base model/mqsc-model.json is extracted from the 2011-era IBM",
+    "'Script (MQSC) Command Reference' (SC1024) and cannot know about",
+    "MQ 7.1+-9.x commands and parameters. This file adds what real-world",
+    "usage needs; it is merged at model load (server/src/model.rs) and",
+    "flagged as curated in README 'Model gaps'.",
+    "Evidence: z/OS MQ 9.3 dmpmqcfg output (324-file real-world corpus)",
+    "plus IBM MQ 9.x documentation knowledge. Parameter kinds are",
+    "deliberately permissive (string) where the full MQSC value set could",
+    "not be verified: a string kind accepts anything and can never raise a",
+    "false code-5 — the enum is narrowed only when the value list is known",
+    "with confidence. Merge semantics: 'commands' upsert whole command",
+    "entries; 'patch' keys are 'VERB OBJECT' of an existing entry.",
+    "Patch ops: add_params (upsert by name), replace_params (full list",
+    "wins), extend_enum (union value lists)."
+  ],
+  "commands": {
+    "SET": {
+      "AUTHREC": {
+        "verb": "SET",
+        "object": "AUTHREC",
+        "title": "SET AUTHREC",
+        "description": "Change the authorization details of an authorization profile (MQ 7.1+ / z/OS). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "PROFILE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "OBJTYPE",
+            "kind": "enum",
+            "values": [
+              "AUTHINFO",
+              "CHANNEL",
+              "CLNTCONN",
+              "CMODEL",
+              "COMMINFO",
+              "GROUPMEMBER",
+              "LISTENER",
+              "NAMELIST",
+              "PROCESS",
+              "QMGR",
+              "QUEUE",
+              "RQMNAME",
+              "SECURITY",
+              "SERVICE",
+              "TOPIC",
+              "XRESOURCE",
+              "XSERVICE"
+            ],
+            "optional": true
+          },
+          {
+            "name": "OBJNAME",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "AUTHADD",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "AUTHDEL",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "ENTITY",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "GENERIC",
+            "kind": "enum",
+            "values": [
+              "NO",
+              "ONLY",
+              "YES"
+            ],
+            "optional": true
+          },
+          {
+            "name": "GROUP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "PRINCIPAL",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QSGDISP",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": null
+      },
+      "CHLAUTH": {
+        "verb": "SET",
+        "object": "CHLAUTH",
+        "title": "SET CHLAUTH",
+        "description": "Modify a channel authentication record (MQ 9.0+; MQSC equivalent of z/OS SET CHLAUTH). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "TYPE",
+            "kind": "enum",
+            "values": [
+              "ADDRESSMAP",
+              "BLOCKADDR",
+              "BLOCKUSER",
+              "GROUPMAP",
+              "KNOWNCLIENT",
+              "QMGRMAP",
+              "SSLPEERMAP",
+              "USERMAP"
+            ],
+            "optional": true
+          },
+          {
+            "name": "ADDRESS",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERSRC",
+            "kind": "enum",
+            "values": [
+              "CHANNEL",
+              "MAP",
+              "NOACCESS"
+            ],
+            "optional": true
+          },
+          {
+            "name": "USERSRCID",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "ACTION",
+            "kind": "enum",
+            "values": [
+              "DELETE",
+              "REPLACE"
+            ],
+            "optional": true
+          },
+          {
+            "name": "MCAUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CLNTUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERLIST",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLPEER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLCERT",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLCERTI",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QMNAME",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "DESCR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "WARN",
+            "kind": "enum",
+            "values": [
+              "NO",
+              "YES"
+            ],
+            "optional": true
+          },
+          {
+            "name": "CHCKCLNT",
+            "kind": "enum",
+            "values": [
+              "ASDEF",
+              "OFF",
+              "OPTIONAL",
+              "REQDADM",
+              "REQUIRED"
+            ],
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": "name"
+      },
+      "GLOBAL": {
+        "verb": "SET",
+        "object": "GLOBAL",
+        "title": "SET GLOBAL",
+        "description": "Change global queue manager attributes (z/OS; MQ 9.x). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "AUDITHON",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "AUDITCMD",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "AUDITPCF",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CERTVALLIST",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "MAXPUBAGINGS",
+            "kind": "integer",
+            "optional": true
+          },
+          {
+            "name": "SSLFIPS",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLCIPH",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": null
+      }
+    },
+    "DEFINE": {
+      "COMMINFO": {
+        "verb": "DEFINE",
+        "object": "COMMINFO",
+        "title": "DEFINE COMMINFO",
+        "description": "Define a multicast communications information object (z/OS MQ 9.x, pub/sub multicast). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "GRPADDR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "PORT",
+            "kind": "integer",
+            "optional": true
+          },
+          {
+            "name": "DESCR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QSGDISP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "REPLACE",
+            "kind": "flag",
+            "optional": true
+          }
+        ],
+        "attrs": [
+          "ALL",
+          "DESCR",
+          "GRPADDR",
+          "PORT",
+          "QSGDISP"
+        ],
+        "positional": "name"
+      }
+    },
+    "ALTER": {
+      "COMMINFO": {
+        "verb": "ALTER",
+        "object": "COMMINFO",
+        "title": "ALTER COMMINFO",
+        "description": "Alter a multicast communications information object (z/OS MQ 9.x). Curated entry.",
+        "params": [
+          {
+            "name": "GRPADDR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "PORT",
+            "kind": "integer",
+            "optional": true
+          },
+          {
+            "name": "DESCR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QSGDISP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": "name"
+      }
+    },
+    "DISPLAY": {
+      "COMMINFO": {
+        "verb": "DISPLAY",
+        "object": "COMMINFO",
+        "title": "DISPLAY COMMINFO",
+        "description": "Display multicast communications information objects (z/OS MQ 9.x). Curated entry.",
+        "params": [
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QSGDISP",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [
+          "ALL",
+          "DESCR",
+          "GRPADDR",
+          "PORT",
+          "QSGDISP"
+        ],
+        "positional": "name"
+      },
+      "CHLAUTH": {
+        "verb": "DISPLAY",
+        "object": "CHLAUTH",
+        "title": "DISPLAY CHLAUTH",
+        "description": "Display channel authentication records (MQ 9.0+). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "TYPE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "DETAIL",
+            "kind": "enum",
+            "values": [
+              "BASIC",
+              "FULL"
+            ],
+            "optional": true
+          }
+        ],
+        "attrs": [
+          "ALL",
+          "ADDRESS",
+          "ADDRESS6",
+          "ALTDATE",
+          "ALTTIME",
+          "CLNTUSER",
+          "DESCR",
+          "MCAUSER",
+          "SET",
+          "SRCGRP",
+          "SRCUSR",
+          "SSLCERT",
+          "SSLCERTI",
+          "SSLPEER",
+          "TYPE",
+          "USERSRC",
+          "USERSRCID"
+        ],
+        "positional": "name"
+      }
+    },
+    "ADD": {
+      "CHLAUTH": {
+        "verb": "ADD",
+        "object": "CHLAUTH",
+        "title": "ADD CHLAUTH",
+        "description": "Add a channel authentication record (MQ 9.0+). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "TYPE",
+            "kind": "enum",
+            "values": [
+              "ADDRESSMAP",
+              "BLOCKADDR",
+              "BLOCKUSER",
+              "GROUPMAP",
+              "KNOWNCLIENT",
+              "QMGRMAP",
+              "SSLPEERMAP",
+              "USERMAP"
+            ],
+            "optional": true
+          },
+          {
+            "name": "ADDRESS",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERSRC",
+            "kind": "enum",
+            "values": [
+              "CHANNEL",
+              "MAP",
+              "NOACCESS"
+            ],
+            "optional": true
+          },
+          {
+            "name": "USERSRCID",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "MCAUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CLNTUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERLIST",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLPEER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLCERT",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QMNAME",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "DESCR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": "name"
+      }
+    },
+    "MODIFY": {
+      "CHLAUTH": {
+        "verb": "MODIFY",
+        "object": "CHLAUTH",
+        "title": "MODIFY CHLAUTH",
+        "description": "Modify a channel authentication record (MQ 9.0+). Curated entry: postdates the 2011 reference.",
+        "params": [
+          {
+            "name": "ADDRESS",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERSRC",
+            "kind": "enum",
+            "values": [
+              "CHANNEL",
+              "MAP",
+              "NOACCESS"
+            ],
+            "optional": true
+          },
+          {
+            "name": "USERSRCID",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "MCAUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CLNTUSER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "USERLIST",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLPEER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "SSLCERT",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "QMNAME",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "DESCR",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "CMDSCOPE",
+            "kind": "string",
+            "optional": true
+          }
+        ],
+        "attrs": [],
+        "positional": "name"
+      }
+    }
+  },
+  "patch": {
+    "DEFINE QLOCAL": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "MCAST",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "COMMINFO",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "STREAMQ",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLCHNAME",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ],
+        "ACCTQ": [
+          "DISABLED",
+          "ENABLED",
+          "GROUP",
+          "MDU",
+          "NONE",
+          "OFF",
+          "ON"
+        ]
+      }
+    },
+    "ALTER QLOCAL": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "MCAST",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "COMMINFO",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "STREAMQ",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLCHNAME",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ],
+        "ACCTQ": [
+          "DISABLED",
+          "ENABLED",
+          "GROUP",
+          "MDU",
+          "NONE",
+          "OFF",
+          "ON"
+        ]
+      }
+    },
+    "DEFINE QMODEL": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ],
+        "ACCTQ": [
+          "DISABLED",
+          "ENABLED",
+          "GROUP",
+          "MDU",
+          "NONE",
+          "OFF",
+          "ON"
+        ]
+      }
+    },
+    "ALTER QMODEL": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ],
+        "ACCTQ": [
+          "DISABLED",
+          "ENABLED",
+          "GROUP",
+          "MDU",
+          "NONE",
+          "OFF",
+          "ON"
+        ]
+      }
+    },
+    "DEFINE QALIAS": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ]
+      }
+    },
+    "ALTER QALIAS": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "PROPCTL": [
+          "ALL",
+          "COMPAT",
+          "FORCE",
+          "NONE",
+          "V6COMPAT"
+        ]
+      }
+    },
+    "DEFINE QREMOTE": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "ALTER QREMOTE": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "DEFINE TOPIC": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "MCAST",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "USEDLQ",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "COMMINFO",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "DEFPRTY": [
+          "integer",
+          "ASPARENT"
+        ]
+      }
+    },
+    "ALTER TOPIC": {
+      "add_params": [
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CUSTOMUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "MCAST",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "USEDLQ",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "COMMINFO",
+          "kind": "string",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "DEFPRTY": [
+          "integer",
+          "ASPARENT"
+        ]
+      }
+    },
+    "DEFINE CHANNEL": {
+      "add_params": [
+        {
+          "name": "PORT",
+          "kind": "integer",
+          "optional": true
+        },
+        {
+          "name": "TPROOT",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TMPMODEL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TMPQPRFX",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CERTLABL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "AMQPKA",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLNTAUTH",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "KAINT",
+          "kind": "integer",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "CHLTYPE": [
+          "AMQP",
+          "CLNTCONN",
+          "CLUSSDR",
+          "CLUSRCVR",
+          "MQTT",
+          "RCVR",
+          "RQSTR",
+          "SDR",
+          "SVR",
+          "SVRCONN"
+        ]
+      }
+    },
+    "ALTER CHANNEL": {
+      "add_params": [
+        {
+          "name": "PORT",
+          "kind": "integer",
+          "optional": true
+        },
+        {
+          "name": "TPROOT",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TMPMODEL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TMPQPRFX",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CERTLABL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "AMQPKA",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLNTAUTH",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "KAINT",
+          "kind": "integer",
+          "optional": true
+        }
+      ],
+      "extend_enum": {
+        "CHLTYPE": [
+          "AMQP",
+          "CLNTCONN",
+          "CLUSSDR",
+          "CLUSRCVR",
+          "MQTT",
+          "RCVR",
+          "RQSTR",
+          "SDR",
+          "SVR",
+          "SVRCONN"
+        ]
+      }
+    },
+    "ALTER QMGR": {
+      "add_params": [
+        {
+          "name": "CONNAUTH",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CHLAUTH",
+          "kind": "enum",
+          "values": [
+            "DISABLED",
+            "ENABLED",
+            "REFRESH"
+          ],
+          "optional": true
+        },
+        {
+          "name": "CERTLABL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CERTQSGL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CONFIGEV",
+          "kind": "enum",
+          "values": [
+            "DISABLED",
+            "ENABLED"
+          ],
+          "optional": true
+        },
+        {
+          "name": "PERFMEV",
+          "kind": "enum",
+          "values": [
+            "DISABLED",
+            "ENABLED"
+          ],
+          "optional": true
+        },
+        {
+          "name": "SUITEB",
+          "kind": "enum",
+          "values": [
+            "NONE",
+            "NO",
+            "ONLY",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "IMGSCHED",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "IMGLOGLN",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "ACTVCONO",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "FORCE",
+          "kind": "flag",
+          "optional": true
+        }
+      ]
+    },
+    "DEFINE PROCESS": {
+      "extend_enum": {
+        "APPLTYPE": [
+          "CICS",
+          "DEF",
+          "DOS",
+          "IMS",
+          "MVS",
+          "NOTESAGENT",
+          "NSK",
+          "OPENVMS",
+          "OS2",
+          "OS400",
+          "UNIX",
+          "WINDOWS",
+          "WINDOWSNT",
+          "WLM",
+          "integer"
+        ]
+      }
+    },
+    "ALTER PROCESS": {
+      "extend_enum": {
+        "APPLTYPE": [
+          "CICS",
+          "DEF",
+          "DOS",
+          "IMS",
+          "MVS",
+          "NOTESAGENT",
+          "NSK",
+          "OPENVMS",
+          "OS2",
+          "OS400",
+          "UNIX",
+          "WINDOWS",
+          "WINDOWSNT",
+          "WLM",
+          "integer"
+        ]
+      }
+    },
+    "DEFINE AUTHINFO": {
+      "add_params": [
+        {
+          "name": "ADOPTCTX",
+          "kind": "enum",
+          "values": [
+            "COMMAND",
+            "NO",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "CHCKCLNT",
+          "kind": "enum",
+          "values": [
+            "ASDEF",
+            "OFF",
+            "OPTIONAL",
+            "REQDADM",
+            "REQUIRED"
+          ],
+          "optional": true
+        },
+        {
+          "name": "SHORTUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLASSGRP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLASSUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "FINDGRP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "FINDUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "BASEDNG",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "BASEDNU",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "LDAPUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "GRPFIELD",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "USRFIELD",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "AUTHORMD",
+          "kind": "enum",
+          "values": [
+            "ALLOWANY",
+            "ORDERLDAP",
+            "SEARCHUSR"
+          ],
+          "optional": true
+        },
+        {
+          "name": "OCSPURL",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "ALTER AUTHINFO": {
+      "add_params": [
+        {
+          "name": "ADOPTCTX",
+          "kind": "enum",
+          "values": [
+            "COMMAND",
+            "NO",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "CHCKCLNT",
+          "kind": "enum",
+          "values": [
+            "ASDEF",
+            "OFF",
+            "OPTIONAL",
+            "REQDADM",
+            "REQUIRED"
+          ],
+          "optional": true
+        },
+        {
+          "name": "SHORTUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLASSGRP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CLASSUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "FINDGRP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "FINDUSR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "BASEDNG",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "BASEDNU",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "LDAPUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "GRPFIELD",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "USRFIELD",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "AUTHORMD",
+          "kind": "enum",
+          "values": [
+            "ALLOWANY",
+            "ORDERLDAP",
+            "SEARCHUSR"
+          ],
+          "optional": true
+        },
+        {
+          "name": "OCSPURL",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "DEFINE LISTENER": {
+      "add_params": [
+        {
+          "name": "TRPTYPE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "CONTROL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "LOCLNAME",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "IPADDR",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "DEFINE SUB": {
+      "replace_params": [
+        {
+          "name": "CMDSCOPE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "DEST",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "DESTCLAS",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "DESTCORL",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "DESTQMGR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "DURSUB",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "EXPIRY",
+          "kind": "integer",
+          "optional": true
+        },
+        {
+          "name": "PERSIST",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "PSCLRSYS",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "NONE",
+            "PUB"
+          ],
+          "optional": true
+        },
+        {
+          "name": "PSCTLCASE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PSMSGID",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PSPROP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PUBACCT",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PUBAPPID",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PUBPRTY",
+          "kind": "integer",
+          "optional": true
+        },
+        {
+          "name": "PUBSCOPE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "QSGDISP",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "REPLACE",
+          "kind": "flag",
+          "optional": true
+        },
+        {
+          "name": "REQONLY",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES"
+          ],
+          "optional": true
+        },
+        {
+          "name": "SELECTOR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "SUBLEVEL",
+          "kind": "integer",
+          "optional": true
+        },
+        {
+          "name": "SUBSCOPE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "QMGR"
+          ],
+          "optional": true
+        },
+        {
+          "name": "SUBUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TOPICOBJ",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "TOPICSTR",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "USERDATA",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "VARUSER",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "WSCHEMA",
+          "kind": "string",
+          "optional": true
+        }
+      ]
+    },
+    "ALTER SUB": {
+      "add_params": [
+        {
+          "name": "PSCLRSYS",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "NONE",
+            "PUB"
+          ],
+          "optional": true
+        },
+        {
+          "name": "PSCTLCASE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PSMSGID",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "PUBSCOPE",
+          "kind": "string",
+          "optional": true
+        },
+        {
+          "name": "REPLACE",
+          "kind": "flag",
+          "optional": true
+        }
+      ]
+    }
+  }
+}

@@ -8,6 +8,12 @@ use serde::Deserialize;
 
 const MODEL_JSON: &str = include_str!("../../model/mqsc-model.json");
 
+/// Curated modern (MQ 7.1+–9.x) additions merged over the 2011-reference
+/// extraction at load time — see model/mqsc-overlay.json and README
+/// "Model gaps". The base model JSON stays the pure, reproducible extractor
+/// output; everything curated lives here.
+const OVERLAY_JSON: &str = include_str!("../../model/mqsc-overlay.json");
+
 #[derive(Debug, Deserialize)]
 pub struct RawParam {
     pub name: String,
@@ -51,6 +57,73 @@ struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
     #[serde(default)]
     param_docs: HashMap<String, Vec<(String, String)>>,
+}
+
+/// One `"VERB OBJECT"` patch in the overlay; every operation optional.
+#[derive(Debug, Deserialize, Default)]
+struct CommandPatch {
+    #[serde(default)]
+    add_params: Vec<RawParam>,
+    #[serde(default)]
+    replace_params: Option<Vec<RawParam>>,
+    /// parameter name -> values to union into its enum
+    #[serde(default)]
+    extend_enum: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Overlay {
+    #[serde(default)]
+    commands: HashMap<String, HashMap<String, CommandEntry>>,
+    #[serde(default)]
+    patch: HashMap<String, CommandPatch>,
+    #[serde(default)]
+    param_docs: HashMap<String, Vec<(String, String)>>,
+}
+
+impl RawModel {
+    /// Merge the curated modern overlay into the extracted 2011 model.
+    /// New commands are inserted whole; patches adjust existing commands.
+    fn apply_overlay(&mut self, ov: Overlay) {
+        for (verb, objs) in ov.commands {
+            for (obj, entry) in objs {
+                self.commands.entry(verb.clone()).or_default().insert(obj, entry);
+            }
+        }
+        for (key, p) in ov.patch {
+            let Some((verb, obj)) = key.split_once(' ') else {
+                eprintln!("mqsc-model overlay: patch key {key:?} is not 'VERB OBJECT', skipped");
+                continue;
+            };
+            let Some(entry) = self.commands.get_mut(verb).and_then(|o| o.get_mut(obj)) else {
+                eprintln!("mqsc-model overlay: patch target {key:?} not in base model, skipped");
+                continue;
+            };
+            if let Some(list) = p.replace_params {
+                entry.params = list;
+            }
+            for np in p.add_params {
+                match entry.params.iter_mut().find(|e| e.name == np.name) {
+                    Some(slot) => *slot = np,
+                    None => entry.params.push(np),
+                }
+            }
+            for (pname, vals) in p.extend_enum {
+                let Some(slot) = entry.params.iter_mut().find(|e| e.name == pname) else { continue };
+                for v in vals {
+                    if !slot.values.contains(&v) {
+                        slot.values.push(v);
+                    }
+                }
+                if slot.kind != "enum" {
+                    slot.kind = "enum".into();
+                }
+            }
+        }
+        for (name, docs) in ov.param_docs {
+            self.param_docs.entry(name).or_default().extend(docs);
+        }
+    }
 }
 
 /// A value category for a parameter, after normalisation.
@@ -101,7 +174,7 @@ pub struct Command {
 }
 
 static VERBS: &[&str] = &[
-    "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY",
+    "ADD", "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY",
     "MOVE", "PING", "RECOVER", "REFRESH", "RESET", "RESOLVE", "RESUME",
     "RVERIFY", "SET", "START", "STOP", "SUSPEND",
 ];
@@ -168,8 +241,11 @@ impl Model {
     pub fn load() -> &'static Model {
         static MODEL: OnceLock<Model> = OnceLock::new();
         MODEL.get_or_init(|| {
-            let raw: RawModel = serde_json::from_str(MODEL_JSON)
+            let mut raw: RawModel = serde_json::from_str(MODEL_JSON)
                 .expect("embedded mqsc-model.json must be valid");
+            let overlay: Overlay = serde_json::from_str(OVERLAY_JSON)
+                .expect("embedded mqsc-overlay.json must be valid");
+            raw.apply_overlay(overlay);
 
             let mut entries: Vec<Box<Command>> = Vec::new();
             let mut commands: HashMap<&'static str, HashMap<String, usize>> = HashMap::new();

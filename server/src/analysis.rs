@@ -98,6 +98,16 @@ fn node_text<'a>(n: Node<'a>, src: &'a [u8]) -> &'a str {
     n.utf8_text(src).unwrap_or("")
 }
 
+/// MQSC is case-insensitive: when the user typed a token entirely in lower
+/// case, quickfix suggestions should not force it to upper case.
+fn mirror_case(sample: &str, canonical_upper: &str) -> String {
+    if sample.chars().any(|c| c.is_lowercase()) && !sample.chars().any(|c| c.is_uppercase()) {
+        canonical_upper.to_ascii_lowercase()
+    } else {
+        canonical_upper.to_string()
+    }
+}
+
 fn node_at(root: Node<'_>, off: usize) -> Node<'_> {
     let mut node = root;
     loop {
@@ -497,6 +507,20 @@ fn names_for<'a>(defs: &'a Definitions, r: Option<ObjRef>, cmd_obj: &str) -> Vec
         .collect()
 }
 
+impl Definitions {
+    /// Whether code 12 may fire at all for a reference family in this script:
+    /// only when the script DEFINEs at least one object of a matching type.
+    /// A dump that only contains, say, QALIAS definitions never gets TARGET
+    /// hints (the real queues live in other scripts) — see README
+    /// "Same-script object knowledge".
+    fn arms(&self, r: ObjRef, cmd_obj: &str) -> bool {
+        match r {
+            ObjRef::QueueFamily => self.by_obj.keys().any(|o| o.starts_with('Q')),
+            ObjRef::SameType => self.by_obj.contains_key(cmd_obj),
+        }
+    }
+}
+
 /// Code 12: an object-name reference (TARGET, XMITQ, LIKE, ...) that no
 /// DEFINE in this script provides. Hint severity on purpose: runmqsc
 /// scripts routinely reference queue-manager objects that exist already.
@@ -509,11 +533,16 @@ fn check_obj_ref(
     defs: &Definitions,
     d: &mut Diags,
 ) {
-    if object_ref_param(pname, cmd_obj).is_none() || !defs.any_defines {
+    let Some(r) = object_ref_param(pname, cmd_obj) else { return };
+    if !defs.any_defines || !defs.arms(r, cmd_obj) {
         return;
     }
     for v in values {
         for name in value_name_words(*v, src) {
+            // Blank/' ' values (legal in dumps, e.g. SHORTUSR(' ')) are never typos.
+            if name.trim().is_empty() {
+                continue;
+            }
             // IBM ships every SYSTEM.* object; never flag those.
             if defs.names.contains(&name) || name.starts_with("SYSTEM") {
                 continue;
@@ -647,7 +676,6 @@ fn check_command(
     // group directly after it belongs to the same typo: report once, not twice.
     let mut mute_next_group = false;
     let mut used: HashSet<String> = HashSet::new();
-    let mut used_seq: Vec<(String, usize)> = Vec::new(); // name -> first word start
     let mut pending: Option<(String, Node<'_>)> = None;
 
     for (k, item) in items[idx..].iter().enumerate() {
@@ -656,17 +684,22 @@ fn check_command(
                 mute_next_group = false;
                 let w = node_text(*n, src);
                 let up = w.to_ascii_uppercase();
-                if used.contains(&up) {
-                    d.push(
-                        lines.range(n.start_byte(), n.end_byte()),
-                        DiagnosticSeverity::ERROR,
-                        CODE_DUPLICATE,
-                        format!("Parameter {up} appears more than once; MQSC allows it once"),
-                    );
-                } else {
-                    used.insert(up.clone());
-                    used_seq.push((up.clone(), n.start_byte()));
+                // Code 6 applies only to genuine keyword parameters. Bare
+                // positional object names (`DISPLAY QLOCAL(A) B B`) and
+                // repeated DISPLAY attributes are legal MQSC and must not
+                // trigger it; `used` still records every word so the
+                // missing-required check below sees what was supplied.
+                if e.by_name.contains_key(&up) {
+                    if used.contains(&up) {
+                        d.push(
+                            lines.range(n.start_byte(), n.end_byte()),
+                            DiagnosticSeverity::ERROR,
+                            CODE_DUPLICATE,
+                            format!("Parameter {up} appears more than once; MQSC allows it once"),
+                        );
+                    }
                 }
+                used.insert(up.clone());
 
                 if let Some(&pi) = e.by_name.get(&up) {
                     let p = &e.params[pi];
@@ -894,7 +927,14 @@ fn check_values(p: &Param, up: &str, values: &[Node<'_>], src: &[u8], lines: &Li
                     );
                 } else if let Some(w) = &has_word {
                     let uw = w.to_ascii_uppercase();
-                    if !vals.iter().any(|x| x == &uw) {
+                    // enum-plus-integer parameters (APPLTYPE, DEFPRTY, ...)
+                    // take plain integers as well
+                    let int_ok = p.alt_integer
+                        && has_int
+                        && !has_string
+                        && !has_wildcard
+                        && w.chars().all(|c| c.is_ascii_digit());
+                    if !int_ok && !vals.iter().any(|x| x == &uw) {
                         let sugs = model::suggest(&uw, vals.iter().map(|s| s.as_str()), 3);
                         let list = vals.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
                         let msg = if sugs.is_empty() {
@@ -905,7 +945,7 @@ fn check_values(p: &Param, up: &str, values: &[Node<'_>], src: &[u8], lines: &Li
                                 sugs.join(", ")
                             )
                         };
-                        let fixes = sugs.iter().map(|s| s.to_string()).collect();
+                        let fixes = sugs.iter().map(|s| mirror_case(raw, s)).collect();
                         d.push_fixes(
                             lines.range(v.start_byte(), v.end_byte()),
                             DiagnosticSeverity::WARNING,
