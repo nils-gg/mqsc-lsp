@@ -25,10 +25,23 @@ the full picture; this file only lists what is easy to get wrong.
   parameters (driving hint 12 and defined-name completion) live in the
   curated `object_ref_param` table in analysis.rs — a documented heuristic,
   not model data. Don't "fix" it by keying off `ValueKind::Name`.
-- `server.rs` caches one parse tree per open doc (`Mutex<tree_sitter::Tree>`;
-  `Tree` is Send-but-not-Sync). Handlers receive `(&str, &Tree)` via
-  `with_doc`; never re-parse in a handler and never hold a lock guard across
-  an `.await` (futures must stay Send).
+- `server.rs` caches one `Doc { text, tree, defs }` per open document
+  (`Tree` is Send-but-not-Sync, hence the per-tree `Mutex`; `defs` is the
+  doc's own DEFINE index, making the T-17 cross-file view a cheap merge).
+  Handlers receive `(&str, &Tree)` via `with_doc`; never re-parse in a
+  handler and never hold a lock guard across an `.await` (futures must stay
+  Send). Invalidation policy: did_open/did_close refresh **all** documents
+  (cross-file defines changed for everyone), did_change refreshes only
+  itself — per-keystroke sibling refresh would be quadratic.
+- `model/mqsc-overlay.json` is likewise `include_str!`-embedded and merged
+  over the base model at load time (`Model::load`); the base JSON must stay
+  byte-identical to `extract_model.py` output (`tools/check_model.py`
+  guards it; overlay `add_params` REPLACE base params — remove overlay
+  entries whenever the extractor itself gets fixed).
+- `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
+  stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
+  tower wrapper catches handler panics into `-32603` responses — handlers
+  must not add their own `catch_unwind`.
 - `tools/extract_model.py` regenerates the model from
   `MQSC_ScriptCommandReference.md` at the repo root. That file (plus the
   `-rag.md` twin and `.pdf`) is IBM copyrighted and **gitignored**; a local
@@ -38,16 +51,21 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd grammars/tree-sitter-mqsc && tree-sitter test    # 23 corpus tests (works with CLI 0.27.x)
+cd server && cargo test                             # 49 unit + 3 grammar-corpus tests (no CLI needed)
+cd grammars/tree-sitter-mqsc && tree-sitter test    # 24 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
-python3 tools/lsp_smoke_test.py                     # repo root; full LSP session over stdio
+python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
+python3 tools/check_model.py                        # model byte-reproducibility guard
 ```
 
 - `lsp_smoke_test.py` is **assertive**: it checks quickfixes, script-defined
-  completion names, and settings-driven severity filtering, and exits non-zero
-  on FAIL. Defaults to the debug binary (`server/target/debug/mqsc-lsp`); pass
-  a binary path as `$1` to test release. It runs **whatever binary is on
-  disk** — rebuild first, or a stale `target/` silently tests old code.
+  completion names, settings-driven severity filtering, navigation
+  (definition/references/rename), cross-file behavior (open/close a sibling
+  document and watch hint 12 come and go), and the `MQSC_LSP_LOG` file it
+  starts the server with — and exits non-zero on FAIL. Defaults to the debug
+  binary (`server/target/debug/mqsc-lsp`); pass a binary path as `$1` to
+  test release. It runs **whatever binary is on disk** — rebuild first, or a
+  stale `target/` silently tests old code.
 - The **`tree-sitter` CLI is not installed on this machine** (no npm/node
   either), so grammar corpus tests and `tree-sitter generate` cannot run
   out of the box. Server-side work never needs the CLI: cargo compiles the
@@ -84,5 +102,9 @@ python3 tools/lsp_smoke_test.py                     # repo root; full LSP sessio
   `~/.profile`): rustc/cargo **1.75.0**, the repo's MSRV. Keep the default
   toolchain at 1.75 — if a build hits pin-related errors, apply the
   downgrade recipe above instead of installing a newer toolchain.
-- No cargo workspace, no npm/node toolchain for the grammar, no CI, no
-  formatter/linter config. `server/` is a single standalone crate.
+- No cargo workspace, no npm/node toolchain for the grammar, no formatter
+  config beyond rustfmt defaults, no extension build tooling. `server/` is a
+  single standalone crate. CI **does** exist now (`.github/workflows/ci.yml`,
+  rust 1.75 pinned: fmt/clippy `-D warnings`/test/release build/smoke/
+  model-guard) — keep its gates green; rustfmt and clippy components are
+  installed locally too.

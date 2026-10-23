@@ -60,7 +60,8 @@ Prerequisites: tree-sitter CLI **0.27.x** (verified on 0.27.1), a C compiler, `p
 # 1. Grammar (already generated; regenerate only after editing grammar.js)
 cd grammars/tree-sitter-mqsc
 tree-sitter generate --abi 14      # regenerate parser.c / scanner bindings
-tree-sitter test                   # 23 corpus tests
+tree-sitter test                   # 24 corpus tests (cargo test runs the same
+                                   # corpus through the server's parser, no CLI needed)
 
 # 2. Model (already extracted and committed; rerun only after editing the
 #    extractor AND placing your own copy of the reference markdown at the
@@ -75,14 +76,22 @@ cargo build --release              # target/release/mqsc-lsp
 **MSRV pinning:** this machine's toolchain is rustc 1.75 without rustup. If
 `cargo check` fails with *"requires rustc X"* / *"edition2024"*, downgrade the
 offending transitive crate, e.g. `cargo update -p idna_adapter --precise 1.2.0`.
-The direct pins in `Cargo.toml` (tree-sitter `=0.24.7`, tokio `=1.44.2`, …) are
-load-bearing; do not bump them casually.
+The `=` pins in `Cargo.toml` (`idna_adapter`, `hashbrown`, `indexmap`,
+`zerofrom`, `zerofrom-derive`) exist only for rustc 1.75; `tree-sitter` is
+`"0.24"` (ABI 14, matching the committed `parser.c`). Do not bump the pins
+casually or run a broad `cargo update`.
 
 ## Using
 
 ```sh
 server/target/release/mqsc-lsp                # stdio (what editors launch)
 server/target/release/mqsc-lsp --tcp 9257     # TCP; one LSP session per connection
+server/target/release/mqsc-lsp --check FILE... # lint without an editor:
+                     #   file:line:col: severity[code]: message, exit 1 on errors
+                     #   ('-' = stdin; --diag CODE=SEVERITY / --settings file.json)
+server/target/release/mqsc-lsp --log-file /tmp/mqsc-lsp.log
+                     # optional server tracing (also $MQSC_LSP_LOG): request
+                     # timings, parse/analyze durations, panics — silent by default
 server/target/release/mqsc-lsp --version
 ```
 
@@ -94,14 +103,16 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | Capability | Behaviour |
 | --- | --- |
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
-| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; displayable attributes too |
-| Completion | verbs on fresh lines, object types after a verb, parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group), enum/flag values inside groups, object names already `DEFINE`d in the script, prefix filtering, docs in the detail pane |
-| codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5) |
-| documentSymbol | one entry per command |
+| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document), use count, "this is the definition" |
+| Completion | verbs on fresh lines, object types after a verb, parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group), enum/flag values inside groups, object names `DEFINE`d in the script **or any other open document**, prefix filtering, docs in the detail pane |
+| codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5), preferred flag per diagnostic |
+| definition / references / rename | object names: jump to the `DEFINE` (across open documents), list all sites, rename every site in every open document keeping quoted/bare style |
+| documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
+| workspace/symbol | every object `DEFINE`d in any open document, grouped by object type |
 | foldingRange | multi-line continuation chains + comment blocks |
 | documentHighlight | same-word highlights |
 | semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes); full and range requests; enum values equal to the parameter default carry the `default` modifier |
-| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (`(`, `,`, `:` triggers), code actions, symbols, folding, highlights, semantic tokens |
+| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (`(`, `,`, `:` triggers), code actions, symbols, folding, highlights, semantic tokens, definition, references, rename, workspace symbols |
 
 ### Diagnostic codes
 
@@ -118,7 +129,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 9 | Warning | a *single* required parameter missing (suppressed for multi-alternative commands like DEFINE CHANNEL) |
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
-| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script |
+| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document |
 
 ### Configuration
 
@@ -138,29 +149,46 @@ Keys are the code number (`"12"`) or its name (`PARSE_ERROR`,
 `warning`, `information`, `hint`, `off`. On a settings change, diagnostics
 for all open documents are republished immediately.
 
-### Same-script object knowledge
+### Object knowledge (across open documents)
 
-The server knows what the open file itself defines and uses it two ways:
+The server knows what the open documents define and uses it three ways:
 completion inside object-name groups and reference parameters offers the
-names already `DEFINE`d (order-independent), and hint 12 marks references
-that the file never defines. That hint is a deliberate heuristic:
-`SYSTEM.*` names are never flagged, a script without any `DEFINE` is never
-flagged, and only the curated object-reference parameters (queue aliases'
-`TARGET`, channels' `XMITQ`, `LIKE`, dynamic-queue `MODEL`, the `MOVE`
-queue parameters …) are checked, because the 2011 model types them all as
-plain strings.
+names `DEFINE`d anywhere among the open documents (order-independent),
+hint 12 marks references that **no open document** defines, and
+definition/references/rename/hover navigate between them. That hint is a
+deliberate heuristic: `SYSTEM.*` names are never flagged, a set of scripts
+without any `DEFINE` is never flagged, and only the curated
+object-reference parameters (queue aliases' `TARGET`, channels' `XMITQ`,
+`LIKE`, dynamic-queue `MODEL`, the `MOVE` queue parameters …) are checked,
+because the 2011 model types them all as plain strings. Invalidation:
+opening or closing a document re-publishes every other document's
+diagnostics; typing only re-analyses the edited document (per keystroke,
+re-analysing all siblings would be quadratic). Closed documents count
+again once you reopen them; the server never touches the filesystem.
 
 ## Testing
 
 ```sh
-cd grammars/tree-sitter-mqsc && tree-sitter test    # grammar corpus (23 tests)
-python3 tools/lsp_smoke_test.py                      # full LSP session: diagnostics, hover,
-                                                     # completion, symbols, folding, tokens
+cd server
+cargo test                                       # 49 unit tests + 3 grammar-corpus tests
+                                                 # (corpus runs through the committed
+                                                 # parser.c — no tree-sitter CLI needed)
+cd ..
+python3 tools/lsp_smoke_test.py                  # full assertive LSP session (stdio):
+                                                 # diagnostics, hover, completion, symbols,
+                                                 # folding, tokens, navigation, cross-file,
+                                                 # settings, server log — exit != 0 on FAIL
+python3 tools/check_model.py                     # model is byte-identical to extractor output
+                                                 # (skips cleanly without the IBM reference)
 cd server
 echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol
 cargo run --example complete                         # completion behaviour matrix
 cargo run --example fold                             # folding ranges
 ```
+
+`.github/workflows/ci.yml` runs exactly this set on rustc 1.75 (fmt and
+clippy `-D warnings` too), with the smoke session against the **release**
+binary.
 
 `tools/lsp_smoke_test.py` drives the real binary over stdio and prints what
 each request returned; run it from the repository root. Beyond printing, it
@@ -182,10 +210,17 @@ non-zero when a check fails.
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
   gracefully there.
-- **No knowledge beyond the open file**: the server is a script checker, not
-  a queue manager. Same-script `DEFINE`s drive completion and hint 12, but
-  objects living in other scripts or in the queue manager itself are
-  invisible (which is exactly why hint 12 is only a hint).
+- **Knowledge spans open documents, not the filesystem**: the server is a
+  script checker, not a queue manager. Objects living in files that are not
+  open — or in the queue manager itself — are invisible (which is exactly
+  why hint 12 is only a hint). A `workspace/didChangeWatchedFiles` scan of
+  `*.mqsc` is the natural next step.
+- **False positives are measured, not eliminated**: on a 324-file
+  `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
+  the count sits at 18,865 after the model/overlay/grammar fixes (-92.8%);
+  codes 3/5/9 are at zero and the remainder is 18,830 × hint 12 by design
+  (cross-file references without the sibling open, MQ 9.x parameters).
+  Track regressions with `tools/corpus_measure.py`.
 - The process exits when stdin is closed after the `exit` notification
   (standard tower-lsp lifecycle); TCP sessions end with their connection.
 
