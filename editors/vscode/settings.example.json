@@ -1,6 +1,12 @@
 {
 	// mqsc-lsp options for the VS Code LSP ecosystem.
 	//
+	// A ready-made (untested skeleton) extension now lives in ./extension/:
+	// package.json + client + grammar + the settings schema for all 12
+	// diagnostic codes. See extension/README.md to build it. The recipe
+	// below remains useful for a hand-rolled client or a generic
+	// "bring your own server" extension.
+	//
 	// VS Code does not register arbitrary language servers from user settings
 	// alone. Two supported ways to plug mqsc-lsp in:
 	//

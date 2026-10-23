@@ -1,0 +1,127 @@
+{
+  "name": "mqsc-lsp-vscode",
+  "displayName": "MQSC",
+  "description": "IBM MQ MQSC script support — diagnostics, completion, navigation and quickfixes via the mqsc-lsp server (tree-sitter based). Requires the mqsc-lsp binary.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "REPLACE-WITH-YOUR-PUBLISHER",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:mqsc"
+  ],
+  "main": "./client/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mqsc",
+        "aliases": [
+          "MQSC",
+          "mqsc"
+        ],
+        "extensions": [
+          ".mqsc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mqsc",
+        "scopeName": "source.mqsc",
+        "path": "./syntaxes/mqsc.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "MQSC",
+      "properties": {
+        "mqsc.server.path": {
+          "type": "string",
+          "default": "mqsc-lsp",
+          "markdownDescription": "Path to the `mqsc-lsp` binary (build it with `cargo build --release` in the server directory of the mqsc-lsp repository, or install a release download on your PATH)."
+        },
+        "mqsc.server.logFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional file for server diagnostics (request timings, parse/analyze durations, panics). Passed to the server as `MQSC_LSP_LOG`. Empty = no logging."
+        },
+        "mqsc.diagnostics.PARSE_ERROR": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 1: syntax error reported by the parser."
+        },
+        "mqsc.diagnostics.UNKNOWN_VERB": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 2: the command verb is not a known MQSC verb."
+        },
+        "mqsc.diagnostics.UNKNOWN_OBJECT": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 3: the object type does not exist for this verb."
+        },
+        "mqsc.diagnostics.UNKNOWN_PARAM": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 4: parameter not defined for this command."
+        },
+        "mqsc.diagnostics.BAD_VALUE": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 5: value outside the modelled range/enum."
+        },
+        "mqsc.diagnostics.DUPLICATE_PARAM": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 6: parameter given twice in one command."
+        },
+        "mqsc.diagnostics.MISSING_CONTINUATION": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 7: command looks truncated — a continuation '+' is probably missing."
+        },
+        "mqsc.diagnostics.LEXICAL": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 8: lexical problem (e.g. unterminated quoted string)."
+        },
+        "mqsc.diagnostics.MISSING_REQUIRED": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 9: required parameter missing."
+        },
+        "mqsc.diagnostics.MISSING_NAME": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 10: the object name group is missing."
+        },
+        "mqsc.diagnostics.WILDCARD": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 11: wildcard used where a plain name is required."
+        },
+        "mqsc.diagnostics.UNDEFINED_OBJECT": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 12: name is never DEFINEd in this script (default: hint)."
+        }
+      }
+    }
+  }
+}

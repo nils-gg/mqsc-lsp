@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MQSC",
+  "scopeName": "source.mqsc",
+  "patterns": [
+    {
+      "name": "comment.line.mqsc",
+      "match": "^\\*.*$"
+    },
+    {
+      "name": "string.quoted.single.mqsc",
+      "begin": "'",
+      "end": "'(?!')",
+      "patterns": [
+        {
+          "name": "constant.character.escape.mqsc",
+          "match": "''"
+        }
+      ]
+    },
+    {
+      "name": "keyword.language.mqsc",
+      "match": "(?i)\\b(?:DEFINE|DEF|ALTER|ALT|DISPLAY|DIS|DELETE|DEL|CLEAR|CLR|START|STOP|SUSPEND|RESUME|REBIND|RESET)\\b"
+    },
+    {
+      "name": "support.type.object.mqsc",
+      "match": "(?i)\\b(?:QLOCAL|QL|QALIAS|QA|QREMOTE|QR|QMODEL|QMODEL?|QM|QINIT|QI|XMITQ|QOUT|QIN?|CHANNEL|CHL|LISTENER|LSTR|CHINIT|PROCESS|PROC|SVC|SECURITY|STORAGECLASS|STCLASS|CCWLM|SBF|TOPIC|TOP|CLNTCONN|COMMUNITY|GROUP|PRINCIPAL)\\b"
+    },
+    {
+      "name": "constant.numeric.mqsc",
+      "match": "\\b[0-9]+\\b"
+    },
+    {
+      "name": "keyword.operator.continuation.mqsc",
+      "match": "(?:^|(?<=\\s))\\+\\s*$"
+    },
+    {
+      "name": "variable.parameter.mqsc",
+      "match": "(?i)\\b[A-Z][A-Z0-9_#$@%/.-]*\\b(?=\\s*\\()"
+    }
+  ]
+}
