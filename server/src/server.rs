@@ -61,8 +61,7 @@ impl MqscServer {
                     }
                     let tree = doc.tree.lock().unwrap();
                     let t0 = std::time::Instant::now();
-                    let mut diags =
-                        analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
+                    let mut diags = analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
                     crate::tlog!(
                         "analyze {uri} len={} diags={} open_docs={} in {}ms",
                         doc.text.len(),
@@ -79,7 +78,9 @@ impl MqscServer {
                 None => return,
             }
         }; // guards dropped before the await
-        self.client.publish_diagnostics(uri.clone(), diags, None).await;
+        self.client
+            .publish_diagnostics(uri.clone(), diags, None)
+            .await;
     }
 
     /// Definitions from all open documents except `uri` (cached per doc, so
@@ -121,8 +122,14 @@ impl MqscServer {
     /// changed for every other document. Not called on did_change — that
     /// would be O(open documents) per keystroke.
     async fn refresh_others(&self, skip: &Url) {
-        let others: Vec<Url> =
-            self.docs.read().unwrap().keys().filter(|u| *u != skip).cloned().collect();
+        let others: Vec<Url> = self
+            .docs
+            .read()
+            .unwrap()
+            .keys()
+            .filter(|u| *u != skip)
+            .cloned()
+            .collect();
         for u in others {
             self.refresh(&u).await;
         }
@@ -143,7 +150,10 @@ impl MqscServer {
                     None => true,
                 };
                 if keep {
-                    out.push(Location { uri: u.clone(), range: s.range });
+                    out.push(Location {
+                        uri: u.clone(),
+                        range: s.range,
+                    });
                 }
             }
         }
@@ -183,11 +193,9 @@ fn display_file(uri: &Url) -> String {
 /// (`[A-Za-z_#$@%/.][-A-Za-z0-9_#$@%/.]*`) must be written as a 'string'.
 fn rename_text(new_name: &str, site_quoted: bool) -> String {
     let bare_ok = match new_name.chars().next() {
-        Some(c) if c.is_ascii_alphabetic() || "_#$@%/.".contains(c) => {
-            new_name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || "_#$@%/.-".contains(c))
-        }
+        Some(c) if c.is_ascii_alphabetic() || "_#$@%/.".contains(c) => new_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_#$@%/.-".contains(c)),
         _ => false,
     };
     if site_quoted || !bare_ok {
@@ -246,8 +254,14 @@ impl LanguageServer for MqscServer {
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
                             legend: SemanticTokensLegend {
-                                token_types: analysis::TOKEN_TYPES.iter().map(|t| lsp_types::SemanticTokenType::from(*t)).collect(),
-                                token_modifiers: analysis::TOKEN_MODIFIERS.iter().map(|m| lsp_types::SemanticTokenModifier::from(*m)).collect(),
+                                token_types: analysis::TOKEN_TYPES
+                                    .iter()
+                                    .map(|t| lsp_types::SemanticTokenType::from(*t))
+                                    .collect(),
+                                token_modifiers: analysis::TOKEN_MODIFIERS
+                                    .iter()
+                                    .map(|m| lsp_types::SemanticTokenModifier::from(*m))
+                                    .collect(),
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
                             range: Some(true),
@@ -274,8 +288,11 @@ impl LanguageServer for MqscServer {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         crate::tlog!("didChangeConfiguration: settings {}", params.settings);
-        *self.settings.write().unwrap() =
-            if params.settings.is_null() { None } else { Some(params.settings) };
+        *self.settings.write().unwrap() = if params.settings.is_null() {
+            None
+        } else {
+            Some(params.settings)
+        };
         // severities may have changed: republish everything we know about
         let uris: Vec<Url> = self.docs.read().unwrap().keys().cloned().collect();
         for uri in uris {
@@ -297,7 +314,11 @@ impl LanguageServer for MqscServer {
         );
         self.docs.write().unwrap().insert(
             uri.clone(),
-            Doc { text, tree: Mutex::new(tree), defs },
+            Doc {
+                text,
+                tree: Mutex::new(tree),
+                defs,
+            },
         );
         self.refresh(&uri).await;
         // T-17: this document's DEFINEs change the hints of every other
@@ -323,7 +344,11 @@ impl LanguageServer for MqscServer {
         );
         self.docs.write().unwrap().insert(
             uri.clone(),
-            Doc { text, tree: Mutex::new(tree), defs },
+            Doc {
+                text,
+                tree: Mutex::new(tree),
+                defs,
+            },
         );
         // Sibling documents are deliberately NOT re-analysed on every keystroke
         // (O(open documents) per change); their cross-file hints refresh on
@@ -374,7 +399,12 @@ impl LanguageServer for MqscServer {
                 return Ok(Some(actions));
             }
         }
-        for d in p.context.diagnostics.iter().filter(|d| d.source.as_deref() == Some("mqsc")) {
+        for d in p
+            .context
+            .diagnostics
+            .iter()
+            .filter(|d| d.source.as_deref() == Some("mqsc"))
+        {
             let fixes = match d
                 .data
                 .as_ref()
@@ -393,7 +423,10 @@ impl LanguageServer for MqscServer {
                 let mut changes = HashMap::new();
                 changes.insert(
                     p.text_document.uri.clone(),
-                    vec![TextEdit { range: d.range, new_text: new_text.to_string() }],
+                    vec![TextEdit {
+                        range: d.range,
+                        new_text: new_text.to_string(),
+                    }],
                 );
                 let preferred = first_for_this_diag;
                 first_for_this_diag = false;
@@ -401,7 +434,10 @@ impl LanguageServer for MqscServer {
                     title: format!("Change to `{new_text}`"),
                     kind: Some(CodeActionKind::QUICKFIX),
                     diagnostics: Some(vec![d.clone()]),
-                    edit: Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
                     is_preferred: Some(preferred),
                     ..Default::default()
                 }));
@@ -433,7 +469,9 @@ impl LanguageServer for MqscServer {
     ) -> RpcResult<Option<Vec<DocumentHighlight>>> {
         let uri = &p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
-        self.with_doc(uri, |text, tree| Ok(Some(analysis::highlights(text, tree, pos))))
+        self.with_doc(uri, |text, tree| {
+            Ok(Some(analysis::highlights(text, tree, pos)))
+        })
     }
 
     /// T-16/T-17: jump from any use of an object name to its DEFINE — across
@@ -455,7 +493,13 @@ impl LanguageServer for MqscServer {
         if locs.is_empty() {
             return Ok(None);
         }
-        locs.sort_by_key(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character));
+        locs.sort_by_key(|l| {
+            (
+                l.uri.to_string(),
+                l.range.start.line,
+                l.range.start.character,
+            )
+        });
         let response = if locs.len() == 1 {
             GotoDefinitionResponse::Scalar(locs.pop().unwrap())
         } else {
@@ -475,7 +519,13 @@ impl LanguageServer for MqscServer {
         // every site of the name, definitions included (clients honour
         // includeDeclaration themselves)
         let mut locs = self.sites_of_name(&name, None);
-        locs.sort_by_key(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character));
+        locs.sort_by_key(|l| {
+            (
+                l.uri.to_string(),
+                l.range.start.line,
+                l.range.start.character,
+            )
+        });
         Ok(Some(locs))
     }
 
@@ -488,7 +538,9 @@ impl LanguageServer for MqscServer {
         let pos = p.text_document_position.position;
         let new_name = p.new_name;
         if new_name.is_empty() {
-            return Err(tower_lsp::jsonrpc::Error::invalid_params("new name is empty"));
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "new name is empty",
+            ));
         }
         let name = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
@@ -515,16 +567,19 @@ impl LanguageServer for MqscServer {
                 changes.insert(u.clone(), edits);
             }
         }
-        Ok(Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }))
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
     }
 
     /// T-20: every object DEFINEd in every open document, grouped in the
     /// client's outline by their object type (container_name).
     /// (tower-lsp names the `workspace/symbol` handler `symbol`.)
-    async fn symbol(
-        &self,
-        p: WorkspaceSymbolParams,
-    ) -> RpcResult<Option<Vec<SymbolInformation>>> {
+    /// `deprecated` stays None: lsp-types 0.94 requires the field in the
+    /// struct literal even though tags supersede it.
+    #[allow(deprecated)]
+    async fn symbol(&self, p: WorkspaceSymbolParams) -> RpcResult<Option<Vec<SymbolInformation>>> {
         let query = p.query.to_ascii_uppercase();
         let mut out = Vec::new();
         let docs = self.docs.read().unwrap();
@@ -540,7 +595,10 @@ impl LanguageServer for MqscServer {
                     kind: SymbolKind::METHOD, // matches the documentSymbol kinds
                     tags: None,
                     deprecated: None,
-                    location: Location { uri: uri.clone(), range: s.range },
+                    location: Location {
+                        uri: uri.clone(),
+                        range: s.range,
+                    },
                     container_name: s.defines.clone(),
                 });
             }

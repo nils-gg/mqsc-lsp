@@ -50,7 +50,10 @@ fn cases() -> Vec<(String, String, String)> {
                 j += 1;
             }
             if j >= lines.len() {
-                panic!("{}: dangling '=' separator without a closing pair", path.display());
+                panic!(
+                    "{}: dangling '=' separator without a closing pair",
+                    path.display()
+                );
             }
             let title = lines[t0..j].join(" ").trim().to_string();
             // source up to the '-' separator
@@ -104,7 +107,12 @@ fn norm(sexp: &str) -> Vec<String> {
     }
     toks.into_iter()
         .filter(|t| !t.starts_with('"')) // anonymous nodes ("+", "\"\"")
-        .filter(|t| !(t.ends_with(':') && t[..t.len() - 1].chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')))
+        .filter(|t| {
+            !(t.ends_with(':')
+                && t[..t.len() - 1]
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-'))
+        })
         .collect()
 }
 
@@ -112,7 +120,11 @@ fn assert_clean(n: Node<'_>, title: &str, src: &str) {
     assert!(
         n.kind() != "ERROR" && !n.is_missing(),
         "corpus case {title:?} regressed: parse produced {} at {}\nsource: {src:?}",
-        if n.kind() == "ERROR" { "an ERROR node" } else { "a MISSING node" },
+        if n.kind() == "ERROR" {
+            "an ERROR node"
+        } else {
+            "a MISSING node"
+        },
         n.start_position(),
     );
     for i in 0..n.child_count() {

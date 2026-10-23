@@ -243,10 +243,8 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn isolated_init(tag: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "mqsc-lsp-log-test-{}-{tag}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("mqsc-lsp-log-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         init(&path).expect("init log file");
         path
@@ -293,13 +291,18 @@ mod tests {
         }
     }
 
+    // The std-guard-across-await is deliberate: it serialises two tests that
+    // share the process-global log target for their whole body, awaits included.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn panicking_handler_becomes_internal_error_not_a_dead_server() {
         let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let path = isolated_init("panic");
         let mut svc = Observed::new(Panicky);
 
-        let req = Request::build("textDocument/hover").id(Id::Number(7)).finish();
+        let req = Request::build("textDocument/hover")
+            .id(Id::Number(7))
+            .finish();
         let resp = svc
             .call(req)
             .await
@@ -307,9 +310,17 @@ mod tests {
             .expect("requests get an answer");
         let (_id, body) = resp.into_parts();
         let err = body.expect_err("panicked request must be an error response");
-        assert!(matches!(err.code, ErrorCode::InternalError), "{:?}", err.code);
         assert!(
-            err.data.as_ref().and_then(|v| v.as_str()).unwrap_or("").contains("boom in handler"),
+            matches!(err.code, ErrorCode::InternalError),
+            "{:?}",
+            err.code
+        );
+        assert!(
+            err.data
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .contains("boom in handler"),
             "{err:?}"
         );
 
@@ -318,7 +329,10 @@ mod tests {
         assert!(svc.call(notif).await.unwrap().is_none());
 
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("PANIC while polling `textDocument/hover`"), "{text}");
+        assert!(
+            text.contains("PANIC while polling `textDocument/hover`"),
+            "{text}"
+        );
         assert!(
             text.contains("PANIC while polling `textDocument/didChange`"),
             "{text}"

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 fn main() {
-    let grammar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../grammars/tree-sitter-mqsc/src");
+    let grammar =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../grammars/tree-sitter-mqsc/src");
 
     let mut build = cc::Build::new();
     build

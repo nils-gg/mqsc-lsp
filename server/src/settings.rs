@@ -52,7 +52,10 @@ pub fn apply_diagnostic_settings(diags: &mut Vec<Diagnostic>, map: &Value) {
             Some(NumberOrString::Number(c)) => c,
             _ => return true,
         };
-        let val = match map.get(diag_name(code)).or_else(|| map.get(&code.to_string())) {
+        let val = match map
+            .get(diag_name(code))
+            .or_else(|| map.get(code.to_string()))
+        {
             Some(v) => v,
             None => return true,
         };
@@ -123,7 +126,11 @@ mod tests {
         apply_diagnostic_settings(&mut d, &json!({"NOT_A_CODE": "off"}));
         assert_eq!(d.len(), 1);
         apply_diagnostic_settings(&mut d, &json!({"12": "purple"}));
-        assert_eq!(d[0].severity, Some(DiagnosticSeverity::HINT), "bad severity must not mutate");
+        assert_eq!(
+            d[0].severity,
+            Some(DiagnosticSeverity::HINT),
+            "bad severity must not mutate"
+        );
     }
 
     #[test]

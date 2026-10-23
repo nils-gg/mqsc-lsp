@@ -35,12 +35,10 @@ async fn main() -> Result<()> {
                 diag_overrides.push((k.to_string(), v.to_string()));
             }
             "--settings" => {
-                settings_file =
-                    Some(args.next().context("expected JSON file after --settings")?);
+                settings_file = Some(args.next().context("expected JSON file after --settings")?);
             }
             "--log-file" => {
-                log_file =
-                    Some(args.next().context("expected file path after --log-file")?);
+                log_file = Some(args.next().context("expected file path after --log-file")?);
             }
             "--version" | "-V" => {
                 println!("mqsc-lsp {}", env!("CARGO_PKG_VERSION"));
@@ -90,9 +88,10 @@ async fn main() -> Result<()> {
                 .map(|p| {
                     let text = std::fs::read_to_string(p)
                         .with_context(|| format!("cannot read settings {p}"))?;
-                    anyhow::Ok(serde_json::from_str::<serde_json::Value>(&text).with_context(
-                        || format!("settings {p} is not valid JSON"),
-                    )?)
+                    anyhow::Ok(
+                        serde_json::from_str::<serde_json::Value>(&text)
+                            .with_context(|| format!("settings {p} is not valid JSON"))?,
+                    )
                 })
                 .transpose()?,
         };
@@ -123,7 +122,7 @@ fn parse_listen(spec: &str) -> Result<(IpAddr, u16)> {
 }
 
 async fn serve_stdio() -> Result<()> {
-    let (service, socket) = LspService::new(|client| MqscServer::new(client));
+    let (service, socket) = LspService::new(MqscServer::new);
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(mqsc_lsp::telemetry::Observed::new(service))
         .await;
@@ -140,7 +139,7 @@ async fn serve_tcp(host: IpAddr, port: u16) -> Result<()> {
         eprintln!("connection from {peer}");
         tokio::spawn(async move {
             let (read, write) = tokio::io::split(stream);
-            let (service, socket) = LspService::new(|client| MqscServer::new(client));
+            let (service, socket) = LspService::new(MqscServer::new);
             Server::new(read, write, socket)
                 .serve(mqsc_lsp::telemetry::Observed::new(service))
                 .await;

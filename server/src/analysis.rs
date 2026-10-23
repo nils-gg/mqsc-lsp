@@ -61,7 +61,10 @@ impl<'a> Lines<'a> {
         let line = self.line_of(offset);
         let start = self.starts[line];
         let col = utf16_len(&self.text[start..offset]);
-        Position { line: line as u32, character: col as u32 }
+        Position {
+            line: line as u32,
+            character: col as u32,
+        }
     }
 
     pub fn range(&self, start: usize, end: usize) -> Range {
@@ -91,7 +94,7 @@ impl<'a> Lines<'a> {
 }
 
 fn utf16_len(s: &str) -> usize {
-    s.chars().map(|c| c.len_utf16() as usize).sum()
+    s.chars().map(|c| c.len_utf16()).sum()
 }
 
 fn node_text<'a>(n: Node<'a>, src: &'a [u8]) -> &'a str {
@@ -301,8 +304,8 @@ pub fn analyze(
 
             if let Some(w) = &word_at {
                 let up = w.to_ascii_uppercase();
-                let looks_param =
-                    m.canon_verb(&up).is_none() && (m.known_params.contains(&up) || m.known_attrs.contains(&up));
+                let looks_param = m.canon_verb(&up).is_none()
+                    && (m.known_params.contains(&up) || m.known_attrs.contains(&up));
                 if looks_param {
                     if let Some(pw) = command_before(tree, off) {
                         let end_line = line_of(&lines, pw.end_byte());
@@ -372,7 +375,7 @@ fn first_word(n: Node<'_>, src: &[u8]) -> Option<String> {
     None
 }
 
-fn command_before<'t>(tree: &'t Tree, byte_off: usize) -> Option<Node<'t>> {
+fn command_before(tree: &Tree, byte_off: usize) -> Option<Node<'_>> {
     let root = tree.root_node();
     let mut last = None;
     let mut cursor = root.walk();
@@ -427,10 +430,14 @@ pub fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
             Some(Item::Word(n)) => Some(node_text(*n, src)),
             _ => None,
         };
-        let Some(i) = m.resolve(verb, obj_txt) else { continue };
+        let Some(i) = m.resolve(verb, obj_txt) else {
+            continue;
+        };
         let obj = m.entry(i).object.to_string();
         // the object-name group is the first argument group after the verb
-        let Some(Item::Arg(g)) = items.get(2) else { continue };
+        let Some(Item::Arg(g)) = items.get(2) else {
+            continue;
+        };
         for v in value_nodes(*g) {
             for name in value_name_words(v, src) {
                 defs.any_defines = true;
@@ -491,9 +498,11 @@ enum ObjRef {
 
 fn object_ref_param(pname: &str, cmd_obj: &str) -> Option<ObjRef> {
     match pname {
-        "LIKE" => {
-            Some(if cmd_obj.starts_with('Q') { ObjRef::QueueFamily } else { ObjRef::SameType })
-        }
+        "LIKE" => Some(if cmd_obj.starts_with('Q') {
+            ObjRef::QueueFamily
+        } else {
+            ObjRef::SameType
+        }),
         "TARGET" | "TGTQ" | "XMITQ" | "MODEL" | "MDURMDL" | "MNDURMDL" | "FROMQ" | "TOQLOCAL"
         | "TOQALIAS" | "TOQNAME" => Some(ObjRef::QueueFamily),
         _ => None,
@@ -509,7 +518,11 @@ fn obj_ref_matches(r: ObjRef, def_obj: &str, cmd_obj: &str) -> bool {
 
 /// Defined names matching a reference family, as (object type, name) pairs.
 /// `None` means every defined name.
-fn names_for<'a>(defs: &'a Definitions, r: Option<ObjRef>, cmd_obj: &str) -> Vec<(&'a str, &'a str)> {
+fn names_for<'a>(
+    defs: &'a Definitions,
+    r: Option<ObjRef>,
+    cmd_obj: &str,
+) -> Vec<(&'a str, &'a str)> {
     defs.by_obj
         .iter()
         .filter(|(obj, _)| match r {
@@ -568,7 +581,9 @@ fn check_obj_ref(
     defs: &Definitions,
     d: &mut Diags,
 ) {
-    let Some(r) = object_ref_param(pname, cmd_obj) else { return };
+    let Some(r) = object_ref_param(pname, cmd_obj) else {
+        return;
+    };
     if !defs.any_defines || !defs.arms(r, cmd_obj) {
         return;
     }
@@ -589,7 +604,11 @@ fn check_obj_ref(
                 format!(
                     "'{name}' is not DEFINEd in {}; it must already exist in the \
                      queue manager (or is a typo)",
-                    if defs.from_other_files { "this script or the other open documents" } else { "this script" }
+                    if defs.from_other_files {
+                        "this script or the other open documents"
+                    } else {
+                        "this script"
+                    }
                 ),
             );
         }
@@ -646,7 +665,9 @@ impl ObjectIndex {
     }
 
     pub fn definitions_of<'a>(&'a self, name_upper: &'a str) -> Vec<&'a NameSite> {
-        self.sites_of(name_upper).filter(|s| s.defines.is_some()).collect()
+        self.sites_of(name_upper)
+            .filter(|s| s.defines.is_some())
+            .collect()
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = &NameSite> {
@@ -704,7 +725,9 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
         if cmd.kind() != "command" {
             continue;
         }
-        let Some((verb, obj_txt, e)) = command_context(cmd, src, m) else { continue };
+        let Some((verb, obj_txt, e)) = command_context(cmd, src, m) else {
+            continue;
+        };
         let is_define = m.canon_verb(verb) == Some("DEFINE");
         let _ = obj_txt;
         let items = command_items(cmd);
@@ -720,7 +743,10 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
                     // a parameter's, taken from its owner word.
                     let positional = i == 2 && matches!(items.get(1), Some(Item::Word(_)));
                     let ref_param = !positional
-                        && owner.as_deref().and_then(|w| object_ref_param(w, e.object)).is_some();
+                        && owner
+                            .as_deref()
+                            .and_then(|w| object_ref_param(w, e.object))
+                            .is_some();
                     if !(positional || ref_param) {
                         continue;
                     }
@@ -832,15 +858,22 @@ fn check_command(
                     format!(
                         "'{up_w}' is not a command; it is a {}. If this line continues the \
                          command above, end the previous line with '+' or '-'",
-                        if m.known_params.contains(&up_w) { "parameter" } else { "attribute" }
+                        if m.known_params.contains(&up_w) {
+                            "parameter"
+                        } else {
+                            "attribute"
+                        }
                     ),
                 );
             } else {
-                let sugs = model::suggest(verb_txt, m.all_verbs().into_iter(), 3);
+                let sugs = model::suggest(verb_txt, m.all_verbs(), 3);
                 let msg = if sugs.is_empty() {
                     format!("Unknown command '{verb_txt}'")
                 } else {
-                    format!("Unknown command '{verb_txt}'; did you mean {}?", sugs.join(", "))
+                    format!(
+                        "Unknown command '{verb_txt}'; did you mean {}?",
+                        sugs.join(", ")
+                    )
                 };
                 let fixes = sugs.iter().map(|s| s.to_string()).collect();
                 d.push_fixes(
@@ -858,7 +891,16 @@ fn check_command(
 
     let multi_pos = matches!(
         e.verb,
-        "DISPLAY" | "START" | "STOP" | "CLEAR" | "RESET" | "MOVE" | "PING" | "REFRESH" | "RESUME" | "SUSPEND"
+        "DISPLAY"
+            | "START"
+            | "STOP"
+            | "CLEAR"
+            | "RESET"
+            | "MOVE"
+            | "PING"
+            | "REFRESH"
+            | "RESUME"
+            | "SUSPEND"
     );
     let positional_required = matches!(e.verb, "DEFINE" | "ALTER" | "DELETE");
 
@@ -880,22 +922,21 @@ fn check_command(
                 // repeated DISPLAY attributes are legal MQSC and must not
                 // trigger it; `used` still records every word so the
                 // missing-required check below sees what was supplied.
-                if e.by_name.contains_key(&up) {
-                    if used.contains(&up) {
-                        d.push(
-                            lines.range(n.start_byte(), n.end_byte()),
-                            DiagnosticSeverity::ERROR,
-                            CODE_DUPLICATE,
-                            format!("Parameter {up} appears more than once; MQSC allows it once"),
-                        );
-                    }
+                if e.by_name.contains_key(&up) && used.contains(&up) {
+                    d.push(
+                        lines.range(n.start_byte(), n.end_byte()),
+                        DiagnosticSeverity::ERROR,
+                        CODE_DUPLICATE,
+                        format!("Parameter {up} appears more than once; MQSC allows it once"),
+                    );
                 }
                 used.insert(up.clone());
 
                 if let Some(&pi) = e.by_name.get(&up) {
                     let p = &e.params[pi];
-                    let wants_group = !matches!(p.kind, ValueKind::Flag | ValueKind::Star | ValueKind::Free)
-                        || matches!(p.kind, ValueKind::Enum(_));
+                    let wants_group =
+                        !matches!(p.kind, ValueKind::Flag | ValueKind::Star | ValueKind::Free)
+                            || matches!(p.kind, ValueKind::Enum(_));
                     if wants_group && !matches!(p.kind, ValueKind::Flag) {
                         pending = Some((up.clone(), *n));
                     }
@@ -927,9 +968,17 @@ fn check_command(
                     .collect();
                 let sugs = model::suggest(&up, pool.iter().copied(), 3);
                 let msg = if sugs.is_empty() {
-                    format!("'{w}' is not a parameter, attribute, or object name of {} {}", e.verb, e.object)
+                    format!(
+                        "'{w}' is not a parameter, attribute, or object name of {} {}",
+                        e.verb, e.object
+                    )
                 } else {
-                    format!("'{w}' is not a parameter of {} {}; did you mean {}?", e.verb, e.object, sugs.join(", "))
+                    format!(
+                        "'{w}' is not a parameter of {} {}; did you mean {}?",
+                        e.verb,
+                        e.object,
+                        sugs.join(", ")
+                    )
                 };
                 let fixes = sugs.iter().map(|s| s.to_string()).collect();
                 d.push_fixes(
@@ -999,7 +1048,11 @@ fn check_command(
                 };
                 if let Some(&pi) = e.by_name.get(&up) {
                     let p = &e.params[pi];
-                    let vs = if n.kind() == "value" { vec![*n] } else { value_nodes(*n) };
+                    let vs = if n.kind() == "value" {
+                        vec![*n]
+                    } else {
+                        value_nodes(*n)
+                    };
                     check_values(p, &up, &vs, src, lines, d);
                     check_obj_ref(&up, e.object, &vs, src, lines, defs, d);
                 }
@@ -1031,14 +1084,21 @@ fn check_command(
                 && !matches!(p.name.as_str(), "CMDSCOPE" | "QSGDISP")
         })
         .collect();
-    let missing_one = if missing.len() == 1 { missing } else { Vec::new() };
+    let missing_one = if missing.len() == 1 {
+        missing
+    } else {
+        Vec::new()
+    };
     for p in missing_one {
         {
             d.push(
                 lines.range(cmd.start_byte(), verb_node.end_byte()),
                 DiagnosticSeverity::WARNING,
                 CODE_MISSING_REQUIRED,
-                format!("{} {} usually requires parameter {}", e.verb, e.object, p.name),
+                format!(
+                    "{} {} usually requires parameter {}",
+                    e.verb, e.object, p.name
+                ),
             );
         }
     }
@@ -1072,7 +1132,14 @@ fn value_nodes(arg: Node<'_>) -> Vec<Node<'_>> {
     out
 }
 
-fn check_values(p: &Param, up: &str, values: &[Node<'_>], src: &[u8], lines: &Lines, d: &mut Diags) {
+fn check_values(
+    p: &Param,
+    up: &str,
+    values: &[Node<'_>],
+    src: &[u8],
+    lines: &Lines,
+    d: &mut Diags,
+) {
     for v in values {
         let mut has_wildcard = false;
         let mut has_string = false;
@@ -1095,7 +1162,11 @@ fn check_values(p: &Param, up: &str, values: &[Node<'_>], src: &[u8], lines: &Li
 
         match &p.kind {
             ValueKind::Integer => {
-                let ok = has_int && !has_string && !has_word.map(|w| !w.chars().all(|c| c.is_ascii_digit())).unwrap_or(false);
+                let ok = has_int
+                    && !has_string
+                    && !has_word
+                        .map(|w| !w.chars().all(|c| c.is_ascii_digit()))
+                        .unwrap_or(false);
                 if !ok {
                     d.push(
                         lines.range(v.start_byte(), v.end_byte()),
@@ -1213,7 +1284,11 @@ fn check_question_wildcards(tree: &Tree, src: &[u8], lines: &Lines, m: &Model, d
 
 // ------------------------------------------------------------------- hover
 
-fn command_context<'t>(cmd: Node<'t>, src: &'t [u8], m: &'t Model) -> Option<(&'t str, Option<&'t str>, &'t model::Command)> {
+fn command_context<'t>(
+    cmd: Node<'t>,
+    src: &'t [u8],
+    m: &'t Model,
+) -> Option<(&'t str, Option<&'t str>, &'t model::Command)> {
     let items = command_items(cmd);
     let verb = match items.first() {
         Some(Item::Verb(n)) => node_text(*n, src),
@@ -1242,7 +1317,7 @@ pub fn hover(
         return None;
     }
     let cmd = ancestor_of(node, "command")?;
-    let (verb, obj, e) = command_context(cmd, src, m)?;
+    let (verb, _obj, e) = command_context(cmd, src, m)?;
 
     let mk = |value: String| Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -1258,7 +1333,10 @@ pub fn hover(
     // otherwise misread names that collide with attribute words.
     let idx = object_index(text, tree, m);
     if let Some(site) = idx.site_at(pos) {
-        let uses = idx.sites_of(&site.name).filter(|s| s.defines.is_none()).count();
+        let uses = idx
+            .sites_of(&site.name)
+            .filter(|s| s.defines.is_none())
+            .count();
         let defs = idx.definitions_of(&site.name);
         let md = if defs.is_empty() {
             // not defined in this document — is it DEFINEd in another open
@@ -1273,7 +1351,11 @@ pub fn hover(
                         site.name,
                         ext[0].1 + 1,
                         ext[0].0,
-                        if ext.len() > 1 { format!(" — {} DEFINE locations there", ext.len()) } else { String::new() },
+                        if ext.len() > 1 {
+                            format!(" — {} DEFINE locations there", ext.len())
+                        } else {
+                            String::new()
+                        },
                         uses,
                         if uses == 1 { "use" } else { "uses" },
                     )
@@ -1337,7 +1419,12 @@ pub fn hover(
             md.push_str(&format!(
                 "\n\n_Displayable attributes ({})_: `{}`{}",
                 e.attrs.len(),
-                e.attrs.iter().take(14).cloned().collect::<Vec<_>>().join(" "),
+                e.attrs
+                    .iter()
+                    .take(14)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 if e.attrs.len() > 14 { " …" } else { "" }
             ));
         }
@@ -1378,7 +1465,11 @@ pub fn hover(
         if let Some(dv) = &p.default {
             md.push_str(&format!("*Default:* `{dv}`\n\n"));
         }
-        md.push_str(if p.optional { "_Optional._\n\n" } else { "_Required by the reference diagram._\n\n" });
+        md.push_str(if p.optional {
+            "_Optional._\n\n"
+        } else {
+            "_Required by the reference diagram._\n\n"
+        });
         let doc = doc_for(m, p, e.object);
         if !doc.is_empty() {
             md.push_str(&doc);
@@ -1390,7 +1481,10 @@ pub fn hover(
     }
     if e.attr_set.contains(&pname) {
         let doc = m.param_doc(&pname, e.object).unwrap_or("");
-        let mut md = format!("**Displayable attribute — `{pname}`**\n\n_{} {}_\n\n", verb, e.object);
+        let mut md = format!(
+            "**Displayable attribute — `{pname}`**\n\n_{} {}_\n\n",
+            verb, e.object
+        );
         if !doc.is_empty() {
             md.push_str(doc);
         }
@@ -1407,7 +1501,11 @@ fn doc_for(m: &Model, p: &Param, obj: &str) -> String {
     }
 }
 
-fn preceding_word<'t>(cmd: Node<'t>, before: Node<'_>, src: &'t [u8]) -> Option<(String, Node<'t>)> {
+fn preceding_word<'t>(
+    cmd: Node<'t>,
+    before: Node<'_>,
+    src: &'t [u8],
+) -> Option<(String, Node<'t>)> {
     let mut best = None;
     let mut cursor = cmd.walk();
     for c in cmd.named_children(&mut cursor) {
@@ -1432,7 +1530,11 @@ pub fn completions(
     let lines = Lines::new(text);
     let off = lines.offset(pos);
     let line = lines.line_start(pos.line as usize);
-    let end = lines.starts.get(pos.line as usize + 1).copied().unwrap_or(text.len());
+    let end = lines
+        .starts
+        .get(pos.line as usize + 1)
+        .copied()
+        .unwrap_or(text.len());
     let line_text = &text[line..end.min(text.len())];
     let col = off.saturating_sub(line).min(line_text.len());
     let before = &line_text[..col];
@@ -1533,7 +1635,10 @@ pub fn completions(
     }
 
     // object position: verb + one word, no groups yet
-    if items.len() <= 2 && matches!(items.get(1), Some(Item::Word(_))) && m.resolve(verb, word_at(&items, 1, src)).is_none() {
+    if items.len() <= 2
+        && matches!(items.get(1), Some(Item::Word(_)))
+        && m.resolve(verb, word_at(&items, 1, src)).is_none()
+    {
         // word under the cursor is the object type being typed
         let mut out: Vec<CompletionItem> = m
             .objects_for(verb)
@@ -1552,7 +1657,7 @@ pub fn completions(
         return out;
     }
 
-    let (verb, obj, e) = match command_context(cmd, src, m) {
+    let (_verb, obj, e) = match command_context(cmd, src, m) {
         Some(x) => x,
         None => return vec![],
     };
@@ -1575,10 +1680,16 @@ pub fn completions(
             continue;
         }
         let (insert, kind, fmt) = match &p.kind {
-            ValueKind::Flag => (p.name.clone(), CompletionItemKind::KEYWORD, InsertTextFormat::PLAIN_TEXT),
-            _ if !snippet => {
-                (format!("{}(", p.name), CompletionItemKind::PROPERTY, InsertTextFormat::PLAIN_TEXT)
-            }
+            ValueKind::Flag => (
+                p.name.clone(),
+                CompletionItemKind::KEYWORD,
+                InsertTextFormat::PLAIN_TEXT,
+            ),
+            _ if !snippet => (
+                format!("{}(", p.name),
+                CompletionItemKind::PROPERTY,
+                InsertTextFormat::PLAIN_TEXT,
+            ),
             _ => (
                 format!("{}({})", p.name, snippet_body(p)),
                 CompletionItemKind::PROPERTY,
@@ -1588,7 +1699,10 @@ pub fn completions(
         let detail = match &p.kind {
             ValueKind::Flag => "keyword".to_string(),
             ValueKind::Enum(vals) => {
-                format!("values: {}", vals.iter().take(4).cloned().collect::<Vec<_>>().join("/"))
+                format!(
+                    "values: {}",
+                    vals.iter().take(4).cloned().collect::<Vec<_>>().join("/")
+                )
             }
             ValueKind::Integer => "integer".into(),
             ValueKind::Str => "string".into(),
@@ -1731,13 +1845,17 @@ fn word_fragment(before: &str) -> String {
     // The fragment is the trailing run of word-constituent characters at the
     // cursor. If the cursor sits after whitespace (or punctuation), there is no
     // active fragment and everything should be offered.
-    if before.chars().next_back().map_or(true, |c| !(c.is_alphanumeric() || matches!(c, '_' | '#' | '@' | '%' | '/' | '.' | '-'))) {
+    if before.chars().next_back().map_or(true, |c| {
+        !(c.is_alphanumeric() || matches!(c, '_' | '#' | '@' | '%' | '/' | '.' | '-'))
+    }) {
         return String::new();
     }
     let t = before;
     let end = t
         .char_indices()
-        .rfind(|(_, c)| !(c.is_alphanumeric() || matches!(c, '_' | '#' | '@' | '%' | '/' | '.' | '-')))
+        .rfind(|(_, c)| {
+            !(c.is_alphanumeric() || matches!(c, '_' | '#' | '@' | '%' | '/' | '.' | '-'))
+        })
         .map(|(i, c)| i + c.len_utf8())
         .unwrap_or(0);
     t[end..].to_string()
@@ -1788,6 +1906,9 @@ fn argument_containing(tree: &Tree, off: usize) -> Option<Node<'_>> {
 
 // ------------------------------------------------------------ symbols/folding
 
+// lsp-types 0.94 still requires the deprecated `deprecated` field in the
+// DocumentSymbol struct literal; setting `tags` does not remove it.
+#[allow(deprecated)]
 pub fn symbols(text: &str, tree: &Tree) -> Vec<DocumentSymbol> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
@@ -1930,15 +2051,15 @@ pub fn highlights(text: &str, tree: &Tree, pos: Position) -> Vec<DocumentHighlig
 // ---------------------------------------------------------- semantic tokens
 
 pub const TOKEN_TYPES: &[&str] = &[
-    "keyword",  // 0 command verb
-    "type",     // 1 object type
-    "property", // 2 parameter name
-    "variable", // 3 object name / positional value
+    "keyword",    // 0 command verb
+    "type",       // 1 object type
+    "property",   // 2 parameter name
+    "variable",   // 3 object name / positional value
     "enumMember", // 4 enumerated keyword value
-    "string",   // 5 quoted string
-    "number",   // 6 integer
-    "comment",  // 7 comment
-    "regexp",   // 8 wildcard
+    "string",     // 5 quoted string
+    "number",     // 6 integer
+    "comment",    // 7 comment
+    "regexp",     // 8 wildcard
 ];
 
 pub const TOKEN_MODIFIERS: &[&str] = &[
@@ -1964,7 +2085,7 @@ fn raw_tokens(text: &str, tree: &Tree) -> Vec<(usize, usize, usize, u32, u32)> {
         let items = command_items(node);
         // parameter words: any Word followed (in items order) by an Arg, plus
         // bare flag/attr words resolved against the model
-        let cmd_ctx = command_context(node, src, &Model::load());
+        let cmd_ctx = command_context(node, src, Model::load());
         let mut obj_done = false;
         // reference default of the parameter owning the group we are in
         let mut owner_default: Option<String> = None;
@@ -1979,10 +2100,7 @@ fn raw_tokens(text: &str, tree: &Tree) -> Vec<(usize, usize, usize, u32, u32)> {
                         emit(*n, src, &lines, 1, 0, &mut raw); // object type
                         continue;
                     }
-                    let e = match cmd_ctx {
-                        Some((_, _, e)) => Some(e),
-                        None => None,
-                    };
+                    let e = cmd_ctx.map(|(_, _, e)| e);
                     let is_param = match e {
                         Some(e) => {
                             e.by_name.contains_key(&up)
@@ -2011,7 +2129,6 @@ fn raw_tokens(text: &str, tree: &Tree) -> Vec<(usize, usize, usize, u32, u32)> {
                     walk_group(*n, src, &lines, owner_default.as_deref(), &mut raw);
                     owner_default = None;
                 }
-                Item::Verb(_) => {}
             }
         }
     }
@@ -2082,7 +2199,11 @@ fn encode_tokens(
     let mut out = Vec::with_capacity(raw.len());
     for (line, col, len, ty, mods) in raw {
         let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { col - prev_char } else { col };
+        let delta_start = if delta_line == 0 {
+            col - prev_char
+        } else {
+            col
+        };
         out.push(SemanticToken {
             delta_line: delta_line as u32,
             delta_start: delta_start as u32,
@@ -2147,7 +2268,10 @@ mod tests {
         assert_eq!(l.pos(5), Position::new(1, 1));
         assert_eq!(l.pos(7), Position::new(2, 0));
         assert_eq!(l.line_start(1), 4);
-        assert_eq!(l.range(4, 6), Range::new(Position::new(1, 0), Position::new(1, 2)));
+        assert_eq!(
+            l.range(4, 6),
+            Range::new(Position::new(1, 0), Position::new(1, 2))
+        );
     }
 
     #[test]
@@ -2218,7 +2342,10 @@ mod tests {
 
     #[test]
     fn code06_duplicate_param() {
-        assert!(has("DEFINE QLOCAL(A) MAXDEPTH(1) MAXDEPTH(2)\n", CODE_DUPLICATE));
+        assert!(has(
+            "DEFINE QLOCAL(A) MAXDEPTH(1) MAXDEPTH(2)\n",
+            CODE_DUPLICATE
+        ));
     }
 
     #[test]
@@ -2236,8 +2363,14 @@ mod tests {
             &Url::parse("file:///t.mqsc").unwrap(),
             &Definitions::default(),
         );
-        let d = diags.iter().find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)));
-        assert!(d.is_some(), "expected MISSING_CONT, got {:?}", codes("DESCR REPLACE\n"));
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)));
+        assert!(
+            d.is_some(),
+            "expected MISSING_CONT, got {:?}",
+            codes("DESCR REPLACE\n")
+        );
         assert!(d.unwrap().message.contains("parameter"));
     }
 
@@ -2291,7 +2424,11 @@ mod tests {
             "DEFINE SUB(S) TOPICSTR(a/b) EXPIRY(UNLIMITED)\n",
             "DEFINE SUB(S) TOPICSTR(a/b) EXPIRY(120)\n",
         ] {
-            assert!(!has(src, CODE_BAD_VALUE), "unexpected BAD_VALUE for {src:?}: {:?}", codes(src));
+            assert!(
+                !has(src, CODE_BAD_VALUE),
+                "unexpected BAD_VALUE for {src:?}: {:?}",
+                codes(src)
+            );
         }
     }
 
@@ -2317,7 +2454,10 @@ mod tests {
             .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE)))
             .expect("DISTL(yesx) must produce BAD_VALUE");
         assert_eq!(
-            d.data.as_ref().and_then(|v| v.pointer("/quickfixes/0")).and_then(|v| v.as_str()),
+            d.data
+                .as_ref()
+                .and_then(|v| v.pointer("/quickfixes/0"))
+                .and_then(|v| v.as_str()),
             Some("yes"),
             "quickfix must mirror the typed lowercase (data = {:?})",
             d.data
@@ -2335,7 +2475,10 @@ mod tests {
             .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE)))
             .expect("DISTL(YESX) must produce BAD_VALUE");
         assert_eq!(
-            d.data.as_ref().and_then(|v| v.pointer("/quickfixes/0")).and_then(|v| v.as_str()),
+            d.data
+                .as_ref()
+                .and_then(|v| v.pointer("/quickfixes/0"))
+                .and_then(|v| v.as_str()),
             Some("YES")
         );
     }
@@ -2383,7 +2526,7 @@ mod tests {
         assert_eq!(a[0].range.start.line, 0);
         assert!(a[1..].iter().all(|s| s.defines.is_none()));
         assert_eq!(a[2].range.start.line, 2); // TARGET(A)
-        // B: defined as QALIAS, used by DISPLAY on the next line
+                                              // B: defined as QALIAS, used by DISPLAY on the next line
         let b: Vec<_> = idx.sites_of("B").collect();
         assert_eq!(b.len(), 2, "{b:?}");
         assert_eq!(b[0].defines.as_deref(), Some("QALIAS"));
@@ -2404,11 +2547,16 @@ mod tests {
     fn quoted_name_site_spans_the_quotes() {
         let text = "DEFINE QALIAS(B) TARGET('A')\n";
         let idx = index_of(text);
-        let s = idx.site_at(Position::new(0, 25)).expect("cursor inside 'A'");
+        let s = idx
+            .site_at(Position::new(0, 25))
+            .expect("cursor inside 'A'");
         assert_eq!(s.name, "A");
         assert!(s.quoted);
         assert_eq!(s.word, "A");
-        assert_eq!(s.range, Range::new(Position::new(0, 24), Position::new(0, 27)));
+        assert_eq!(
+            s.range,
+            Range::new(Position::new(0, 24), Position::new(0, 27))
+        );
     }
 
     #[test]
@@ -2421,11 +2569,16 @@ mod tests {
             _ => panic!("expected markup"),
         };
         // on the definition itself
-        let h = hover(text, &tree, m, Position::new(0, 15), &Default::default()).expect("hover def");
+        let h =
+            hover(text, &tree, m, Position::new(0, 15), &Default::default()).expect("hover def");
         let md = md_of(h);
-        assert!(md.contains("QLOCAL") && md.contains("this is the definition"), "{md}");
+        assert!(
+            md.contains("QLOCAL") && md.contains("this is the definition"),
+            "{md}"
+        );
         // on the reference: names the defining line (1-based) and use count
-        let h = hover(text, &tree, m, Position::new(1, 29), &Default::default()).expect("hover use");
+        let h =
+            hover(text, &tree, m, Position::new(1, 29), &Default::default()).expect("hover use");
         let md = md_of(h);
         assert!(md.contains("DEFINEd at line 1"), "{md}");
         assert!(md.contains("1 use"), "{md}");
@@ -2451,18 +2604,27 @@ mod tests {
         let tree = parse(text);
         let uri = Url::parse("file:///a.mqsc").unwrap();
         let m = Model::load();
-        let is12 = |d: &Diagnostic| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT));
+        let is12 =
+            |d: &Diagnostic| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT));
         // alone: the hint fires on TARGET(GHOST)
         assert!(codes(text).contains(&CODE_UNDEFINED_OBJECT));
         // with a sibling document DEFINing GHOST: gone
         let diags = analyze(text, &tree, m, &uri, &sibling_defining("GHOST"));
-        assert!(!diags.iter().any(is12), "{:?}", diags.iter().map(|d| &d.message));
+        assert!(
+            !diags.iter().any(is12),
+            "{:?}",
+            diags.iter().map(|d| &d.message)
+        );
         // still hinted when the sibling defines something else — and then the
         // message widens its scope to the other documents
         let diags = analyze(text, &tree, m, &uri, &sibling_defining("OTHER"));
-        let d = diags.iter().find(|d| is12(*d)).expect("GHOST must still be hinted");
+        let d = diags
+            .iter()
+            .find(|d| is12(d))
+            .expect("GHOST must still be hinted");
         assert!(
-            d.message.contains("this script or the other open documents"),
+            d.message
+                .contains("this script or the other open documents"),
             "{}",
             d.message
         );
@@ -2474,7 +2636,10 @@ mod tests {
         let tree = parse(text);
         let m = Model::load();
         let mut ext: ExternalDefs = Default::default();
-        ext.insert("GHOST".into(), vec![("sibling.mqsc".to_string(), 7, "QLOCAL".to_string())]);
+        ext.insert(
+            "GHOST".into(),
+            vec![("sibling.mqsc".to_string(), 7, "QLOCAL".to_string())],
+        );
         // cursor inside GHOST (TARGET( sits at col 22, G at 24)
         let h = hover(text, &tree, m, Position::new(0, 25), &ext).expect("hover");
         let md = match h.contents {
@@ -2482,7 +2647,9 @@ mod tests {
             _ => panic!("expected markup"),
         };
         assert!(
-            md.contains("sibling.mqsc") && md.contains("line 8") && md.contains("another open document"),
+            md.contains("sibling.mqsc")
+                && md.contains("line 8")
+                && md.contains("another open document"),
             "{md}"
         );
         // without the sibling it falls back to the plain "not DEFINEd" text

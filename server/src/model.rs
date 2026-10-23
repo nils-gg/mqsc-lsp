@@ -87,7 +87,10 @@ impl RawModel {
     fn apply_overlay(&mut self, ov: Overlay) {
         for (verb, objs) in ov.commands {
             for (obj, entry) in objs {
-                self.commands.entry(verb.clone()).or_default().insert(obj, entry);
+                self.commands
+                    .entry(verb.clone())
+                    .or_default()
+                    .insert(obj, entry);
             }
         }
         for (key, p) in ov.patch {
@@ -109,7 +112,9 @@ impl RawModel {
                 }
             }
             for (pname, vals) in p.extend_enum {
-                let Some(slot) = entry.params.iter_mut().find(|e| e.name == pname) else { continue };
+                let Some(slot) = entry.params.iter_mut().find(|e| e.name == pname) else {
+                    continue;
+                };
                 for v in vals {
                     if !slot.values.contains(&v) {
                         slot.values.push(v);
@@ -174,9 +179,9 @@ pub struct Command {
 }
 
 static VERBS: &[&str] = &[
-    "ADD", "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY",
-    "MOVE", "PING", "RECOVER", "REFRESH", "RESET", "RESOLVE", "RESUME",
-    "RVERIFY", "SET", "START", "STOP", "SUSPEND",
+    "ADD", "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY", "MOVE", "PING",
+    "RECOVER", "REFRESH", "RESET", "RESOLVE", "RESUME", "RVERIFY", "SET", "START", "STOP",
+    "SUSPEND",
 ];
 
 /// Global, loaded model.
@@ -241,8 +246,8 @@ impl Model {
     pub fn load() -> &'static Model {
         static MODEL: OnceLock<Model> = OnceLock::new();
         MODEL.get_or_init(|| {
-            let mut raw: RawModel = serde_json::from_str(MODEL_JSON)
-                .expect("embedded mqsc-model.json must be valid");
+            let mut raw: RawModel =
+                serde_json::from_str(MODEL_JSON).expect("embedded mqsc-model.json must be valid");
             let overlay: Overlay = serde_json::from_str(OVERLAY_JSON)
                 .expect("embedded mqsc-overlay.json must be valid");
             raw.apply_overlay(overlay);
@@ -257,7 +262,8 @@ impl Model {
 
             // stable verb ordering for completion
             for (verb_s, objs) in raw.commands {
-                let verb: &'static str = match VERBS.iter().copied().find(|v| *v == verb_s.as_str()) {
+                let verb: &'static str = match VERBS.iter().copied().find(|v| *v == verb_s.as_str())
+                {
                     Some(v) => v,
                     None => continue,
                 };
@@ -323,7 +329,11 @@ impl Model {
             // Manual MQSC object-type aliases that the reference documents
             // only in prose notes:
             //  DISPLAY QLOCAL/QMODEL/... == DISPLAY QUEUE TYPE(...)
-            if let Some(q) = commands.get("DISPLAY").and_then(|m| m.get("QUEUE")).copied() {
+            if let Some(q) = commands
+                .get("DISPLAY")
+                .and_then(|m| m.get("QUEUE"))
+                .copied()
+            {
                 for alias in ["QLOCAL", "QMODEL", "QALIAS", "QREMOTE", "QCLUSTER", "Q"] {
                     commands
                         .get_mut("DISPLAY")
@@ -365,7 +375,11 @@ impl Model {
                 if let Some(&i) = objs.get(o) {
                     return Some(i);
                 }
-                if let Some(i) = self.obj_syn.get(&(canon, o.clone())).and_then(|real| objs.get(real.as_str()).copied()) {
+                if let Some(i) = self
+                    .obj_syn
+                    .get(&(canon, o.clone()))
+                    .and_then(|real| objs.get(real.as_str()).copied())
+                {
                     return Some(i);
                 }
                 if let Some(real) = self.global_obj_syn.get(o) {
@@ -387,7 +401,9 @@ impl Model {
     }
 
     pub fn objects_for(&self, verb: &str) -> Vec<&str> {
-        let Some(canon) = self.canon_verb(verb) else { return Vec::new() };
+        let Some(canon) = self.canon_verb(verb) else {
+            return Vec::new();
+        };
         let mut out: Vec<&str> = self
             .commands
             .get(canon)
@@ -401,7 +417,9 @@ impl Model {
     /// mention `object`.
     pub fn param_doc(&self, name: &str, object: &str) -> Option<&str> {
         for cand in [name.to_string(), strip_no(name)] {
-            let Some(docs) = self.param_docs.get(&cand) else { continue };
+            let Some(docs) = self.param_docs.get(&cand) else {
+                continue;
+            };
             let mut any = None;
             for (ctx, d) in docs {
                 if d.is_empty() {
@@ -468,7 +486,11 @@ pub fn distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-pub fn suggest<'a, I: IntoIterator<Item = &'a str>>(word: &str, pool: I, max: usize) -> Vec<&'a str> {
+pub fn suggest<'a, I: IntoIterator<Item = &'a str>>(
+    word: &str,
+    pool: I,
+    max: usize,
+) -> Vec<&'a str> {
     let w = word.to_ascii_uppercase();
     let mut hits: Vec<(usize, &str)> = pool
         .into_iter()
@@ -528,9 +550,15 @@ mod tests {
         // far-away words are not suggested (threshold = max(2, len/3))
         assert!(suggest("ZZZZZZZ", pool, 3).is_empty());
         // near miss survives, other candidates are out of range
-        assert_eq!(suggest("MAXDEPT", ["MAXDEPTH", "MAXMSGL", "MAXDATA"], 2), vec!["MAXDEPTH"]);
+        assert_eq!(
+            suggest("MAXDEPT", ["MAXDEPTH", "MAXMSGL", "MAXDATA"], 2),
+            vec!["MAXDEPTH"]
+        );
         // equal-distance hits come back alphabetical and respect the cap
-        assert_eq!(suggest("MAXMSGX", ["MAXMSGL", "MAXMSGX1", "MAXDEPTH"], 2), vec!["MAXMSGL", "MAXMSGX1"]);
+        assert_eq!(
+            suggest("MAXMSGX", ["MAXMSGL", "MAXMSGX1", "MAXDEPTH"], 2),
+            vec!["MAXMSGL", "MAXMSGX1"]
+        );
     }
 
     // ------------------------------------------------------------ model lookup
@@ -568,7 +596,12 @@ mod tests {
     fn overlay_setchlauth_has_warn_and_chckclnt() {
         let m = model();
         let idx = m.resolve("SET", Some("CHLAUTH")).unwrap();
-        let names: Vec<_> = m.entry(idx).params.iter().map(|p| p.name.as_str()).collect();
+        let names: Vec<_> = m
+            .entry(idx)
+            .params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
         assert!(names.contains(&"WARN"), "SET CHLAUTH params: {names:?}");
         assert!(names.contains(&"CHCKCLNT"));
     }
@@ -584,18 +617,30 @@ mod tests {
     fn extracted_integer_alternatives_are_marked() {
         // T-3 (railroad) and T-7 (merge) fixes, directly from the base model
         let appltype = param("DEFINE", "PROCESS", "APPLTYPE");
-        assert!(appltype.alt_integer, "APPLTYPE lost its integer alternative");
+        assert!(
+            appltype.alt_integer,
+            "APPLTYPE lost its integer alternative"
+        );
         assert!(enum_values(appltype).contains(&"CICS".to_string()));
-        assert!(param("DEFINE", "TOPIC", "DEFPRTY").alt_integer, "DEFPRTY lost its integer alternative");
+        assert!(
+            param("DEFINE", "TOPIC", "DEFPRTY").alt_integer,
+            "DEFPRTY lost its integer alternative"
+        );
         assert!(param("ALTER", "TRACE", "TNO").alt_integer);
     }
 
     #[test]
     fn enum_extensions_present() {
         let propctl = enum_values(param("DEFINE", "QLOCAL", "PROPCTL"));
-        assert!(propctl.contains(&"V6COMPAT".to_string()), "PROPCTL: {propctl:?}");
+        assert!(
+            propctl.contains(&"V6COMPAT".to_string()),
+            "PROPCTL: {propctl:?}"
+        );
         let acctq = enum_values(param("DEFINE", "QMODEL", "ACCTQ"));
-        assert!(acctq.contains(&"OFF".to_string()) && acctq.contains(&"QMGR".to_string()), "ACCTQ: {acctq:?}");
+        assert!(
+            acctq.contains(&"OFF".to_string()) && acctq.contains(&"QMGR".to_string()),
+            "ACCTQ: {acctq:?}"
+        );
     }
 
     #[test]
