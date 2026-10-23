@@ -217,10 +217,11 @@ non-zero when a check fails.
   `*.mqsc` is the natural next step.
 - **False positives are measured, not eliminated**: on a 324-file
   `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
-  the count sits at 18,865 after the model/overlay/grammar fixes (-92.8%);
-  codes 3/5/9 are at zero and the remainder is 18,830 × hint 12 by design
+  the count sits at 19,613 after the model/overlay/grammar fixes (-92.5%);
+  codes 3/5/9 are at zero and the remainder is 19,578 × hint 12 by design
   (cross-file references without the sibling open, MQ 9.x parameters).
-  Track regressions with `tools/corpus_measure.py`.
+  Track regressions with `tools/corpus_measure.py` (non-UTF-8 files are
+  linted through a lossy decode, never skipped).
 - The process exits when stdin is closed after the `exit` notification
   (standard tower-lsp lifecycle); TCP sessions end with their connection.
 

@@ -81,9 +81,11 @@ pub fn run(files: &[String], settings: Option<&Value>) -> i32 {
     let mut any_error = false;
     let mut failed_io = false;
     for f in files {
-        let (text, display) = if f == "-" {
-            let mut buf = String::new();
-            match std::io::stdin().read_to_string(&mut buf) {
+        // Real dmpmqcfg dumps sometimes carry stray non-UTF-8 bytes in
+        // DESCR text; lint a lossy decode instead of skipping the file.
+        let (bytes, display) = if f == "-" {
+            let mut buf = Vec::new();
+            match std::io::stdin().read_to_end(&mut buf) {
                 Ok(_) => (buf, "-"),
                 Err(e) => {
                     eprintln!("mqsc-lsp: cannot read stdin: {e}");
@@ -92,13 +94,20 @@ pub fn run(files: &[String], settings: Option<&Value>) -> i32 {
                 }
             }
         } else {
-            match std::fs::read_to_string(f) {
-                Ok(t) => (t, f.as_str()),
+            match std::fs::read(f) {
+                Ok(b) => (b, f.as_str()),
                 Err(e) => {
                     eprintln!("mqsc-lsp: cannot read {}: {e}", Path::new(f).display());
                     failed_io = true;
                     continue;
                 }
+            }
+        };
+        let text = match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("mqsc-lsp: {display}: not valid UTF-8, linting a lossy decode");
+                String::from_utf8_lossy(e.as_bytes()).into_owned()
             }
         };
         let mut out = String::new();

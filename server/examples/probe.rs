@@ -1,7 +1,12 @@
+use std::io::Read;
 use std::time::Instant;
 use tower_lsp::lsp_types::Url;
 fn main() {
-    let text = std::io::read_to_string(std::io::stdin()).unwrap();
+    // Lossy decode: real dmpmqcfg dumps contain the odd non-UTF-8 byte
+    // (DESCR text written on Windows boxes); a probe must never panic.
+    let mut buf = Vec::new();
+    std::io::stdin().read_to_end(&mut buf).unwrap();
+    let text = String::from_utf8_lossy(&buf).into_owned();
     eprintln!("probing {} bytes", text.len());
     let now = Instant::now();
     let tree = mqsc_lsp::analysis::parse(&text);
