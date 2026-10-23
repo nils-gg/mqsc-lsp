@@ -6,7 +6,7 @@ fn main() {
         let m = mqsc_lsp::model::Model::load();
         let pos = Position { line, character: ch };
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            mqsc_lsp::analysis::completions(doc, &tree, m, pos)
+            mqsc_lsp::analysis::completions(doc, &tree, m, pos, true)
         }));
         match res {
             Ok(items) => println!("({line},{ch}) -> {} items: {}", items.len(),

@@ -58,8 +58,18 @@ DISPLAY QLOCAL(*) WHERE(CURRENT_QS)
 ALTER QLOCAL(NEW1) MAXMSGS
 DEF QL(X)
 DEFINE QLOCAL(Q1) DESCR('It works')
+DEFINE QALIAS(A2) TARGET(Q1) REPLACE
+DEFINE QALIAS(A3) TARGET(NO.SUCH.Q) REPLACE
 """
 uri = "file:///tmp/sample.mqsc"
+
+fails = []
+
+
+def check(name, ok, extra=""):
+    print(f"  [{'PASS' if ok else 'FAIL'}] {name} {extra}")
+    if not ok:
+        fails.append(name)
 
 r = request(1, "initialize", {"processId": None, "capabilities": {}, "rootUri": None})
 caps = r["result"]["capabilities"]
@@ -136,6 +146,51 @@ if m:
     d = m["result"]["data"]
     print("   total:", len(d), "first quintets:", [d[i:i+5] for i in range(0, min(20, len(d)), 5)])
 
+print("\n== completion inside TARGET( on line 6: script-defined names ==")
+m = request(11, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 6, "character": 25},
+                                           "context": {"triggerKind": 2}})
+labels = []
+if m and m.get("result"):
+    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
+    labels = [i["label"] for i in items]
+    print("  ", labels)
+check("completion offers Q1 DEFINEd earlier in script", "Q1" in labels)
+
+print("\n== codeAction quickfix on the MAXMSGS diagnostic ==")
+d4 = next((d for d in diags if d.get("code") == 4 and "MAXMSGS" in d["message"]), None)
+if d4 is None:
+    check("code-4 MAXMSGS diagnostic published", False)
+else:
+    m = request(12, "textDocument/codeAction", {"textDocument": {"uri": uri}, "range": d4["range"],
+                                                "context": {"diagnostics": [d4]}})
+    acts = (m or {}).get("result") or []
+    titles = [a.get("title") for a in acts]
+    print("  ", titles)
+    check("quickfix 'Change to `MAXMSGL`' offered", any("MAXMSGL" in (t or "") for t in titles))
+
+print("\n== settings: UNDEFINED_OBJECT off ==")
+before = sum(1 for d in diags if d.get("code") == 12)
+print("   code-12 hints before:", before)
+send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+      "params": {"settings": {"mqsc": {"diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
+send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+    "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": DOC}]}})
+diags2 = []
+while True:
+    m = pump(3)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics":
+        diags2 = m["params"]["diagnostics"]
+after = sum(1 for d in diags2 if d.get("code") == 12)
+print("   code-12 hints after:", after, "| total diags:", len(diags2))
+check("hint 12 present before config", before > 0)
+check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+
+print("\n== summary ==")
+if fails:
+    print("  FAILED:", ", ".join(fails))
+
 request(99, "shutdown", {})
 send({"jsonrpc": "2.0", "method": "exit", "params": {}})
 proc.stdin.close()  # tower-lsp terminates its stdio loop on EOF after exit
@@ -147,3 +202,4 @@ err = proc.stderr.read().decode(errors="replace")
 if err.strip():
     print("stderr:", err[-500:])
 print("exit code:", proc.returncode)
+sys.exit(1 if fails else 0)

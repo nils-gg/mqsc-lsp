@@ -93,14 +93,15 @@ Point your editor at the binary and associate `*.mqsc` with language id
 
 | Capability | Behaviour |
 | --- | --- |
-| Diagnostics | pushed on open/change — see code table below |
+| Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
 | Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; displayable attributes too |
-| Completion | verbs on fresh lines, object types after a verb, parameter names (used ones dropped, `NAME(` inserted for value params), enum/flag values inside groups, prefix filtering, docs in the detail pane |
+| Completion | verbs on fresh lines, object types after a verb, parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group), enum/flag values inside groups, object names already `DEFINE`d in the script, prefix filtering, docs in the detail pane |
+| codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5) |
 | documentSymbol | one entry per command |
 | foldingRange | multi-line continuation chains + comment blocks |
 | documentHighlight | same-word highlights |
-| semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes) |
-| Sync | full-text; `initialize` advertises hover, completion (`(`, `,`, `:` triggers), symbols, folding, highlights, semantic tokens |
+| semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes); full and range requests; enum values equal to the parameter default carry the `default` modifier |
+| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (`(`, `,`, `:` triggers), code actions, symbols, folding, highlights, semantic tokens |
 
 ### Diagnostic codes
 
@@ -117,6 +118,37 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 9 | Warning | a *single* required parameter missing (suppressed for multi-alternative commands like DEFINE CHANNEL) |
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
+| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script |
+
+### Configuration
+
+Every code can be re-severitised or switched off. Settings are read from
+`initializationOptions` and updated by `workspace/didChangeConfiguration`;
+both shapes are accepted:
+
+```json
+{ "diagnostics": { "UNDEFINED_OBJECT": "off", "BAD_VALUE": "error" } }
+{ "mqsc": { "diagnostics": { "UNDEFINED_OBJECT": "off" } } }
+```
+
+Keys are the code number (`"12"`) or its name (`PARSE_ERROR`,
+`UNKNOWN_VERB`, `UNKNOWN_OBJECT`, `UNKNOWN_PARAM`, `BAD_VALUE`,
+`DUPLICATE_PARAM`, `MISSING_CONTINUATION`, `LEXICAL`, `MISSING_REQUIRED`,
+`MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`). Values: `error`,
+`warning`, `information`, `hint`, `off`. On a settings change, diagnostics
+for all open documents are republished immediately.
+
+### Same-script object knowledge
+
+The server knows what the open file itself defines and uses it two ways:
+completion inside object-name groups and reference parameters offers the
+names already `DEFINE`d (order-independent), and hint 12 marks references
+that the file never defines. That hint is a deliberate heuristic:
+`SYSTEM.*` names are never flagged, a script without any `DEFINE` is never
+flagged, and only the curated object-reference parameters (queue aliases'
+`TARGET`, channels' `XMITQ`, `LIKE`, dynamic-queue `MODEL`, the `MOVE`
+queue parameters …) are checked, because the 2011 model types them all as
+plain strings.
 
 ## Testing
 
@@ -131,7 +163,10 @@ cargo run --example fold                             # folding ranges
 ```
 
 `tools/lsp_smoke_test.py` drives the real binary over stdio and prints what
-each request returned; run it from the repository root.
+each request returned; run it from the repository root. Beyond printing, it
+asserts the regression-sensitive behaviours (quickfix suggestions, names
+`DEFINE`d in the script, settings-driven diagnostic filtering) and exits
+non-zero when a check fails.
 
 ## Known limitations
 
@@ -147,8 +182,10 @@ each request returned; run it from the repository root.
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
   gracefully there.
-- **No cross-object knowledge**: the server is a script checker, not a queue
-  manager — it cannot know whether `TGTQ(X)` exists.
+- **No knowledge beyond the open file**: the server is a script checker, not
+  a queue manager. Same-script `DEFINE`s drive completion and hint 12, but
+  objects living in other scripts or in the queue manager itself are
+  invisible (which is exactly why hint 12 is only a hint).
 - The process exits when stdin is closed after the `exit` notification
   (standard tower-lsp lifecycle); TCP sessions end with their connection.
 

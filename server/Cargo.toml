@@ -8,7 +8,7 @@ license = "MIT"
 [dependencies]
 tree-sitter = "0.24"
 tower-lsp = "0.20"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-std", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 lsp-types = "0.94"

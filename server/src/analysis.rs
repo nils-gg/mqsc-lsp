@@ -1,7 +1,7 @@
 //! Tree-sitter parsing and all MQSC language analysis: diagnostics, hover,
 //! completion, document symbols, folding, highlights, semantic tokens.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use lsp_types::{
     self as lsp, CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity,
@@ -9,6 +9,7 @@ use lsp_types::{
     Hover, HoverContents, InsertTextFormat, MarkupContent, MarkupKind, Position, Range,
     SemanticToken, SymbolKind, Url,
 };
+use serde_json::json;
 use tree_sitter::{Language, Node, Tree};
 
 use crate::model::{self, Model, Param, ValueKind};
@@ -32,20 +33,20 @@ pub fn parse(text: &str) -> Tree {
 // ------------------------------------------------------------------ text index
 
 /// Byte-offset <-> LSP (UTF-16 line/character) conversion.
-pub struct Lines {
+pub struct Lines<'a> {
     starts: Vec<usize>,
-    text: String,
+    text: &'a str,
 }
 
-impl Lines {
-    pub fn new(text: &str) -> Lines {
+impl<'a> Lines<'a> {
+    pub fn new(text: &'a str) -> Lines<'a> {
         let mut starts = vec![0usize];
         for (i, b) in text.bytes().enumerate() {
             if b == b'\n' {
                 starts.push(i + 1);
             }
         }
-        Lines { starts, text: text.to_string() }
+        Lines { starts, text }
     }
 
     fn line_of(&self, offset: usize) -> usize {
@@ -146,6 +147,26 @@ const CODE_LEXICAL: i32 = 8;
 const CODE_MISSING_REQUIRED: i32 = 9;
 const CODE_MISSING_NAME: i32 = 10;
 const CODE_WILDCARD: i32 = 11;
+const CODE_UNDEFINED_OBJECT: i32 = 12;
+
+/// Friendly settings key for a diagnostic code (see README Configuration).
+pub fn diag_name(code: i32) -> &'static str {
+    match code {
+        CODE_PARSE => "PARSE_ERROR",
+        CODE_UNKNOWN_VERB => "UNKNOWN_VERB",
+        CODE_UNKNOWN_OBJECT => "UNKNOWN_OBJECT",
+        CODE_UNKNOWN_PARAM => "UNKNOWN_PARAM",
+        CODE_BAD_VALUE => "BAD_VALUE",
+        CODE_DUPLICATE => "DUPLICATE_PARAM",
+        CODE_MISSING_CONT => "MISSING_CONTINUATION",
+        CODE_LEXICAL => "LEXICAL",
+        CODE_MISSING_REQUIRED => "MISSING_REQUIRED",
+        CODE_MISSING_NAME => "MISSING_NAME",
+        CODE_WILDCARD => "WILDCARD",
+        CODE_UNDEFINED_OBJECT => "UNDEFINED_OBJECT",
+        _ => "OTHER",
+    }
+}
 
 struct Diags {
     items: Vec<Diagnostic>,
@@ -153,12 +174,42 @@ struct Diags {
 
 impl Diags {
     fn push(&mut self, r: Range, severity: DiagnosticSeverity, code: i32, msg: String) {
+        self.push_opt(r, severity, code, msg, None)
+    }
+
+    /// Diagnostic carrying one-click replacements (LSP codeAction quickfixes)
+    /// for the diagnostic range itself.
+    fn push_fixes(
+        &mut self,
+        r: Range,
+        severity: DiagnosticSeverity,
+        code: i32,
+        msg: String,
+        fixes: Vec<String>,
+    ) {
+        let data = if fixes.is_empty() {
+            None
+        } else {
+            Some(json!({ "quickfixes": fixes }))
+        };
+        self.push_opt(r, severity, code, msg, data)
+    }
+
+    fn push_opt(
+        &mut self,
+        r: Range,
+        severity: DiagnosticSeverity,
+        code: i32,
+        msg: String,
+        data: Option<serde_json::Value>,
+    ) {
         self.items.push(Diagnostic {
             range: r,
             severity: Some(severity),
             code: Some(lsp::NumberOrString::Number(code)),
             source: Some("mqsc".into()),
             message: msg,
+            data,
             ..Default::default()
         });
     }
@@ -198,7 +249,7 @@ pub fn analyze(text: &str, tree: &Tree, m: &Model, _uri: &Url) -> Vec<Diagnostic
 
     // ---- lexical checks over raw text
     for (i, line) in text.lines().enumerate() {
-        if let Some(col) = line.find('\t') {
+        for col in line.match_indices('\t').map(|(c, _)| c) {
             let s = lines.line_start(i) + line[..col].len();
             d.push(
                 lines.range(s, s + 1),
@@ -269,11 +320,14 @@ pub fn analyze(text: &str, tree: &Tree, m: &Model, _uri: &Url) -> Vec<Diagnostic
         }
     }
 
+    // ---- same-script object knowledge (shared by all semantic checks)
+    let defs = collect_definitions(tree, src, m);
+
     // ---- semantic checks per command
     let mut cursor = root.walk();
     for cmd in root.named_children(&mut cursor) {
         if cmd.kind() == "command" {
-            check_command(cmd, src, &lines, m, &mut d);
+            check_command(cmd, src, &lines, m, &defs, &mut d);
         }
     }
 
@@ -315,7 +369,176 @@ fn command_before<'t>(tree: &'t Tree, byte_off: usize) -> Option<Node<'t>> {
     last
 }
 
-fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Diags) {
+// ------------------------------------------------- same-script object knowledge
+
+/// Objects the script itself defines (`DEFINE <verb> (name)`). Used to offer
+/// known names in completion and to hint at references that are never
+/// DEFINEd in this file (code 12). Whole-file and order-independent: an
+/// object DEFINEd later in the script counts as defined.
+pub struct Definitions {
+    /// every defined name, uppercase
+    pub names: HashSet<String>,
+    /// canonical object type -> defined names (in script order, unique)
+    pub by_obj: BTreeMap<String, Vec<String>>,
+    /// whether the script contains at least one resolvable DEFINE
+    pub any_defines: bool,
+}
+
+fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
+    let mut defs = Definitions { names: HashSet::new(), by_obj: BTreeMap::new(), any_defines: false };
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for cmd in root.named_children(&mut cursor) {
+        if cmd.kind() != "command" {
+            continue;
+        }
+        let items = command_items(cmd);
+        let verb = match items.first() {
+            Some(Item::Verb(n)) => node_text(*n, src),
+            _ => continue,
+        };
+        if m.canon_verb(verb) != Some("DEFINE") {
+            continue;
+        }
+        let obj_txt = match items.get(1) {
+            Some(Item::Word(n)) => Some(node_text(*n, src)),
+            _ => None,
+        };
+        let Some(i) = m.resolve(verb, obj_txt) else { continue };
+        let obj = m.entry(i).object.to_string();
+        // the object-name group is the first argument group after the verb
+        let Some(Item::Arg(g)) = items.get(2) else { continue };
+        for v in value_nodes(*g) {
+            for name in value_name_words(v, src) {
+                defs.any_defines = true;
+                if defs.names.insert(name.clone()) {
+                    defs.by_obj.entry(obj.clone()).or_default().push(name);
+                }
+            }
+        }
+    }
+    defs
+}
+
+/// Plain-name text of a value node: exactly one word or quoted string and no
+/// wildcard/integer parts (a generic pattern is not one concrete name).
+fn value_name_words(v: Node<'_>, src: &[u8]) -> Vec<String> {
+    let mut has_wildcard = false;
+    let mut name: Option<String> = None;
+    let mut multi = false;
+    let mut vc = v.walk();
+    for c in v.named_children(&mut vc) {
+        match c.kind() {
+            "wildcard" => has_wildcard = true,
+            "integer" => multi = true,
+            "word" => {
+                if name.is_some() {
+                    multi = true;
+                } else {
+                    name = Some(node_text(c, src).to_ascii_uppercase());
+                }
+            }
+            "string" => {
+                let inner = node_text(c, src).trim_matches('\'').replace("''", "'");
+                if name.is_some() {
+                    multi = true;
+                } else {
+                    name = Some(inner.to_ascii_uppercase());
+                }
+            }
+            _ => {}
+        }
+    }
+    match name {
+        Some(n) if !has_wildcard && !multi => vec![n],
+        _ => Vec::new(),
+    }
+}
+
+/// Which family of objects a name-valued parameter points at. The model
+/// types all of these plain string, so this is a curated heuristic table
+/// (documented in README "Same-script object knowledge").
+#[derive(Clone, Copy)]
+enum ObjRef {
+    /// an object of the same type as the current command's object
+    SameType,
+    /// a queue-like object (QLOCAL/QMODEL/QALIAS/QREMOTE/QCLUSTER/QUEUE)
+    QueueFamily,
+}
+
+fn object_ref_param(pname: &str, cmd_obj: &str) -> Option<ObjRef> {
+    match pname {
+        "LIKE" => {
+            Some(if cmd_obj.starts_with('Q') { ObjRef::QueueFamily } else { ObjRef::SameType })
+        }
+        "TARGET" | "TGTQ" | "XMITQ" | "MODEL" | "MDURMDL" | "MNDURMDL" | "FROMQ" | "TOQLOCAL"
+        | "TOQALIAS" | "TOQNAME" => Some(ObjRef::QueueFamily),
+        _ => None,
+    }
+}
+
+fn obj_ref_matches(r: ObjRef, def_obj: &str, cmd_obj: &str) -> bool {
+    match r {
+        ObjRef::QueueFamily => def_obj.starts_with('Q'),
+        ObjRef::SameType => def_obj == cmd_obj,
+    }
+}
+
+/// Defined names matching a reference family, as (object type, name) pairs.
+/// `None` means every defined name.
+fn names_for<'a>(defs: &'a Definitions, r: Option<ObjRef>, cmd_obj: &str) -> Vec<(&'a str, &'a str)> {
+    defs.by_obj
+        .iter()
+        .filter(|(obj, _)| match r {
+            Some(rr) => obj_ref_matches(rr, obj, cmd_obj),
+            None => true,
+        })
+        .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
+        .collect()
+}
+
+/// Code 12: an object-name reference (TARGET, XMITQ, LIKE, ...) that no
+/// DEFINE in this script provides. Hint severity on purpose: runmqsc
+/// scripts routinely reference queue-manager objects that exist already.
+fn check_obj_ref(
+    pname: &str,
+    cmd_obj: &str,
+    values: &[Node<'_>],
+    src: &[u8],
+    lines: &Lines,
+    defs: &Definitions,
+    d: &mut Diags,
+) {
+    if object_ref_param(pname, cmd_obj).is_none() || !defs.any_defines {
+        return;
+    }
+    for v in values {
+        for name in value_name_words(*v, src) {
+            // IBM ships every SYSTEM.* object; never flag those.
+            if defs.names.contains(&name) || name.starts_with("SYSTEM") {
+                continue;
+            }
+            d.push(
+                lines.range(v.start_byte(), v.end_byte()),
+                DiagnosticSeverity::HINT,
+                CODE_UNDEFINED_OBJECT,
+                format!(
+                    "'{name}' is not DEFINEd in this script; it must already exist in the \
+                     queue manager (or is a typo)"
+                ),
+            );
+        }
+    }
+}
+
+fn check_command(
+    cmd: Node<'_>,
+    src: &[u8],
+    lines: &Lines,
+    m: &Model,
+    defs: &Definitions,
+    d: &mut Diags,
+) {
     let items = command_items(cmd);
     let verb_node = match items.first() {
         Some(Item::Verb(n)) => *n,
@@ -372,11 +595,14 @@ fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Di
                             .join(" / ")
                     )
                 };
-                d.push(
+                // the fix replaces the whole verb+object span
+                let fixes = sugs.iter().map(|s| format!("{verb_up} {s}")).collect();
+                d.push_fixes(
                     lines.range(verb_node.start_byte(), w.end_byte()),
                     DiagnosticSeverity::ERROR,
                     CODE_UNKNOWN_OBJECT,
                     msg,
+                    fixes,
                 );
             } else if m.known_params.contains(&up_w) || m.known_attrs.contains(&up_w) {
                 d.push(
@@ -396,11 +622,13 @@ fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Di
                 } else {
                     format!("Unknown command '{verb_txt}'; did you mean {}?", sugs.join(", "))
                 };
-                d.push(
+                let fixes = sugs.iter().map(|s| s.to_string()).collect();
+                d.push_fixes(
                     lines.range(verb_node.start_byte(), verb_node.end_byte()),
                     DiagnosticSeverity::ERROR,
                     CODE_UNKNOWN_VERB,
                     msg,
+                    fixes,
                 );
             }
             return;
@@ -479,11 +707,13 @@ fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Di
                 } else {
                     format!("'{w}' is not a parameter of {} {}; did you mean {}?", e.verb, e.object, sugs.join(", "))
                 };
-                d.push(
+                let fixes = sugs.iter().map(|s| s.to_string()).collect();
+                d.push_fixes(
                     lines.range(n.start_byte(), n.end_byte()),
                     DiagnosticSeverity::ERROR,
                     CODE_UNKNOWN_PARAM,
                     msg,
+                    fixes,
                 );
                 mute_next_group = true;
             }
@@ -498,6 +728,7 @@ fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Di
                     if let Some(&pi) = e.by_name.get(&up) {
                         let p = &e.params[pi];
                         check_values(p, &up, &values, src, lines, d);
+                        check_obj_ref(&up, e.object, &values, src, lines, defs, d);
                     }
                     if values.is_empty() {
                         d.push(
@@ -546,6 +777,7 @@ fn check_command(cmd: Node<'_>, src: &[u8], lines: &Lines, m: &Model, d: &mut Di
                     let p = &e.params[pi];
                     let vs = if n.kind() == "value" { vec![*n] } else { value_nodes(*n) };
                     check_values(p, &up, &vs, src, lines, d);
+                    check_obj_ref(&up, e.object, &vs, src, lines, defs, d);
                 }
             }
             Item::Verb(_) => {}
@@ -673,11 +905,13 @@ fn check_values(p: &Param, up: &str, values: &[Node<'_>], src: &[u8], lines: &Li
                                 sugs.join(", ")
                             )
                         };
-                        d.push(
+                        let fixes = sugs.iter().map(|s| s.to_string()).collect();
+                        d.push_fixes(
                             lines.range(v.start_byte(), v.end_byte()),
                             DiagnosticSeverity::WARNING,
                             CODE_BAD_VALUE,
                             msg,
+                            fixes,
                         );
                     }
                 }
@@ -885,7 +1119,13 @@ fn preceding_word<'t>(cmd: Node<'t>, before: Node<'_>, src: &'t [u8]) -> Option<
 
 // --------------------------------------------------------------- completion
 
-pub fn completions(text: &str, tree: &Tree, m: &Model, pos: Position) -> Vec<CompletionItem> {
+pub fn completions(
+    text: &str,
+    tree: &Tree,
+    m: &Model,
+    pos: Position,
+    snippet: bool,
+) -> Vec<CompletionItem> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
     let off = lines.offset(pos);
@@ -902,20 +1142,45 @@ pub fn completions(text: &str, tree: &Tree, m: &Model, pos: Position) -> Vec<Com
             if let Some((w, _)) = preceding_word(cmd, arg, src) {
                 if let Some((_, _, e)) = command_context(cmd, src, m) {
                     if let Some(&pi) = e.by_name.get(&w) {
-                        return value_completions(&e.params[pi], &frag);
+                        let p = &e.params[pi];
+                        let mut out = value_completions(p, &frag);
+                        // queue/object reference parameter: also offer names
+                        // this very script already DEFINEd
+                        if let Some(r) = object_ref_param(&w, e.object) {
+                            let defs = collect_definitions(tree, src, m);
+                            out.extend(name_items(&names_for(&defs, Some(r), e.object)));
+                        }
+                        // (value_completions already filtered its items;
+                        // re-filtering both sets together is harmless)
+                        filter_prefix(&mut out, &frag);
+                        return out;
                     }
                 }
             }
             // The argument is either the object-name group (directly after the
             // object word) or belongs to an unknown word: MQSC object names and
-            // most keyword values are free tokens, so offer the generic pattern.
-            return vec![CompletionItem {
+            // most keyword values are free tokens, so offer the generic pattern
+            // plus everything already DEFINEd for a compatible object type.
+            let mut out = vec![CompletionItem {
                 label: "*".into(),
                 kind: Some(CompletionItemKind::TEXT),
                 detail: Some("generic name pattern".into()),
                 insert_text: Some("*".into()),
+                sort_text: Some("0*".into()),
                 ..Default::default()
             }];
+            if let Some((_, _, e)) = command_context(cmd, src, m) {
+                let defs = collect_definitions(tree, src, m);
+                let pairs: Vec<(&str, &str)> = defs
+                    .by_obj
+                    .iter()
+                    .filter(|(obj, _)| name_group_matches(obj, e.object))
+                    .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
+                    .collect();
+                out.extend(name_items(&pairs));
+            }
+            filter_prefix(&mut out, &frag);
+            return out;
         }
     }
 
@@ -1004,9 +1269,16 @@ pub fn completions(text: &str, tree: &Tree, m: &Model, pos: Position) -> Vec<Com
         if used.contains(&p.name) {
             continue;
         }
-        let (insert, kind) = match &p.kind {
-            ValueKind::Flag => (p.name.clone(), CompletionItemKind::KEYWORD),
-            _ => (format!("{}(", p.name), CompletionItemKind::PROPERTY),
+        let (insert, kind, fmt) = match &p.kind {
+            ValueKind::Flag => (p.name.clone(), CompletionItemKind::KEYWORD, InsertTextFormat::PLAIN_TEXT),
+            _ if !snippet => {
+                (format!("{}(", p.name), CompletionItemKind::PROPERTY, InsertTextFormat::PLAIN_TEXT)
+            }
+            _ => (
+                format!("{}({})", p.name, snippet_body(p)),
+                CompletionItemKind::PROPERTY,
+                InsertTextFormat::SNIPPET,
+            ),
         };
         let detail = match &p.kind {
             ValueKind::Flag => "keyword".to_string(),
@@ -1029,7 +1301,7 @@ pub fn completions(text: &str, tree: &Tree, m: &Model, pos: Position) -> Vec<Com
                 value: doc,
             })),
             insert_text: Some(insert),
-            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+            insert_text_format: Some(fmt),
             sort_text: Some(format!("{:01}{}", if p.optional { 1 } else { 0 }, p.name)),
             ..Default::default()
         });
@@ -1065,6 +1337,45 @@ pub fn completions(text: &str, tree: &Tree, m: &Model, pos: Position) -> Vec<Com
     filter_prefix(&mut out, &frag);
     let _ = obj;
     out
+}
+
+/// Completion items for `(object type, name)` pairs DEFINEd in this script.
+fn name_items(pairs: &[(&str, &str)]) -> Vec<CompletionItem> {
+    pairs
+        .iter()
+        .map(|(obj, n)| CompletionItem {
+            label: n.to_string(),
+            kind: Some(CompletionItemKind::REFERENCE),
+            detail: Some(format!("DEFINEd in this script as {obj}")),
+            sort_text: Some(format!("1{n}")),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Names typed into a command's object-name group: same type, or any
+/// queue-like type when either side is queue-like (DISPLAY QUEUE and the
+/// QLOCAL/QMODEL/... aliases name the same objects).
+fn name_group_matches(def_obj: &str, cmd_obj: &str) -> bool {
+    def_obj == cmd_obj || (def_obj.starts_with('Q') && cmd_obj.starts_with('Q'))
+}
+
+/// Snippet placeholder for a parameter's value: `NAME(${1:...})` with the
+/// cursor inside the group (and a choice list for short enums). MQSC words
+/// never contain the snippet metacharacters `$`, `}` or `|`.
+fn snippet_body(p: &Param) -> String {
+    match &p.kind {
+        ValueKind::Enum(vals)
+            if !vals.is_empty() && vals.len() <= 6 && !vals.iter().any(|v| v.contains(',')) =>
+        {
+            format!("${{1|{}|}}", vals.join(","))
+        }
+        ValueKind::Enum(_) | ValueKind::Str | ValueKind::Free => "${1:value}".into(),
+        ValueKind::Integer => "${1:n}".into(),
+        ValueKind::Name => "${1:name}".into(),
+        ValueKind::Star => "${1:*}".into(),
+        ValueKind::Flag => String::new(),
+    }
 }
 
 fn word_at<'t>(items: &[Item<'t>], idx: usize, src: &'t [u8]) -> Option<&'t str> {
@@ -1306,16 +1617,21 @@ pub const TOKEN_TYPES: &[&str] = &[
     "regexp",   // 8 wildcard
 ];
 
-pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
+pub const TOKEN_MODIFIERS: &[&str] = &[
+    "default", // 0 enum value equal to the parameter's reference default
+];
+
+/// Absolute-position tokens: (line, col, utf16-len, type, modifier bits).
+fn raw_tokens(text: &str, tree: &Tree) -> Vec<(usize, usize, usize, u32, u32)> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
-    let mut raw: Vec<(usize, usize, usize, u32, u32)> = Vec::new(); // line, col, len, ty, mods
+    let mut raw: Vec<(usize, usize, usize, u32, u32)> = Vec::new();
 
     let mut cursor = tree.root_node().walk();
     for node in tree.root_node().named_children(&mut cursor) {
         match node.kind() {
             "comment" => {
-                emit(node, src, &lines, 7, &mut raw);
+                emit(node, src, &lines, 7, 0, &mut raw);
                 continue;
             }
             "command" => {}
@@ -1326,60 +1642,50 @@ pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
         // bare flag/attr words resolved against the model
         let cmd_ctx = command_context(node, src, &Model::load());
         let mut obj_done = false;
+        // reference default of the parameter owning the group we are in
+        let mut owner_default: Option<String> = None;
         for (i, it) in items.iter().enumerate() {
             match it {
-                Item::Verb(n) => emit(*n, src, &lines, 0, &mut raw),
+                Item::Verb(n) => emit(*n, src, &lines, 0, 0, &mut raw),
                 Item::Word(n) => {
                     let up = node_text(*n, src).to_ascii_uppercase();
                     if !obj_done && i == 1 {
                         obj_done = true;
-                        emit(*n, src, &lines, 1, &mut raw); // object type
+                        owner_default = None;
+                        emit(*n, src, &lines, 1, 0, &mut raw); // object type
                         continue;
                     }
-                    let is_param = match cmd_ctx {
-                        Some((_, _, e)) => {
+                    let e = match cmd_ctx {
+                        Some((_, _, e)) => Some(e),
+                        None => None,
+                    };
+                    let is_param = match e {
+                        Some(e) => {
                             e.by_name.contains_key(&up)
                                 || e.attr_set.contains(&up)
                                 || matches!(items.get(i + 1), Some(Item::Arg(_)))
                         }
                         None => matches!(items.get(i + 1), Some(Item::Arg(_))),
                     };
-                    emit(*n, src, &lines, if is_param { 2 } else { 3 }, &mut raw);
+                    owner_default = match e {
+                        Some(e) => e
+                            .by_name
+                            .get(&up)
+                            .map(|&pi| e.params[pi].default.clone())
+                            .unwrap_or_default(),
+                        None => None,
+                    };
+                    emit(*n, src, &lines, if is_param { 2 } else { 3 }, 0, &mut raw);
                 }
                 Item::Arg(n) => {
-                    let mut st = vec![*n];
-                    while let Some(x) = st.pop() {
-                        match x.kind() {
-                            "string" => emit(x, src, &lines, 5, &mut raw),
-                            "integer" => emit(x, src, &lines, 6, &mut raw),
-                            "wildcard" => emit(x, src, &lines, 8, &mut raw),
-                            "word" => emit(x, src, &lines, 4, &mut raw),
-                            _ => {}
-                        }
-                        for k in 0..x.named_child_count() {
-                            if let Some(c) = x.named_child(k) {
-                                st.push(c);
-                            }
-                        }
-                    }
+                    walk_group(*n, src, &lines, owner_default.as_deref(), &mut raw);
+                    owner_default = None;
                 }
-                Item::Wild(n) => emit(*n, src, &lines, 8, &mut raw),
+                Item::Wild(n) => emit(*n, src, &lines, 8, 0, &mut raw),
                 Item::Val(n) => {
-                    let mut st = vec![*n];
-                    while let Some(x) = st.pop() {
-                        match x.kind() {
-                            "string" => emit(x, src, &lines, 5, &mut raw),
-                            "integer" => emit(x, src, &lines, 6, &mut raw),
-                            "wildcard" => emit(x, src, &lines, 8, &mut raw),
-                            "word" => emit(x, src, &lines, 4, &mut raw),
-                            _ => {}
-                        }
-                        for k in 0..x.named_child_count() {
-                            if let Some(c) = x.named_child(k) {
-                                st.push(c);
-                            }
-                        }
-                    }
+                    // z/OS NAME=value: the owner default was set by the word
+                    walk_group(*n, src, &lines, owner_default.as_deref(), &mut raw);
+                    owner_default = None;
                 }
                 Item::Verb(_) => {}
             }
@@ -1388,10 +1694,67 @@ pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
 
     raw.sort_by_key(|(l, c, ..)| (*l, *c));
     raw.dedup_by_key(|(l, c, ..)| (*l, *c));
+    raw
+}
 
+/// One `(...)` group (or `=` value): value tokens, marking enum words that
+/// equal the parameter's reference default with the `default` modifier.
+fn walk_group(
+    g: Node<'_>,
+    src: &[u8],
+    lines: &Lines,
+    owner_default: Option<&str>,
+    raw: &mut Vec<(usize, usize, usize, u32, u32)>,
+) {
+    let mut st = vec![g];
+    while let Some(x) = st.pop() {
+        match x.kind() {
+            "string" => emit(x, src, lines, 5, 0, raw),
+            "integer" => emit(x, src, lines, 6, 0, raw),
+            "wildcard" => emit(x, src, lines, 8, 0, raw),
+            "word" => {
+                let mods = match owner_default {
+                    Some(dv) if node_text(x, src).eq_ignore_ascii_case(dv) => 1,
+                    _ => 0,
+                };
+                emit(x, src, lines, 4, mods, raw);
+            }
+            _ => {}
+        }
+        for k in 0..x.named_child_count() {
+            if let Some(c) = x.named_child(k) {
+                st.push(c);
+            }
+        }
+    }
+}
+
+pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
+    encode_tokens(raw_tokens(text, tree), 0, 0)
+}
+
+/// Tokens starting inside `range`, delta-encoded against the range start
+/// (per the LSP `semanticTokens/range` convention).
+pub fn semantic_tokens_range(text: &str, tree: &Tree, range: lsp::Range) -> Vec<SemanticToken> {
+    let (sl, sc) = (range.start.line as usize, range.start.character as usize);
+    let (el, ec) = (range.end.line as usize, range.end.character as usize);
+    let raw: Vec<_> = raw_tokens(text, tree)
+        .into_iter()
+        .filter(|(l, c, len, ..)| {
+            (*l > sl || (*l == sl && *c >= sc)) && (*l < el || (*l == el && *c + *len <= ec))
+        })
+        .collect();
+    encode_tokens(raw, range.start.line, range.start.character)
+}
+
+fn encode_tokens(
+    raw: Vec<(usize, usize, usize, u32, u32)>,
+    base_line: u32,
+    base_char: u32,
+) -> Vec<SemanticToken> {
     // delta-encode
-    let mut prev_line = 0usize;
-    let mut prev_char = 0usize;
+    let mut prev_line = base_line as usize;
+    let mut prev_char = base_char as usize;
     let mut out = Vec::with_capacity(raw.len());
     for (line, col, len, ty, mods) in raw {
         let delta_line = line - prev_line;
@@ -1401,7 +1764,7 @@ pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
             delta_start: delta_start as u32,
             length: len as u32,
             token_type: ty,
-            token_modifiers_bitset: 0,
+            token_modifiers_bitset: mods,
         });
         prev_line = line;
         prev_char = col;
@@ -1414,11 +1777,12 @@ fn emit(
     src: &[u8],
     lines: &Lines,
     ty: u32,
+    mods: u32,
     out: &mut Vec<(usize, usize, usize, u32, u32)>,
 ) {
     let p = lines.pos(n.start_byte());
     let len = utf16_len(node_text(n, src).trim_end_matches(['\n', '\r']));
     if len > 0 {
-        out.push((p.line as usize, p.character as usize, len, ty, 0));
+        out.push((p.line as usize, p.character as usize, len, ty, mods));
     }
 }

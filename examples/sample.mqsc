@@ -8,6 +8,10 @@
 * use MQ 8/9.x parameters absent from the 2011 Script (MQSC)
 * Command Reference this tool is modelled on (ACTREC, NAMELIST ADD,
 * ALTER QMGR LOGPAGE/LOGPRIMARY/MAXCHANNELS, MOVE ... FROM/TO).
+* The "did you mean" errors offer "Change to `X`" quickfixes; names
+* referenced by TARGET/XMITQ/LIKE that this file never DEFINEs get
+* hint 12; per-code severities and switching codes off is documented
+* in the README ("Configuration").
 *********************************************************************
 
 * ------------------------------------------------------------------

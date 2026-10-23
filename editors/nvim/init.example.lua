@@ -18,7 +18,10 @@ vim.api.nvim_create_autocmd("FileType", {
 			cmd = { mqsc_bin },
 			root_dir = vim.fs.dirname(vim.fs.find({ ".git", "mqsc-lsp" }, { upward = true })[1])
 				or vim.fn.getcwd(),
-			settings = {},
+			-- Optional per-code diagnostic overrides (see README "Configuration"):
+			settings = {
+				diagnostics = { UNDEFINED_OBJECT = "off", MISSING_REQUIRED = "warning" },
+			},
 			capabilities = require("vim.lsp.protocol").make_client_capabilities(),
 		})
 	end,
@@ -31,5 +34,5 @@ vim.api.nvim_create_autocmd("FileType", {
 -- spec. nvim-lspconfig has no built-in mqsc server definition yet; if you use
 -- lspconfig, register it via require("lspconfig.util").base_server or
 -- on_setup — the capabilities advertised by the server cover hover,
--- completion, documentSymbol, foldingRange, documentHighlight and
--- semanticTokens.
+-- completion, code actions, documentSymbol, foldingRange, documentHighlight
+-- and semanticTokens.
