@@ -54,7 +54,16 @@ jobs:
       - name: --check CLI end-to-end
         run: |
           echo "DEFINE QLOCAL(A) MAXMSGS" > /tmp/w.mqsc
-          if server/target/release/mqsc-lsp --check /tmp/w.mqsc; then
-            echo "expected exit 1 for the MAXMSGS error"; exit 1
+          # Assert the EXACT exit codes: rc=1 (error finding) and rc=0 (off).
+          # Anything else — rc=2 (usage/IO), rc=101 (panic) — is a regression
+          # and must not read as "expected failure" (REVIEW.md M2).
+          rc=0
+          server/target/release/mqsc-lsp --check /tmp/w.mqsc || rc=$?
+          if [ $rc -ne 1 ]; then
+            echo "expected exit 1 for the MAXMSGS error, got $rc"; exit 1
           fi
-          server/target/release/mqsc-lsp --check --diag UNKNOWN_PARAM=off /tmp/w.mqsc
+          rc=0
+          server/target/release/mqsc-lsp --check --diag UNKNOWN_PARAM=off /tmp/w.mqsc || rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "expected exit 0 with UNKNOWN_PARAM=off, got $rc"; exit 1
+          fi
