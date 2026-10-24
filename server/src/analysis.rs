@@ -342,6 +342,21 @@ pub fn analyze(
             );
             continue; // do not descend into error noise
         }
+        if n.kind() == "dangling_continuation" {
+            // A '-'/+ continuation marker the scanner could not resolve into
+            // a real continuation: the rest of the file is blank lines,
+            // comments or nothing at all. The command is truncated.
+            let marker = node_text(n, src).trim().chars().next().unwrap_or('-');
+            d.push(
+                lines.range(n.start_byte(), n.end_byte().max(n.start_byte() + 1)),
+                DiagnosticSeverity::ERROR,
+                CODE_MISSING_CONT,
+                format!(
+                    "'{marker}' continuation marker is never continued: the file ends \
+                     without a continuation line for this command"
+                ),
+            );
+        }
         for i in 0..n.named_child_count() {
             if let Some(c) = n.named_child(i) {
                 stack.push(c);
@@ -2496,6 +2511,47 @@ mod tests {
             codes("DESCR REPLACE\n")
         );
         assert!(d.unwrap().message.contains("parameter"));
+    }
+
+    #[test]
+    fn code07_dangling_continuation_at_eof() {
+        // A continuation marker with no content line after it (the rest of
+        // the file is blanks, comments or nothing): flagged, and the parser
+        // must not invent a phantom token in error recovery.
+        for src in [
+            "DEFINE QLOCAL(A) -\n",
+            "DEFINE QLOCAL(A) -", // marker as the file's last byte
+            "DEFINE QLOCAL(A) +\n",
+            "DEFINE QLOCAL(A) -\n\n\n",
+            "DEFINE QLOCAL(A) -\n* only a comment\n",
+            "-\n",
+        ] {
+            assert!(
+                has(src, CODE_MISSING_CONT),
+                "expected a dangling-continuation flag for {src:?}, got {:?}",
+                codes(src)
+            );
+            let c = codes(src);
+            assert!(
+                !c.contains(&CODE_PARSE) && !c.contains(&CODE_UNKNOWN_PARAM),
+                "phantom parse diagnostic for {src:?}: {c:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn code07_not_flagged_when_the_command_really_continues() {
+        for src in [
+            "DEFINE QLOCAL(A) DESCR('x') -\nREPLACE\n",
+            "DEFINE QLOCAL(A) DESCR('x') -\n* a comment line\nREPLACE\n",
+            "DEFINE QLOCAL(A) DESCR('x') -\n\n  REPLACE\n",
+        ] {
+            assert!(
+                !has(src, CODE_MISSING_CONT),
+                "legit continuation flagged for {src:?}, got {:?}",
+                codes(src)
+            );
+        }
     }
 
     #[test]

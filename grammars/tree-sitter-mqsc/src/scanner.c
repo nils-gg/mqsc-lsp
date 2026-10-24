@@ -13,6 +13,13 @@
 //                    after '-' are literal content), so the string is ended
 //                    as unterminated at that point. Comment lines are
 //                    left for the parser, which accepts them as extras.
+//                    If NO content line follows at all (the rest of the file
+//                    is blank lines and comments, or the marker is the file's
+//                    last character), the token becomes the visible
+//                    dangling_continuation instead - spanning only the marker
+//                    character - so the parser does not demand a continuation
+//                    item that cannot exist, and the language server can
+//                    flag the truncated command.
 //   * string       - '...' with '' as an embedded literal quote. Strings may
 //                    be split across lines with '-' or '+' at the end of a
 //                    line: '-' continues from the start of the next line
@@ -34,6 +41,9 @@ enum TokenType {
   COMMENT_TOKEN,
   CONTINUATION_TOKEN,
   STRING_TOKEN,
+  // Must stay in sync with grammar.js externals: a '+'/'-' continuation
+  // marker that no content line follows (index 4th, appended last).
+  DANGLING_CONTINUATION_TOKEN,
 };
 
 void *tree_sitter_mqsc_external_scanner_create(void) { return NULL; }
@@ -106,20 +116,56 @@ bool tree_sitter_mqsc_external_scanner_scan(void *payload, TSLexer *lexer,
   }
 
   // --- line continuation: '+' or '-' at end of line ------------------------
-  if (valid_symbols[CONTINUATION_TOKEN] &&
+  if ((valid_symbols[CONTINUATION_TOKEN] ||
+       valid_symbols[DANGLING_CONTINUATION_TOKEN]) &&
       (lexer->lookahead == '-' || lexer->lookahead == '+')) {
     lexer->advance(lexer, false); // the marker
+    lexer->mark_end(lexer); // tentative end: just the marker character
     while (!lexer->eof(lexer) && lexer->lookahead != '\n' &&
            (lexer->lookahead == ' ' || lexer->lookahead == '\t' ||
             lexer->lookahead == '\r')) {
       lexer->advance(lexer, false);
     }
     if (lexer->lookahead != '\n') {
+      if (lexer->eof(lexer) && valid_symbols[DANGLING_CONTINUATION_TOKEN]) {
+        // Marker is the file's very last character: a command continuation
+        // with no next line, ever.
+        lexer->result_symbol = DANGLING_CONTINUATION_TOKEN;
+        return true;
+      }
       return false; // marker is not at the end of a line
     }
     lexer->advance(lexer, false); // the newline
     skip_blank_lines(lexer);
-    lexer->mark_end(lexer);
+    // Blank lines and comment lines after the marker are transparent; if only
+    // comment lines remain, no content can follow and the command cannot
+    // continue -> dangling. If content DOES follow, a consumed comment line
+    // must be re-lexed by the parser (comments are extras inside commands),
+    // so mark_end is pinned before the first comment and the token ends there.
+    bool comments_passed = false;
+    while (!lexer->eof(lexer) && lexer->lookahead == '*' &&
+           lexer->get_column(lexer) == 0) {
+      if (!comments_passed) {
+        lexer->mark_end(lexer);
+        comments_passed = true;
+      }
+      consume_to_eol(lexer); // the comment line including its newline
+      skip_blank_lines(lexer);
+    }
+    if (lexer->eof(lexer) && valid_symbols[DANGLING_CONTINUATION_TOKEN]) {
+      // No content after the marker. Token end: just the marker, or — when
+      // comment lines were probed past — up to the first comment (mark_end
+      // cannot move backwards); the diagnostic anchors at the marker either
+      // way.
+      lexer->result_symbol = DANGLING_CONTINUATION_TOKEN;
+      return true;
+    }
+    if (!valid_symbols[CONTINUATION_TOKEN]) {
+      return false; // only a dangling token was valid and content follows
+    }
+    if (!comments_passed) {
+      lexer->mark_end(lexer); // token covers marker, newline and blank lines
+    }
     lexer->result_symbol = CONTINUATION_TOKEN;
     return true;
   }

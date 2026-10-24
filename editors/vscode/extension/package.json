@@ -89,7 +89,7 @@
           "type": "string",
           "enum": ["default", "error", "warning", "information", "hint", "off"],
           "default": "default",
-          "description": "Severity for code 7: command looks truncated — a continuation '+' is probably missing."
+          "description": "Severity for code 7: command looks truncated — a continuation '+' is probably missing, or the file ends right after a '+'/'-' continuation marker."
         },
         "mqsc.diagnostics.LEXICAL": {
           "type": "string",

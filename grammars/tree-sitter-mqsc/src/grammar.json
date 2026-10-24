@@ -406,6 +406,10 @@
     },
     {
       "type": "SYMBOL",
+      "name": "dangling_continuation"
+    },
+    {
+      "type": "SYMBOL",
       "name": "comment"
     }
   ],
@@ -423,6 +427,10 @@
     {
       "type": "SYMBOL",
       "name": "string"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "dangling_continuation"
     }
   ],
   "inline": [],

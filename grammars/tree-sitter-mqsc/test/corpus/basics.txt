@@ -497,3 +497,108 @@ DEFINE SUB('S1') DEST('D1') + DESTCORL('X') REPLACE
       (value
         (string)))
     (word)))
+
+================================================================================
+Continuation marker at end of file (dash and newline) is a visible dangling token
+================================================================================
+
+DEFINE QLOCAL(A) -
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (dangling_continuation)))
+
+================================================================================
+Plus continuation marker at end of file
+================================================================================
+
+DEFINE QLOCAL(A) +
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (dangling_continuation)))
+
+================================================================================
+Continuation marker followed only by blank lines until EOF
+================================================================================
+
+DEFINE QLOCAL(A) -
+
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (dangling_continuation)))
+
+================================================================================
+Continuation marker followed only by comment lines until EOF
+================================================================================
+
+DEFINE QLOCAL(A) -
+* just a comment
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word))))
+  (dangling_continuation)
+  (comment))
+
+================================================================================
+File containing only a continuation marker
+================================================================================
+
+-
+
+--------------------------------------------------------------------------------
+
+(program
+  (dangling_continuation))
+
+================================================================================
+Continuation then blank lines then real content stays a single command
+================================================================================
+
+DEFINE QLOCAL(A) DESCR('x') -
+
+  REPLACE
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (argument
+      (value
+        (string)))
+    (word)))
