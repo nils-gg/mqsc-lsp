@@ -393,5 +393,14 @@ except subprocess.TimeoutExpired:
 err = proc.stderr.read().decode(errors="replace")
 if err.strip():
     print("stderr:", err[-500:])
-print("exit code:", proc.returncode)
+    # panics are echoed to stderr by design (telemetry.rs); anything with
+    # that marker during a smoke session is a failure rc can miss.
+    check("no panic echoed to stderr", "panicked at" not in err, err[-200:])
+# A server that exits non-zero (e.g. 101 despite the exit handshake) must
+# fail this gate, not just print the number (REVIEW.md minor).
+check("server exits cleanly", proc.returncode == 0, f"rc={proc.returncode}")
+try:
+    os.remove(LOGPATH)  # verified above; don't litter the temp dir
+except OSError:
+    pass
 sys.exit(1 if fails else 0)

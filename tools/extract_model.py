@@ -335,7 +335,6 @@ def parse_dotted(section_raw, footnotes):
 # ---------------------------------------------------------------- railroad
 
 RAIL_POS_RE = re.compile(r">>-?\w+(?: \w+)*--\(--\s*([a-z][a-z0-9-]*)\s*--\)")
-RAIL_PARAM_RE = re.compile(r"\+-?([A-Z][A-Z0-9_]{2,})--\(")
 RAIL_BOX_RE = re.compile(r"[+-]-([A-Z][A-Z0-9_]{2,})-{3,}\+?")
 
 
@@ -610,7 +609,13 @@ def main():
             "footnotes": [notes[n] for n in sorted(notes)][:24],
             "_box_tokens": box_tokens,
         }
-        commands.setdefault(verb, OrderedDict())[obj] = entry
+        objs = commands.setdefault(verb, OrderedDict())
+        if obj in objs:
+            # silent overwrite would hide a converter artifact (two topics
+            # for one VERB+OBJ); make the model drift loud (REVIEW.md).
+            print(f"WARN: duplicate {verb} {obj} topic; later wins",
+                  file=sys.stderr)
+        objs[obj] = entry
 
     # ---- attribute lists for DISPLAY/RESET built from railroad boxes:
     # keep box tokens that are real parameter names of this object elsewhere
@@ -639,7 +644,7 @@ def main():
 
     # ---- documentation text
     def param_doc(pname, obj):
-        for cand in (pname, re.sub(r"^NOT?", "", pname)):
+        for cand in (pname, re.sub(r"^NOT", "", pname)):
             docs = param_docs.get(cand, [])
             for ctx, d in docs:
                 if d and obj in ctx:

@@ -14,8 +14,11 @@ Usage:
                                   [--dump FILE]
 
 --dump writes one "<file>\t<line>\t<code>\t<message>" record per diagnostic
-for later triage. Exit code is always 0; this is a measurement tool, not a
-gate (see tools/check_model.py for the model gate).
+for later triage (tabs/newlines in messages are flattened to keep the TSV
+column contract). Exit code is 0 after a successful measurement; missing
+corpus dirs, empty corpora and missing producer binaries are configuration
+errors and exit non-zero. This is a measurement tool, not a gate (see
+tools/check_model.py for the model gate).
 """
 import argparse
 import collections
@@ -53,6 +56,12 @@ def run_check(binary, files):
     p = subprocess.run([binary, "--check"] + files,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, errors="replace")
+    # 0 = clean, 1 = error findings: normal. 2 = usage/IO problem, 101 = a
+    # panic in the analyzer: say so loudly instead of measuring the
+    # truncated stdout as if the run had succeeded (REVIEW.md minor).
+    if p.returncode not in (0, 1):
+        print(f"check failed: rc={p.returncode}\n{p.stderr[:2000]}",
+              file=sys.stderr)
     for ln in p.stdout.splitlines():
         m = RE_CHECK.match(ln)
         if m:
@@ -99,6 +108,7 @@ def main():
         os.makedirs(os.path.dirname(os.path.abspath(args.dump)), exist_ok=True)
         with open(args.dump, "w") as fh:
             for f, ln, c, msg in diags:
+                msg = msg.replace("\t", " ").replace("\n", " ")
                 fh.write(f"{f}\t{ln}\t{c}\t{msg}\n")
         print(f"\ndumped {len(diags)} records to {args.dump}")
 

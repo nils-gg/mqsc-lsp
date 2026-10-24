@@ -40,12 +40,17 @@ def load_extractor():
 
 
 def param_index(model):
-    """(verb, object, param) -> param dict, for a structural diff."""
+    """(verb, object, param) -> param dict, for a structural diff.
+
+    Names are stringified: a nameless param (None) must stay sortable
+    against str keys instead of crashing the diff (py3 compares None
+    against str).
+    """
     out = {}
     for verb, objs in model.get("commands", {}).items():
         for obj, entry in objs.items():
             for p in entry.get("params", []):
-                out[(verb, obj, p.get("name"))] = p
+                out[(verb, obj, str(p.get("name") or "<unnamed>"))] = p
     return out
 
 
