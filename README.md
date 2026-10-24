@@ -13,7 +13,7 @@ reference, context-aware completion, symbols, folding, and semantic tokens.
 
 ## Demo
 
-[![asciicast](https://asciinema.org/a/1269736.svg)](https://asciinema.org/a/1269736)
+[![asciicast](https://asciinema.org/a/1269736.svg)](docs/demo.gif)
 
 The ~40-second recording drives real Neovim against the real server
 ([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
