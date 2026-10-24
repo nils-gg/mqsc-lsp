@@ -8,6 +8,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Recorded feature demo: `docs/demo.cast` (published at
+  https://asciinema.org/a/Yy8RsmzpxK5fRazY), a ~40 s tour through real
+  Neovim driven against the real server — inline diagnostics, a quickfix
+  code action, defined-name completion, definition hover, rename across
+  references, quickfix uses, folds, and the dangling-`-`-at-EOF handling.
+  `tools/record_demo.sh` re-records it; every step asserts the tmux pane
+  (or the saved file) before advancing, so a plain run doubles as an
+  end-to-end UI test
 - Name-length checking (diagnostic code 13 `NAME_TOO_LONG`, warning):
   DEFINE/ALTER/DELETE object names are measured (unquoted, unescaped,
   pattern names exempt) against per-type caps — 48 characters for
