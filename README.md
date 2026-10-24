@@ -11,12 +11,29 @@ AMQMQSC, files typically named `*.mqsc` — the editor smarts they never had:
 real diagnostics with typo suggestions, hover documentation straight from the
 reference, context-aware completion, symbols, folding, and semantic tokens.
 
+## Demo
+
+[![asciicast](https://asciinema.org/a/Yy8RsmzpxK5fRazY.svg)](https://asciinema.org/a/Yy8RsmzpxK5fRazY)
+
+The ~40-second recording drives real Neovim against the real server
+([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
+of deliberate mistakes): diagnostics appear inline on open, a code action
+fixes `MAXMSGS` → `MAXMSGL`, completion offers the names `DEFINE`d in the
+script, hover finds the definition of a queue name, rename follows every
+reference — including `LIKE`/`TARGET` parameters — quickfix lists the uses,
+and even the folds and the dangling `-` at end-of-file come from the server.
+Replay the committed cast locally with `asciinema play docs/demo.cast`, and
+re-record it with `tools/record_demo.sh` (needs tmux + asciinema; every step
+asserts the pane, so a plain run doubles as an end-to-end UI test,
+`--record` captures).
+
 ## Repository layout
 
 ```
 grammars/tree-sitter-mqsc/   tree-sitter grammar + external scanner + corpus tests + highlight queries
 tools/extract_model.py        extracts the command model from the reference markdown
 tools/lsp_smoke_test.py       protocol-level end-to-end test client
+tools/record_demo.sh          drives/records the feature demo (docs/demo.cast)
 model/mqsc-model.json         the extracted model (128 commands, 1336 params, docs, attrs, synonyms)
 server/                       Rust LSP server (tower-lsp + tree-sitter), embeds the model
   src/model.rs                model load/lookup, synonym maps, Levenshtein suggestions
