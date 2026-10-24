@@ -51,7 +51,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 49 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 53 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 24 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
@@ -66,10 +66,11 @@ python3 tools/check_model.py                        # model byte-reproducibility
   binary (`server/target/debug/mqsc-lsp`); pass a binary path as `$1` to
   test release. It runs **whatever binary is on disk** — rebuild first, or a
   stale `target/` silently tests old code.
-- The **`tree-sitter` CLI is not installed on this machine** (no npm/node
-  either), so grammar corpus tests and `tree-sitter generate` cannot run
-  out of the box. Server-side work never needs the CLI: cargo compiles the
-  committed `parser.c`/`scanner.c` directly.
+- The **tree-sitter CLI 0.27.1 is installed** (`~/.local/bin/tree-sitter`;
+  node/npm exist under `/usr/bin`), so `tree-sitter test` works. But never
+  run a bare `tree-sitter generate` here: without `--abi 14` it rewrites the
+  committed `parser.c` to a newer ABI. Server-side work never needs the CLI
+  at all: cargo compiles the committed `parser.c`/`scanner.c` directly.
 - Fast iteration without the protocol, from `server/`:
   `echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe` —
   `probe` reads **stdin** and ignores extra arguments.
@@ -102,9 +103,10 @@ python3 tools/check_model.py                        # model byte-reproducibility
   `~/.profile`): rustc/cargo **1.75.0**, the repo's MSRV. Keep the default
   toolchain at 1.75 — if a build hits pin-related errors, apply the
   downgrade recipe above instead of installing a newer toolchain.
-- No cargo workspace, no npm/node toolchain for the grammar, no formatter
+- No cargo workspace, no npm package scaffolding for the grammar (the
+  tree-sitter CLI is installed directly, see above), no formatter
   config beyond rustfmt defaults, no extension build tooling. `server/` is a
   single standalone crate. CI **does** exist now (`.github/workflows/ci.yml`,
   rust 1.75 pinned: fmt/clippy `-D warnings`/test/release build/smoke/
-  model-guard) — keep its gates green; rustfmt and clippy components are
-  installed locally too.
+  model-guard/`--check` CLI gate with exact exit codes) — keep its gates
+  green; rustfmt and clippy components are installed locally too.
