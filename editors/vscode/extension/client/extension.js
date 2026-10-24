@@ -1,13 +1,10 @@
 // Minimal VS Code client for mqsc-lsp (T-19). Plain CommonJS so the
 // extension runs without a build step; the only dependency is
-// vscode-languageclient. The server binary is NOT bundled — point
-// mqsc.server.path at a build (`cargo build --release` in server/) or an
-// installed release.
+// vscode-languageclient (declared in package.json). The server binary is
+// NOT bundled — point mqsc.server.path at a build (`cargo build --release`
+// in server/) or an installed release.
 const vscode = require('vscode');
-const {
-	LanguageClient,
-	TransportKind,
-} = require('vscode-languageclient/node');
+const { LanguageClient } = require('vscode-languageclient/node');
 
 let client;
 
@@ -40,9 +37,11 @@ function serverOptions(cfg) {
 		delete env.MQSC_LSP_LOG;
 	}
 	const options = { env };
+	// stdio is the default transport; the deprecated TransportKind enum is
+	// gone in vscode-languageclient v9, so just omit it.
 	return {
-		run: { command, transport: TransportKind.stdio, options },
-		debug: { command, transport: TransportKind.stdio, options },
+		run: { command, options },
+		debug: { command, options },
 	};
 }
 
@@ -59,7 +58,14 @@ function activate(context) {
 				{ language: 'mqsc', scheme: 'file' },
 				{ scheme: 'file', pattern: '**/*.mqsc' },
 			],
-			synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher('**/*.mqsc') },
+			// Push the whole `mqsc` configuration section to the server at
+			// startup and whenever it changes (workspace/didChangeConfiguration
+			// via vscode-languageclient). The server reads `{diagnostics:…}`
+			// from that payload; `"default"` values are not severities, so
+			// they fall through to the natural ones. No fileEvents watcher:
+			// the server never touches the filesystem and implements no
+			// didChangeWatchedFiles, so one here would be inert.
+			synchronize: { configurationSection: 'mqsc' },
 			initializationOptions: initOptions,
 		}
 	);
@@ -72,7 +78,6 @@ function activate(context) {
 			if (!e.affectsConfiguration('mqsc')) {
 				return;
 			}
-			const next = vscode.workspace.getConfiguration('mqsc');
 			const logFileChanged = e.affectsConfiguration('mqsc.server.logFile');
 			const pathChanged = e.affectsConfiguration('mqsc.server.path');
 			if (pathChanged || logFileChanged) {
@@ -80,11 +85,9 @@ function activate(context) {
 				client.stop().then(() => client.start()).catch(() => {});
 				return;
 			}
-			if (e.affectsConfiguration('mqsc.diagnostics')) {
-				client.sendNotification('workspace/didChangeConfiguration', {
-					settings: { diagnostics: diagnosticsSettings(next) },
-				});
-			}
+			// Severity changes need no manual push: the `synchronize` block
+			// already forwards the `mqsc` section on change, and a second
+			// hand-rolled notification would race with it (REVIEW.md M4).
 		})
 	);
 

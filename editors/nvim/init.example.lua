@@ -1,4 +1,5 @@
--- Example Neovim setup for mqsc-lsp (Neovim >= 0.8).
+-- Example Neovim setup for mqsc-lsp (Neovim >= 0.10; vim.filetype.add
+-- arrived in 0.10, vim.lsp.start already existed in 0.8).
 -- Drop this into your init.lua / lazy.nvim config and adjust the binary path.
 
 local mqsc_bin = vim.fn.expand("~/projects/mqsc-lsp/server/target/release/mqsc-lsp") -- EDIT ME
