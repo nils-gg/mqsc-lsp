@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::analysis;
 use crate::model::Model;
-use crate::settings::{apply_diagnostic_settings, diagnostic_settings};
+use crate::settings::{apply_diagnostic_settings, diagnostic_settings, settings_warnings};
 
 fn sev_name(s: Option<DiagnosticSeverity>) -> &'static str {
     match s {
@@ -78,12 +78,27 @@ fn check_one(display: &str, text: &str, settings: Option<&Value>, out: &mut Stri
 
 /// Lint each path (`-` = stdin); returns the process exit code.
 pub fn run(files: &[String], settings: Option<&Value>) -> i32 {
+    // A typo in --diag/--settings would otherwise be silently ignored; the
+    // CLI has stderr, so warn there (the LSP path stays silent by design).
+    if let Some(root) = settings {
+        if let Some(map) = diagnostic_settings(root) {
+            for w in settings_warnings(map) {
+                eprintln!("mqsc-lsp: settings warning: {w}");
+            }
+        }
+    }
     let mut any_error = false;
     let mut failed_io = false;
+    let mut saw_stdin = false;
     for f in files {
         // Real dmpmqcfg dumps sometimes carry stray non-UTF-8 bytes in
         // DESCR text; lint a lossy decode instead of skipping the file.
         let (bytes, display) = if f == "-" {
+            if saw_stdin {
+                eprintln!("mqsc-lsp: '-' given more than once; stdin is read once");
+                continue;
+            }
+            saw_stdin = true;
             let mut buf = Vec::new();
             match std::io::stdin().read_to_end(&mut buf) {
                 Ok(_) => (buf, "-"),

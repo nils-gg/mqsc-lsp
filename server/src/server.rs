@@ -34,6 +34,24 @@ pub struct MqscServer {
     snippet_support: AtomicBool,
 }
 
+// Poison-tolerant lock access (REVIEW.md M1). A panic inside a handler
+// unwinds through whatever guards it held and would otherwise poison the
+// shared locks permanently — every later request then answers PoisonError
+// forever (a zombie server). Nothing guarded here has an invariant a panic
+// can corrupt: analysis only reads the tree, and Doc map operations are
+// single atomic inserts/removes — so every access recovers via into_inner.
+// Keep this in sync with telemetry.rs's `Observed`: that layer turns the
+// panic into a -32603 response; these accessors stop it from spreading.
+fn rd<T>(l: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    l.read().unwrap_or_else(|e| e.into_inner())
+}
+fn wr<T>(l: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    l.write().unwrap_or_else(|e| e.into_inner())
+}
+fn mtx<T>(l: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    l.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl MqscServer {
     pub fn new(client: Client) -> Self {
         MqscServer {
@@ -50,7 +68,7 @@ impl MqscServer {
     /// a name defined in a sibling script stops the code-12 hint.
     async fn refresh(&self, uri: &Url) {
         let diags = {
-            let docs = self.docs.read().unwrap();
+            let docs = rd(&self.docs);
             match docs.get(uri) {
                 Some(doc) => {
                     let mut extra = analysis::Definitions::default();
@@ -59,7 +77,7 @@ impl MqscServer {
                             extra.add_external(&other.defs);
                         }
                     }
-                    let tree = doc.tree.lock().unwrap();
+                    let tree = mtx(&doc.tree);
                     let t0 = std::time::Instant::now();
                     let mut diags = analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
                     crate::tlog!(
@@ -69,7 +87,7 @@ impl MqscServer {
                         docs.len(),
                         t0.elapsed().as_millis()
                     );
-                    let cfg = self.settings.read().unwrap();
+                    let cfg = rd(&self.settings);
                     if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
                         apply_diagnostic_settings(&mut diags, map);
                     }
@@ -87,7 +105,7 @@ impl MqscServer {
     /// this merge is cheap).
     fn external_defs(&self, uri: &Url) -> analysis::Definitions {
         let mut merged = analysis::Definitions::default();
-        for (u, doc) in self.docs.read().unwrap().iter() {
+        for (u, doc) in rd(&self.docs).iter() {
             if u != uri {
                 merged.add_external(&doc.defs);
             }
@@ -99,12 +117,12 @@ impl MqscServer {
     /// 0-based line, object type), scanned from the other open documents.
     fn external_defs_map(&self, uri: &Url) -> analysis::ExternalDefs {
         let mut map: analysis::ExternalDefs = Default::default();
-        let docs = self.docs.read().unwrap();
+        let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
             if u == uri {
                 continue;
             }
-            let tree = doc.tree.lock().unwrap();
+            let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
             for s in idx.definitions() {
                 map.entry(s.name.clone()).or_default().push((
@@ -122,10 +140,7 @@ impl MqscServer {
     /// changed for every other document. Not called on did_change — that
     /// would be O(open documents) per keystroke.
     async fn refresh_others(&self, skip: &Url) {
-        let others: Vec<Url> = self
-            .docs
-            .read()
-            .unwrap()
+        let others: Vec<Url> = rd(&self.docs)
             .keys()
             .filter(|u| *u != skip)
             .cloned()
@@ -139,9 +154,9 @@ impl MqscServer {
     /// Some(true)` keeps only DEFINE sites, `Some(false)` only uses.
     fn sites_of_name(&self, name: &str, definitions_only: Option<bool>) -> Vec<Location> {
         let mut out = Vec::new();
-        let docs = self.docs.read().unwrap();
+        let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
-            let tree = doc.tree.lock().unwrap();
+            let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
             for s in idx.sites_of(name) {
                 let keep = match definitions_only {
@@ -165,10 +180,10 @@ impl MqscServer {
         uri: &Url,
         f: impl FnOnce(&str, &tree_sitter::Tree) -> RpcResult<T>,
     ) -> RpcResult<T> {
-        let docs = self.docs.read().unwrap();
+        let docs = rd(&self.docs);
         match docs.get(uri) {
             Some(doc) => {
-                let tree = doc.tree.lock().unwrap();
+                let tree = mtx(&doc.tree);
                 f(&doc.text, &tree)
             }
             None => Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
@@ -212,7 +227,7 @@ impl LanguageServer for MqscServer {
         let _ = Model::load();
 
         if params.initialization_options.is_some() {
-            *self.settings.write().unwrap() = params.initialization_options.clone();
+            *wr(&self.settings) = params.initialization_options.clone();
         }
         let snippet = params
             .capabilities
@@ -288,13 +303,13 @@ impl LanguageServer for MqscServer {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         crate::tlog!("didChangeConfiguration: settings {}", params.settings);
-        *self.settings.write().unwrap() = if params.settings.is_null() {
+        *wr(&self.settings) = if params.settings.is_null() {
             None
         } else {
             Some(params.settings)
         };
         // severities may have changed: republish everything we know about
-        let uris: Vec<Url> = self.docs.read().unwrap().keys().cloned().collect();
+        let uris: Vec<Url> = rd(&self.docs).keys().cloned().collect();
         for uri in uris {
             self.refresh(&uri).await;
         }
@@ -312,7 +327,7 @@ impl LanguageServer for MqscServer {
             defs.names.len(),
             t0.elapsed().as_millis()
         );
-        self.docs.write().unwrap().insert(
+        wr(&self.docs).insert(
             uri.clone(),
             Doc {
                 text,
@@ -342,7 +357,7 @@ impl LanguageServer for MqscServer {
             defs.names.len(),
             t0.elapsed().as_millis()
         );
-        self.docs.write().unwrap().insert(
+        wr(&self.docs).insert(
             uri.clone(),
             Doc {
                 text,
@@ -358,7 +373,7 @@ impl LanguageServer for MqscServer {
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
         crate::tlog!("didClose {}", p.text_document.uri);
-        self.docs.write().unwrap().remove(&p.text_document.uri);
+        wr(&self.docs).remove(&p.text_document.uri);
         // the remaining documents lost their external definitions (T-17)
         self.refresh_others(&p.text_document.uri).await;
     }
@@ -552,9 +567,9 @@ impl LanguageServer for MqscServer {
             ));
         };
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-        let docs = self.docs.read().unwrap();
+        let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
-            let tree = doc.tree.lock().unwrap();
+            let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
             let edits: Vec<TextEdit> = idx
                 .sites_of(&name)
@@ -582,9 +597,9 @@ impl LanguageServer for MqscServer {
     async fn symbol(&self, p: WorkspaceSymbolParams) -> RpcResult<Option<Vec<SymbolInformation>>> {
         let query = p.query.to_ascii_uppercase();
         let mut out = Vec::new();
-        let docs = self.docs.read().unwrap();
+        let docs = rd(&self.docs);
         for (uri, doc) in docs.iter() {
-            let tree = doc.tree.lock().unwrap();
+            let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
             for s in idx.definitions() {
                 if !query.is_empty() && !s.name.contains(&query) {
