@@ -169,6 +169,7 @@ const CODE_MISSING_REQUIRED: i32 = 9;
 const CODE_MISSING_NAME: i32 = 10;
 const CODE_WILDCARD: i32 = 11;
 const CODE_UNDEFINED_OBJECT: i32 = 12;
+const CODE_NAME_TOO_LONG: i32 = 13;
 
 /// Friendly settings key for a diagnostic code (see README Configuration).
 pub fn diag_name(code: i32) -> &'static str {
@@ -185,6 +186,7 @@ pub fn diag_name(code: i32) -> &'static str {
         CODE_MISSING_NAME => "MISSING_NAME",
         CODE_WILDCARD => "WILDCARD",
         CODE_UNDEFINED_OBJECT => "UNDEFINED_OBJECT",
+        CODE_NAME_TOO_LONG => "NAME_TOO_LONG",
         _ => "OTHER",
     }
 }
@@ -913,6 +915,10 @@ fn check_command(
     let positional_required = matches!(e.verb, "DEFINE" | "ALTER" | "DELETE");
 
     let mut seen_name = false;
+    // The node holding the positional object name (a bare word, or the
+    // value inside the first argument group); recorded at the `seen_name`
+    // sites below for the code-13 length check at the end.
+    let mut name_node: Option<Node<'_>> = None;
     // When a word has already been flagged as not-a-parameter, the argument
     // group directly after it belongs to the same typo: report once, not twice.
     let mut mute_next_group = false;
@@ -1023,6 +1029,9 @@ fn check_command(
                 }
                 if !seen_name {
                     seen_name = true; // argument right after the object word = object name
+                                      // The name is the first value inside this group; keep it
+                                      // for the code-13 length check below.
+                    name_node = values.first().copied();
                     continue;
                 }
                 d.push(
@@ -1118,6 +1127,45 @@ fn check_command(
             CODE_MISSING_NAME,
             format!("{} {} requires the object name", e.verb, e.object),
         );
+    }
+
+    // Object-name length (code 13): MQSC caps object names per type — queues,
+    // processes, topics, listeners, ... take 48 characters, channels 1024.
+    // The 2011 reference states these limits only in prose the extractor
+    // cannot capture, so the table is curated in the overlay's `name_max`
+    // section (like the object-reference parameter list: a documented
+    // heuristic). Pattern names (`DEFINE QLOCAL('fin.*')`) are legal MQSC
+    // and exempt; length is measured on the unquoted, unescaped name.
+    if positional_required {
+        if let (Some(n), Some(max)) = (name_node, m.name_max_len(e.object)) {
+            let name = unquote_name(node_text(n, src).trim());
+            if !name.contains(['*', '+', '?']) {
+                let len = name.chars().count();
+                if len > max {
+                    let shown: String = name.chars().take(48).collect();
+                    let more = if len > 48 { " …" } else { "" };
+                    d.push(
+                        lines.range(n.start_byte(), n.end_byte()),
+                        DiagnosticSeverity::WARNING,
+                        CODE_NAME_TOO_LONG,
+                        format!(
+                            "{} name '{shown}{more}' is {len} characters; the maximum is {max}",
+                            e.object
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The literal behind a name token: a quoted string is unwrapped and `''`
+/// unescaped to `'`; a bare word is taken as it stands.
+fn unquote_name(raw: &str) -> String {
+    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
+        raw[1..raw.len() - 1].replace("''", "'")
+    } else {
+        raw.to_string()
     }
 }
 
@@ -2482,6 +2530,60 @@ mod tests {
             "DEFINE CHANNEL(A) CHLTYPE(SDR) TRPTYPE(TCP) XMITQ(NOTDEF)\n",
             CODE_UNDEFINED_OBJECT
         ));
+    }
+
+    #[test]
+    fn code13_object_name_length() {
+        let n48 = "Q".repeat(48);
+        let n49 = "Q".repeat(49);
+        // the queue-name cap is exactly 48 (corpus-confirmed: real 48-char
+        // QLOCAL/QALIAS/PROCESS names exist on live queue managers)
+        assert!(!has(&format!("DEFINE QLOCAL({n48})\n"), CODE_NAME_TOO_LONG));
+        assert!(has(&format!("DEFINE QLOCAL({n49})\n"), CODE_NAME_TOO_LONG));
+        // measured on the unwrapped name, not the quoted token
+        assert!(!has(
+            &format!("DEFINE QLOCAL('{n48}')\n"),
+            CODE_NAME_TOO_LONG
+        ));
+        assert!(has(&format!("ALTER QLOCAL('{n49}')\n"), CODE_NAME_TOO_LONG));
+        assert!(has(&format!("DELETE QLOCAL({n49})\n"), CODE_NAME_TOO_LONG));
+        // a doubled '' counts as one character: 49 apostrophes -> flagged
+        let wrapped = format!("'{}'", "'".repeat(49).replace('\'', "''"));
+        assert!(has(
+            &format!("DEFINE QLOCAL({wrapped})\n"),
+            CODE_NAME_TOO_LONG
+        ));
+        // pattern/wildcard names are legal MQSC regardless of length
+        assert!(!has(
+            &format!("DEFINE QLOCAL('{}*')\n", "Q".repeat(60)),
+            CODE_NAME_TOO_LONG
+        ));
+        // channels cap at 1024, not 48
+        assert!(!has(
+            &format!("DEFINE CHANNEL({}) TRPTYPE(TCP)\n", "C".repeat(100)),
+            CODE_NAME_TOO_LONG
+        ));
+        // object types without a curated cap are never flagged (COMMINFO:
+        // positional name, deliberately not in the name_max table)
+        assert!(!has(
+            &format!("DEFINE COMMINFO({})\n", "G".repeat(200)),
+            CODE_NAME_TOO_LONG
+        ));
+        // non-positional verbs (DISPLAY's name argument) are not checked
+        assert!(!has(
+            &format!("DISPLAY QLOCAL({}) MAXDEPTH\n", "D".repeat(200)),
+            CODE_NAME_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn unquote_name_unwraps_and_unescapes() {
+        assert_eq!(unquote_name("ABC"), "ABC");
+        assert_eq!(unquote_name("'ABC'"), "ABC");
+        assert_eq!(unquote_name("''"), "");
+        assert_eq!(unquote_name("'A''B'"), "A'B");
+        assert_eq!(unquote_name("'"), "'"); // lone quote: parse-error shape
+        assert_eq!(unquote_name("'unterminated"), "'unterminated");
     }
 
     // ------------------------------------------------- enum + integer alts (T-3/T-7)

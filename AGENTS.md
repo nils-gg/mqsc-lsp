@@ -37,7 +37,11 @@ the full picture; this file only lists what is easy to get wrong.
   over the base model at load time (`Model::load`); the base JSON must stay
   byte-identical to `extract_model.py` output (`tools/check_model.py`
   guards it; overlay `add_params` REPLACE base params — remove overlay
-  entries whenever the extractor itself gets fixed).
+  entries whenever the extractor itself gets fixed). Its `name_max`
+  section (object type → max positional-name chars: 48, channels 1024) is
+  read by `Model::name_max_len` to drive code 13 `NAME_TOO_LONG` — like
+  `object_ref_param`, a curated heuristic, since the reference states name
+  limits only in prose the extractor cannot capture.
 - `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
   stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
   tower wrapper catches handler panics into `-32603` responses — handlers
@@ -51,7 +55,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 53 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 56 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 24 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session

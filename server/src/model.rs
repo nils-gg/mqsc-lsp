@@ -57,6 +57,10 @@ struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
     #[serde(default)]
     param_docs: HashMap<String, Vec<(String, String)>>,
+    /// curated object type -> maximum positional name length in chars
+    /// (overlay-only data; the base model JSON never carries this key)
+    #[serde(default)]
+    name_max: HashMap<String, usize>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -79,6 +83,9 @@ struct Overlay {
     patch: HashMap<String, CommandPatch>,
     #[serde(default)]
     param_docs: HashMap<String, Vec<(String, String)>>,
+    /// curated object type -> max positional name length (chars)
+    #[serde(default)]
+    name_max: HashMap<String, usize>,
 }
 
 impl RawModel {
@@ -128,6 +135,8 @@ impl RawModel {
         for (name, docs) in ov.param_docs {
             self.param_docs.entry(name).or_default().extend(docs);
         }
+        // curated name-length table: the overlay is the single source
+        self.name_max.extend(ov.name_max);
     }
 }
 
@@ -201,6 +210,10 @@ pub struct Model {
     pub known_attrs: HashSet<String>,
     pub verbs: &'static [&'static str],
     param_docs: HashMap<String, Vec<(String, String)>>,
+    /// curated object type -> maximum positional name length in chars
+    /// (from the overlay's `name_max` section; absent = limit unknown,
+    /// never flagged). Drives diagnostic 13 NAME_TOO_LONG.
+    name_max: HashMap<String, usize>,
 }
 
 fn norm_syn(s: &str) -> String {
@@ -356,6 +369,7 @@ impl Model {
                 known_attrs,
                 verbs: VERBS,
                 param_docs: raw.param_docs,
+                name_max: raw.name_max,
             }
         })
     }
@@ -411,6 +425,15 @@ impl Model {
             .unwrap_or_default();
         out.sort();
         out
+    }
+
+    /// Curated maximum positional-name length (characters) for an object
+    /// type; `None` = no limit known for that type (never flagged). The
+    /// table is the overlay's `name_max` section — a curated heuristic,
+    /// the 2011 reference records name limits only in prose the extractor
+    /// cannot capture. Backs diagnostic 13 NAME_TOO_LONG.
+    pub fn name_max_len(&self, object: &str) -> Option<usize> {
+        self.name_max.get(&norm_syn(object)).copied()
     }
 
     /// documentation text for a parameter name, preferring contexts that
@@ -648,5 +671,14 @@ mod tests {
         let m = model();
         assert!(m.all_verbs().contains(&"DEFINE"));
         assert!(m.all_verbs().len() >= 15);
+    }
+
+    #[test]
+    fn overlay_name_max_table_loads() {
+        let m = model();
+        assert_eq!(m.name_max_len("QLOCAL"), Some(48));
+        assert_eq!(m.name_max_len("channel"), Some(1024)); // normalized
+        assert_eq!(m.name_max_len("GROUP"), None); // deliberately absent
+        assert_eq!(m.name_max_len(""), None);
     }
 }

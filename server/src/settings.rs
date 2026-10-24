@@ -77,9 +77,9 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
     let Some(obj) = map.as_object() else {
         return Vec::new();
     };
-    // The 12 CODE_* constants in analysis (1..=12); diag_name maps unknown
+    // The 13 CODE_* constants in analysis (1..=13); diag_name maps unknown
     // numbers to "OTHER".
-    let names: Vec<&str> = (1..=12).map(diag_name).collect();
+    let names: Vec<&str> = (1..=13).map(diag_name).collect();
     let mut out = Vec::new();
     for (k, v) in obj {
         let known = match k.parse::<i32>() {
@@ -88,7 +88,7 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
         };
         if !known {
             out.push(format!(
-                "unknown diagnostic code '{k}' (not a number 1-12 or a diag name)"
+                "unknown diagnostic code '{k}' (not a number 1-13 or a diag name)"
             ));
         }
         match v.as_str() {
@@ -178,7 +178,10 @@ mod tests {
 
     #[test]
     fn warnings_flag_typos_and_clean_maps_stay_quiet() {
-        assert!(settings_warnings(&json!({"UNDEFINED_OBJECT": "off", "12": "hint"})).is_empty());
+        assert!(settings_warnings(&json!(
+            {"UNDEFINED_OBJECT": "off", "12": "hint", "NAME_TOO_LONG": "information", "13": "error"}
+        ))
+        .is_empty());
         let w = settings_warnings(&json!({"BOGUS": "off", "12": "purple", "99": "off"}));
         assert_eq!(w.len(), 3, "{w:?}");
         assert!(w.iter().any(|x| x.contains("BOGUS")));

@@ -14,7 +14,16 @@
     "with confidence. Merge semantics: 'commands' upsert whole command",
     "entries; 'patch' keys are 'VERB OBJECT' of an existing entry.",
     "Patch ops: add_params (upsert by name), replace_params (full list",
-    "wins), extend_enum (union value lists)."
+    "wins), extend_enum (union value lists).",
+    "'name_max': curated maximum positional object-name length (characters)",
+    "per object type, driving diagnostic 13 NAME_TOO_LONG. The IBM",
+    "reference states name limits in prose the extractor never captured,",
+    "so this table is a documented heuristic (like the object-reference",
+    "parameter list in analysis.rs): only object types whose limit is",
+    "known with confidence are listed — everything else is never flagged.",
+    "Values cross-checked against the 324-file z/OS dmpmqcfg corpus (no",
+    "real object exceeds its entry; QLOCAL/QALIAS/PROCESS names of exactly",
+    "48 characters exist there, confirming the queue-name limit)."
   ],
   "commands": {
     "SET": {
@@ -1489,5 +1498,23 @@
         }
       ]
     }
+  },
+  "name_max": {
+    "QLOCAL": 48,
+    "QALIAS": 48,
+    "QREMOTE": 48,
+    "QMODEL": 48,
+    "QUEUE": 48,
+    "PROCESS": 48,
+    "NAMELIST": 48,
+    "TOPIC": 48,
+    "AUTHINFO": 48,
+    "CLUSTER": 48,
+    "CLUSQMGR": 48,
+    "LISTENER": 48,
+    "SERVICE": 48,
+    "CMDSERV": 48,
+    "CFSTRUCT": 48,
+    "CHANNEL": 1024
   }
 }
