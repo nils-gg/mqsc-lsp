@@ -83,17 +83,26 @@ async fn main() -> Result<()> {
         }
         let settings = match mqsc_lsp::check::settings_from_overrides(&diag_overrides) {
             Some(v) => Some(v),
-            None => settings_file
-                .as_deref()
-                .map(|p| {
-                    let text = std::fs::read_to_string(p)
-                        .with_context(|| format!("cannot read settings {p}"))?;
-                    anyhow::Ok(
-                        serde_json::from_str::<serde_json::Value>(&text)
-                            .with_context(|| format!("settings {p} is not valid JSON"))?,
-                    )
-                })
-                .transpose()?,
+            None => match settings_file.as_deref() {
+                Some(p) => {
+                    match std::fs::read_to_string(p)
+                        .map_err(|e| format!("cannot read settings {p}: {e}"))
+                        .and_then(|t| {
+                            serde_json::from_str::<serde_json::Value>(&t)
+                                .map_err(|e| format!("settings {p} is not valid JSON: {e}"))
+                        }) {
+                        Ok(v) => Some(v),
+                        Err(msg) => {
+                            // A settings problem is a usage/IO problem: exit 2,
+                            // never 1 ("error diagnostics found") — scripts must
+                            // be able to tell the two apart (REVIEW.md minor).
+                            eprintln!("mqsc-lsp: {msg}");
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                None => None,
+            },
         };
         std::process::exit(mqsc_lsp::check::run(&check_files, settings.as_ref()));
     }

@@ -60,6 +60,14 @@ impl<'a> Lines<'a> {
         let offset = offset.min(self.text.len());
         let line = self.line_of(offset);
         let start = self.starts[line];
+        // Callers legitimately do byte arithmetic (`s + 1`, `end_byte() + 1`)
+        // to address the position just after a character; if that lands
+        // inside a multi-byte char, snap back to its start instead of
+        // panicking the slice below (REVIEW.md C1).
+        let mut offset = offset;
+        while offset > start && !self.text.is_char_boundary(offset) {
+            offset -= 1;
+        }
         let col = utf16_len(&self.text[start..offset]);
         Position {
             line: line as u32,
@@ -2225,10 +2233,20 @@ fn emit(
     mods: u32,
     out: &mut Vec<(usize, usize, usize, u32, u32)>,
 ) {
+    // A node can span a `+`/`-` continuation and therefore contain newlines.
+    // LSP semantic tokens must stay inside their line, so emit one token per
+    // line segment of the node text (continuation lines start at column 0).
+    let text = node_text(n, src).trim_end_matches(['\n', '\r']);
     let p = lines.pos(n.start_byte());
-    let len = utf16_len(node_text(n, src).trim_end_matches(['\n', '\r']));
-    if len > 0 {
-        out.push((p.line as usize, p.character as usize, len, ty, mods));
+    let mut line = p.line as usize;
+    let mut col = p.character as usize;
+    for seg in text.split('\n') {
+        let len = utf16_len(seg.trim_end_matches('\r'));
+        if len > 0 {
+            out.push((line, col, len, ty, mods));
+        }
+        line += 1;
+        col = 0;
     }
 }
 
@@ -2283,6 +2301,64 @@ mod tests {
         // LSP positions inside a surrogate pair snap to its edges
         assert_eq!(l.offset(Position::new(0, 3)), 5);
         assert_eq!(l.offset(Position::new(0, 4)), 6);
+    }
+
+    #[test]
+    fn pos_snaps_inward_from_non_char_boundaries() {
+        // REVIEW.md C1: callers do byte arithmetic (`s + 1`, `end + 1`); an
+        // offset inside a multi-byte char used to panic the UTF-16 column
+        // slice. It must snap back to the char's start instead.
+        let l = Lines::new("éмир");
+        assert_eq!(l.pos(1), Position::new(0, 0)); // inside 'é'
+        assert_eq!(l.pos(3), Position::new(0, 1)); // inside 'м'
+        assert_eq!(l.pos(2), Position::new(0, 1)); // clean boundary
+        assert_eq!(
+            l.range(0, 1), // the shape the 2048-char check builds
+            Range::new(Position::new(0, 0), Position::new(0, 0))
+        );
+    }
+
+    #[test]
+    fn analyze_survives_multibyte_at_panic_sites() {
+        // The exact repro of REVIEW.md C1: a >2048-char line whose first
+        // character is multi-byte lints as a lexical warning, not a panic.
+        let long = "é".to_string() + &"x".repeat(2100) + "\n";
+        assert!(codes(&long).contains(&CODE_LEXICAL));
+        // Adjacent shapes for the other `+1` call sites (error nodes,
+        // missing-name): analyze must run to completion on all of them.
+        for snippet in [
+            "ézz(((\n",
+            "DEFINE QLOCAL(名前) DESCR('ä')\n",
+            "ALTER QLOCAL(AB)中PARAM(1)\n",
+            "DEFINE QLOCAL(Ä)\n",
+        ] {
+            let _ = codes(snippet); // must not panic
+        }
+    }
+
+    #[test]
+    fn semantic_tokens_never_span_lines() {
+        // A string with a `+` continuation is one node covering two lines;
+        // emit() must split it or clients get out-of-line lengths.
+        let text = "DEFINE QLOCAL(A) DESCR('first +\n+ second') REPLACE\n";
+        let tree = parse(text);
+        let line_lens: Vec<usize> = text.split('\n').map(utf16_len).collect();
+        let mut line = 0usize;
+        let mut col = 0usize;
+        for t in semantic_tokens(text, &tree) {
+            line += t.delta_line as usize;
+            col = if t.delta_line == 0 {
+                col + t.delta_start as usize
+            } else {
+                t.delta_start as usize
+            };
+            assert!(
+                col + t.length as usize <= line_lens[line],
+                "token {line}:{col} len {} crosses its line (line is {} wide)",
+                t.length,
+                line_lens[line]
+            );
+        }
     }
 
     #[test]

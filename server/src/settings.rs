@@ -69,6 +69,39 @@ pub fn apply_diagnostic_settings(diags: &mut Vec<Diagnostic>, map: &Value) {
     });
 }
 
+/// Validate a diagnostics settings map: returns human-readable problems —
+/// keys that resolve to no known code, or values that are no severity. The
+/// LSP has no stderr, so it keeps ignoring typos silently; the `--check` CLI
+/// warns with these instead (REVIEW.md minor).
+pub fn settings_warnings(map: &Value) -> Vec<String> {
+    let Some(obj) = map.as_object() else {
+        return Vec::new();
+    };
+    // The 12 CODE_* constants in analysis (1..=12); diag_name maps unknown
+    // numbers to "OTHER".
+    let names: Vec<&str> = (1..=12).map(diag_name).collect();
+    let mut out = Vec::new();
+    for (k, v) in obj {
+        let known = match k.parse::<i32>() {
+            Ok(n) => diag_name(n) != "OTHER",
+            Err(_) => names.contains(&k.as_str()),
+        };
+        if !known {
+            out.push(format!(
+                "unknown diagnostic code '{k}' (not a number 1-12 or a diag name)"
+            ));
+        }
+        match v.as_str() {
+            Some(s) if severity_of(s).is_some() => {}
+            Some(s) => out.push(format!(
+                "'{k}': '{s}' is not a severity (error|warning|information|hint|off)"
+            )),
+            None => out.push(format!("'{k}': value must be a severity string")),
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------- tests (T-10)
 
 #[cfg(test)]
@@ -141,5 +174,15 @@ mod tests {
         }];
         apply_diagnostic_settings(&mut d, &json!({"12": "off"}));
         assert_eq!(d.len(), 1);
+    }
+
+    #[test]
+    fn warnings_flag_typos_and_clean_maps_stay_quiet() {
+        assert!(settings_warnings(&json!({"UNDEFINED_OBJECT": "off", "12": "hint"})).is_empty());
+        let w = settings_warnings(&json!({"BOGUS": "off", "12": "purple", "99": "off"}));
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w.iter().any(|x| x.contains("BOGUS")));
+        assert!(w.iter().any(|x| x.contains("purple")));
+        assert!(w.iter().any(|x| x.contains("99")));
     }
 }
