@@ -12,6 +12,7 @@ const DIAG_CODES = [
 	'PARSE_ERROR', 'UNKNOWN_VERB', 'UNKNOWN_OBJECT', 'UNKNOWN_PARAM',
 	'BAD_VALUE', 'DUPLICATE_PARAM', 'MISSING_CONTINUATION', 'LEXICAL',
 	'MISSING_REQUIRED', 'MISSING_NAME', 'WILDCARD', 'UNDEFINED_OBJECT',
+	'NAME_TOO_LONG',
 ];
 
 /** The `mqsc.diagnostics.*` settings minus the "default" entries, in the

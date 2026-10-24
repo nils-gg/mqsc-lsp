@@ -8,6 +8,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Name-length checking (diagnostic code 13 `NAME_TOO_LONG`, warning):
+  DEFINE/ALTER/DELETE object names are measured (unquoted, unescaped,
+  pattern names exempt) against per-type caps — 48 characters for
+  queues/processes/topics/listeners/…, 1024 for channels. The caps live in
+  a curated `name_max` section of `model/mqsc-overlay.json` because the
+  2011 reference records them only in prose the extractor cannot capture;
+  object types without a curated cap are never flagged. Re-severitisable
+  like every other code (`"NAME_TOO_LONG"` / `"13"`)
 - Cross-file object knowledge (T-17): hint 12, completion, hover,
   definition/references/rename now span all open documents; a name DEFINEd
   in a sibling script no longer triggers the undefined-object hint
@@ -24,7 +32,7 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 - Optional file logging via `--log-file` / `MQSC_LSP_LOG` plus per-request
   panic catching: a panicking handler now answers `-32603` instead of
   killing the connection (T-14)
-- Test suites: 53 unit tests, 3 grammar-corpus tests run through the
+- Test suites: 56 unit tests, 3 grammar-corpus tests run through the
   server's own linked parser (regression guard without the tree-sitter
   CLI), assertive end-to-end LSP smoke harness, `tools/check_model.py`
   regeneration guard (T-10, T-11, T-12)
@@ -33,7 +41,7 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   tag-triggered release workflow producing the linux x86-64 binary
   artifact (T-21, T-22)
 - VS Code extension skeleton under `editors/vscode/extension/` with the
-  settings schema for all 12 diagnostic codes (T-19; not yet tested — no
+  settings schema for all 13 diagnostic codes (T-19; not yet tested — no
   node toolchain was available at authoring time)
 
 ### Changed

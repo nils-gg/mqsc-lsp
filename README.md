@@ -136,6 +136,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
 | 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document |
+| 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 
 ### Configuration
 
@@ -151,7 +152,7 @@ both shapes are accepted:
 Keys are the code number (`"12"`) or its name (`PARSE_ERROR`,
 `UNKNOWN_VERB`, `UNKNOWN_OBJECT`, `UNKNOWN_PARAM`, `BAD_VALUE`,
 `DUPLICATE_PARAM`, `MISSING_CONTINUATION`, `LEXICAL`, `MISSING_REQUIRED`,
-`MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`). Values: `error`,
+`MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`, `NAME_TOO_LONG`). Values: `error`,
 `warning`, `information`, `hint`, `off`. On a settings change, diagnostics
 for all open documents are republished immediately.
 
@@ -176,7 +177,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 53 unit tests + 3 grammar-corpus tests
+cargo test                                       # 56 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
