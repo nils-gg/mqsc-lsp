@@ -8,7 +8,10 @@
 //   * continuation - '-' or '+' as the last non-blank character on a line
 //                    continues the command on the following line. Blank lines
 //                    after a continuation are skipped (MQSC resumes at the
-//                    next non-blank, non-comment line). Comment lines are
+//                    next non-blank, non-comment line). Exception INSIDE a
+//                    string: a blank line there is ambiguous (leading blanks
+//                    after '-' are literal content), so the string is ended
+//                    as unterminated at that point. Comment lines are
 //                    left for the parser, which accepts them as extras.
 //   * string       - '...' with '' as an embedded literal quote. Strings may
 //                    be split across lines with '-' or '+' at the end of a
@@ -22,6 +25,8 @@
 //
 // Whitespace skipping: spaces, tabs and carriage returns are skipped, but a
 // bare newline is NEVER skipped - the grammar needs to see it as a token.
+// Consequence: a pure-CR (classic Mac) file, where every line break is '\r',
+// lexes as one giant line; accepted since real MQSC files are LF or CRLF.
 
 #include "tree_sitter/parser.h"
 

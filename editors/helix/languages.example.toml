@@ -19,11 +19,13 @@ scope = "source.mqsc"
 injection-regex = "mqsc"
 file-types = ["mqsc"]
 comment-token = "*"
-block-comment-tokens = { start = "*", end = "*" }
-roots = []
+# No block comments: '*' only comments in column 0 (wrapping text as
+# *text* would produce wildcard tokens, not a comment).
+roots = ["."]
 indent-tabs = false
 language-server = { command = "/path/to/mqsc-lsp/server/target/release/mqsc-lsp" }  # EDIT ME
 
-[[grammar]]
-name = "mqsc"
-source = { path = "/path/to/mqsc-lsp/grammars/tree-sitter-mqsc" }  # EDIT ME
+# Grammar install: released helix takes grammars from its own runtime
+# sources (`:grammar install` after symlinking, see the comment at the top)
+# — a [[grammar]] entry with source = { path = ... } is not a supported
+# form, so none is declared here.
