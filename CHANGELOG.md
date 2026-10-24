@@ -56,6 +56,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   `-D warnings`; CI enforces both
 
 ### Fixed
+- A `+`/`-` continuation marker with nothing to continue (the rest of the
+  file is blank lines, comments or EOF) no longer derails error recovery:
+  `DEFINE QLOCAL(A) -\n<EOF>` used to report a phantom `Error[4] "Unexpected
+  '*'"` on a nonexistent line (and `Error[1]` when the dash was the file's
+  last byte). The scanner now lexes such a marker as a visible
+  `dangling_continuation` token and the server reports one honest
+  `Error[7] MISSING_CONTINUATION` at the marker itself; the shape is pinned
+  by new corpus cases (REVIEW.md deferred appendix)
 - Analysis no longer panics when a byte offset computed as `start + 1`
   lands inside a multi-byte character. Reachable trigger: a line over
   2048 characters starting with a non-ASCII character — `probe`/`--check`

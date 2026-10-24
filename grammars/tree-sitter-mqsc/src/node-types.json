@@ -125,6 +125,11 @@
     "extra": true
   },
   {
+    "type": "dangling_continuation",
+    "named": true,
+    "extra": true
+  },
+  {
     "type": "integer",
     "named": true
   },

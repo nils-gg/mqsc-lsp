@@ -60,7 +60,7 @@ Prerequisites: tree-sitter CLI **0.27.x** (verified on 0.27.1), a C compiler, `p
 # 1. Grammar (already generated; regenerate only after editing grammar.js)
 cd grammars/tree-sitter-mqsc
 tree-sitter generate --abi 14      # regenerate parser.c / scanner bindings
-tree-sitter test                   # 24 corpus tests (cargo test runs the same
+tree-sitter test                   # 30 corpus tests (cargo test runs the same
                                    # corpus through the server's parser, no CLI needed)
 
 # 2. Model (already extracted and committed; rerun only after editing the
@@ -130,7 +130,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 4 | Error | word is not a parameter/attribute of the resolved command (`MAXMSGS` → "did you mean MAXMSGL?") |
 | 5 | Warning | value not in the parameter's enum, empty value list, value shape mismatch |
 | 6 | Error | parameter used twice in one command |
-| 7 | Error | a parameter word starts a line — missing `+`/`-` continuation on the previous line |
+| 7 | Error | command looks truncated: a parameter word starts a line (missing `+`/`-` continuation on the previous line), or the file ends right after a `+`/`-` continuation marker with no continuation line after it |
 | 8 | Warning | lexical issues: tabs, lines > 2048 chars |
 | 9 | Warning | a *single* required parameter missing (suppressed for multi-alternative commands like DEFINE CHANNEL) |
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
@@ -177,7 +177,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 56 unit tests + 3 grammar-corpus tests
+cargo test                                       # 58 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -209,7 +209,11 @@ non-zero when a check fails.
 - **Continuation chains are permissive**: a `+`/`-` chain continues across
   blank and comment lines (the grammar treats them as transparent). If a
   parameter word starts a line and the previous command was *complete*, the
-  server instead reports the missing `+`/`-` (code 7).
+  server instead reports the missing `+`/`-` (code 7). And if no content
+  line follows the marker at all — the file ends, with only blanks or
+  comments after it — the command is truncated: the parser lexes the marker
+  as a visible `dangling_continuation` token and the server reports the
+  same code 7 at the marker.
 - **MQ 9.x-only constructs are out of scope**: `WHERE`/`SELECT`/`FROM`
   clauses on DISPLAY are accepted as plain parameters (the reference predates
   them), but they are not validated. The reference is also not z/OS-current:

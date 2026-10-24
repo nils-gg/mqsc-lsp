@@ -23,7 +23,10 @@
  * External scanner handles: '*' column-0 comments (swallowing their line
  * break), '...' strings with '' escapes and in-string continuations, and
  * '+'/'-' end-of-line continuations (the continuation token absorbs its line
- * break and any blank lines that follow, per §1.1.3).
+ * break and any blank lines that follow, per §1.1.3). A continuation marker
+ * with no content line after it (only blanks, comments or EOF) becomes a
+ * visible dangling_continuation token instead — the command cannot continue,
+ * and the server reports it as an incomplete command.
  *
  * Real-world tolerance: IBM's own `dmpmqcfg` config dumps wrap long commands
  * and mark the wrap with a '+'. When those wrapped lines are later joined
@@ -43,9 +46,18 @@ module.exports = grammar({
   // '+' is an ignored stray-continuation marker (see note above); it can only
   // ever match a '+' no other token can start (word excludes it, integer is
   // '-?[0-9]', string is external), so it never splits another token.
-  extras: ($) => [/[ \t\r]+/, '+', $.comment],
+  // dangling_continuation is the '+'/'-' marker at end of file: nothing
+  // continues after it, so it cannot be a real continuation (that would make
+  // the parser demand a next item and invent one in error recovery). As an
+  // extra it parses cleanly and the language server flags it (code 7).
+  extras: ($) => [/[ \t\r]+/, '+', $.dangling_continuation, $.comment],
 
-  externals: ($) => [$.comment, $._continuation, $.string],
+  externals: ($) => [
+    $.comment,
+    $._continuation,
+    $.string,
+    $.dangling_continuation,
+  ],
 
   rules: {
     // A MQSC script is a sequence of commands, comments and blank lines.
