@@ -73,7 +73,12 @@ cd server
 cargo build --release              # target/release/mqsc-lsp
 ```
 
-**MSRV pinning:** this machine's toolchain is rustc 1.75 without rustup. If
+No prebuilt binaries are published yet: `.github/workflows/release.yml`
+packages the linux x86-64 binary into a GitHub Release **when a `v*` tag is
+pushed** — until the first tag exists, build from source as shown above.
+
+**MSRV pinning:** the toolchain pinned here is rustc 1.75 (installed per-user
+via rustup, `~/.cargo/bin`). If
 `cargo check` fails with *"requires rustc X"* / *"edition2024"*, downgrade the
 offending transitive crate, e.g. `cargo update -p idna_adapter --precise 1.2.0`.
 The `=` pins in `Cargo.toml` (`idna_adapter`, `hashbrown`, `indexmap`,
@@ -86,6 +91,7 @@ casually or run a broad `cargo update`.
 ```sh
 server/target/release/mqsc-lsp                # stdio (what editors launch)
 server/target/release/mqsc-lsp --tcp 9257     # TCP; one LSP session per connection
+                     #   (no auth and no idle timeout — local/LAN dev use only)
 server/target/release/mqsc-lsp --check FILE... # lint without an editor:
                      #   file:line:col: severity[code]: message, exit 1 on errors
                      #   ('-' = stdin; --diag CODE=SEVERITY / --settings file.json)
@@ -170,7 +176,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 49 unit tests + 3 grammar-corpus tests
+cargo test                                       # 53 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -187,7 +193,8 @@ cargo run --example fold                             # folding ranges
 ```
 
 `.github/workflows/ci.yml` runs exactly this set on rustc 1.75 (fmt and
-clippy `-D warnings` too), with the smoke session against the **release**
+clippy `-D warnings` too), plus an end-to-end `--check` CLI gate with exact
+exit-code assertions, with the smoke session against the **release**
 binary.
 
 `tools/lsp_smoke_test.py` drives the real binary over stdio and prints what
