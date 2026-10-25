@@ -220,6 +220,18 @@ fn rename_text(new_name: &str, site_quoted: bool) -> String {
     }
 }
 
+/// The name the rename caller meant, before it reaches `rename_text`:
+/// whitespace that came with a selection is trimmed, and a name still
+/// wrapped in `'quotes'` is unwrapped. That wrapper arrives from clients
+/// that skip the prepareRename gate (e.g. helix without `rename-support
+/// prepare-support`) and echo their own quote-included selection back as
+/// the new name; unwrapping here keeps quoted sites from being rewritten
+/// as `''NAME''`. Returns None when nothing of a name is left.
+fn rename_target(raw: &str) -> Option<String> {
+    let name = analysis::unquote_name(raw.trim());
+    (!name.trim().is_empty()).then_some(name)
+}
+
 /// prepareRename answer for one site: editors select the returned range
 /// verbatim, so a quoted site reports the name INSIDE the quotes — the
 /// whole token is what the rename edits later replace (they rewrite the
@@ -595,12 +607,17 @@ impl LanguageServer for MqscServer {
     async fn rename(&self, p: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
-        let new_name = p.new_name;
-        if new_name.is_empty() {
-            return Err(tower_lsp::jsonrpc::Error::invalid_params(
-                "new name is empty",
-            ));
-        }
+        // Normalize the caller's name first: see `rename_target` (quoted
+        // selections from clients that skipped prepareRename would else
+        // double-quote every quoted site).
+        let new_name = match rename_target(&p.new_name) {
+            Some(n) => n,
+            None => {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                    "rename needs a non-empty new name",
+                ))
+            }
+        };
         let name = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
             Ok(idx.site_at(pos).map(|s| s.name.clone()))
@@ -697,12 +714,30 @@ impl LanguageServer for MqscServer {
 
 #[cfg(test)]
 mod tests {
-    use super::rename_text;
+    use super::{rename_target, rename_text};
     use lsp_types::PrepareRenameResponse;
 
     #[test]
     fn quoted_sites_stay_quoted() {
         assert_eq!(rename_text("NEW1", true), "'NEW1'");
+    }
+
+    #[test]
+    fn rename_target_unwraps_client_quotes_and_trims() {
+        // plain input passes through
+        assert_eq!(rename_target("NEW1").as_deref(), Some("NEW1"));
+        // a client that skipped prepareRename may echo the selection with
+        // quotes: the name must NOT become ''NEW1'' at quoted sites
+        assert_eq!(rename_target("'NEW1'").as_deref(), Some("NEW1"));
+        // doubled inner quotes unescape like any MQSC string
+        assert_eq!(rename_target("'IT''S'").as_deref(), Some("IT'S"));
+        // selection whitespace is trimmed off the name
+        assert_eq!(rename_target("  NEW1  ").as_deref(), Some("NEW1"));
+        assert_eq!(rename_target(" 'NEW1' ").as_deref(), Some("NEW1"));
+        // nothing of a name left: rejected
+        assert_eq!(rename_target(""), None);
+        assert_eq!(rename_target("   "), None);
+        assert_eq!(rename_target("''"), None);
     }
 
     #[test]

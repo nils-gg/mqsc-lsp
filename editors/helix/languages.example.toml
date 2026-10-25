@@ -25,6 +25,18 @@ roots = ["."]
 indent-tabs = false
 language-server = { command = "/path/to/mqsc-lsp/server/target/release/mqsc-lsp" }  # EDIT ME
 
+# Rename (helix >= 24.03): helix only consults the server's prepareRename
+# gate when prepare-support is on — and it defaults to OFF. Without it helix
+# prompts for a rename on ANY word (DEFINE, QLOCAL, ...), pre-fills with its
+# own word guess (wrong around 'quoted' names) and only fails after you
+# type, because the server rejects non-name positions. With prepare-support
+# the gate holds: verbs refuse immediately ("nothing to rename"), and at a
+# quoted name helix selects the name WITHOUT its quotes.
+rename-support = { prepare-support = true }
+# The rename workspace edit can touch several open documents; helix applies
+# more than the current file's edits only with workspace-edit on.
+workspace-support = { workspace-edit = true }
+
 # Grammar install: released helix takes grammars from its own runtime
 # sources (`:grammar install` after symlinking, see the comment at the top)
 # — a [[grammar]] entry with source = { path = ... } is not a supported
