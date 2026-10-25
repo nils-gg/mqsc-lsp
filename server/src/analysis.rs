@@ -2794,6 +2794,33 @@ mod tests {
     }
 
     #[test]
+    fn no_name_site_on_verb_object_word_or_plain_value() {
+        // DEFINE 0..6 | QLOCAL 7..13 | 'SHOP.FRONT' token 14..26 | REPLACE 28..35
+        let text = "DEFINE QLOCAL('SHOP.FRONT') REPLACE\n";
+        let idx = index_of(text);
+        for (col, what) in [
+            (0u32, "DEFINE first char"),
+            (3, "DEFINE middle"),
+            (7, "QLOCAL first char"),
+            (10, "QLOCAL middle"),
+            (28, "REPLACE first char"),
+            (31, "REPLACE middle"),
+        ] {
+            assert!(
+                idx.site_at(Position::new(0, col)).is_none(),
+                "{what} at col {col} must not be a name site (rename would trigger on a verb)"
+            );
+        }
+        // the quoted name itself is a site, quotes included
+        for col in [14u32, 15, 24, 25] {
+            assert!(
+                idx.site_at(Position::new(0, col)).is_some(),
+                "col {col} is inside the name token"
+            );
+        }
+    }
+
+    #[test]
     fn hover_on_names_reports_the_definition() {
         let text = "DEFINE QLOCAL(SRC)\nDEFINE QALIAS(ALIAS1) TARGET(SRC)\n";
         let m = Model::load();

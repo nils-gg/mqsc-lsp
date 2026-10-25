@@ -68,6 +68,7 @@ DEF QL(X)
 DEFINE QLOCAL(Q1) DESCR('It works')
 DEFINE QALIAS(A2) TARGET(Q1) REPLACE
 DEFINE QALIAS(A3) TARGET(NO.SUCH.Q) REPLACE
+ALTER QLOCAL('DEAD.QUEUE') MAXDEPTH(99)
 """
 uri = "file:///tmp/sample.mqsc"
 
@@ -90,6 +91,9 @@ print("== initialize: hover", bool(caps.get("hoverProvider")),
       "| references", bool(caps.get("referencesProvider")),
       "| rename", bool(caps.get("renameProvider")),
       "| workspace/symbol", bool(caps.get("workspaceSymbolProvider")))
+_rp = caps.get("renameProvider")
+check("rename advertises prepareProvider",
+      isinstance(_rp, dict) and _rp.get("prepareProvider") is True, str(_rp))
 send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri, "languageId": "mqsc", "version": 1, "text": DOC}}})
@@ -356,6 +360,25 @@ after = sum(1 for d in diags2 if d.get("code") == 12)
 print("   code-12 hints after:", after, "| total diags:", len(diags2))
 check("hint 12 present before config", before > 0)
 check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+
+print("\n== prepareRename: verbs refuse; a quoted name selects WITHOUT quotes ==")
+m = request(28, "textDocument/prepareRename", {"textDocument": {"uri": uri},
+                                               "position": {"line": 0, "character": 9}})
+check("prepareRename on the QLOCAL object word is null (no rename on verbs)",
+      m is not None and "error" not in m and m.get("result") is None, str(m))
+m = request(29, "textDocument/prepareRename", {"textDocument": {"uri": uri},
+                                               "position": {"line": 0, "character": 3}})
+check("prepareRename on the DEFINE verb is null",
+      m is not None and "error" not in m and m.get("result") is None, str(m))
+# line 8 = ALTER QLOCAL('DEAD.QUEUE') MAXDEPTH(99): the name token spans
+# 13..25 INCLUDING quotes; prepareRename must report the name only (14..24)
+m = request(30, "textDocument/prepareRename", {"textDocument": {"uri": uri},
+                                               "position": {"line": 8, "character": 16}})
+r0 = (m or {}).get("result") or {}
+check("prepareRename inside 'DEAD.QUEUE' returns the quote-free range + placeholder",
+      r0.get("range", {}).get("start") == {"line": 8, "character": 14}
+      and r0.get("range", {}).get("end") == {"line": 8, "character": 24}
+      and r0.get("placeholder") == "DEAD.QUEUE", str(r0))
 
 print("\n== log file (T-14, via MQSC_LSP_LOG) ==")
 try:

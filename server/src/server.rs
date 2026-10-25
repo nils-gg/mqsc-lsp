@@ -220,6 +220,26 @@ fn rename_text(new_name: &str, site_quoted: bool) -> String {
     }
 }
 
+/// prepareRename answer for one site: editors select the returned range
+/// verbatim, so a quoted site reports the name INSIDE the quotes — the
+/// whole token is what the rename edits later replace (they rewrite the
+/// quoting), but selecting `'NAME'` with quotes is the wrong selection.
+/// The placeholder is the name as written, unquoted.
+fn prepare_site(s: &analysis::NameSite) -> PrepareRenameResponse {
+    let range = if s.quoted && s.range.start.line == s.range.end.line {
+        Range::new(
+            Position::new(s.range.start.line, s.range.start.character + 1),
+            Position::new(s.range.end.line, s.range.end.character.saturating_sub(1)),
+        )
+    } else {
+        s.range
+    };
+    PrepareRenameResponse::RangeWithPlaceholder {
+        range,
+        placeholder: s.word.clone(),
+    }
+}
+
 #[async_trait]
 impl LanguageServer for MqscServer {
     async fn initialize(&self, params: InitializeParams) -> RpcResult<InitializeResult> {
@@ -261,7 +281,14 @@ impl LanguageServer for MqscServer {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(true)),
+                // Options (not Left(true)) so prepareProvider is advertised:
+                // clients then gate rename through prepare_rename below,
+                // which is what keeps the prompt off verbs and the editor
+                // selection honest around 'quoted' names.
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
@@ -544,6 +571,23 @@ impl LanguageServer for MqscServer {
         Ok(Some(locs))
     }
 
+    /// textDocument/prepareRename — the rename gate and its exact range.
+    /// Clients call this before prompting, so words that are not object
+    /// names (the DEFINE verb, the QLOCAL object-type word, plain values
+    /// like DESCR('...')) never open a rename box at all, and for a
+    /// 'quoted' name the returned range covers the name without quotes.
+    async fn prepare_rename(
+        &self,
+        p: TextDocumentPositionParams,
+    ) -> RpcResult<Option<PrepareRenameResponse>> {
+        let uri = &p.text_document.uri;
+        let pos = p.position;
+        self.with_doc(uri, |text, tree| {
+            let idx = analysis::object_index(text, tree, Model::load());
+            Ok(idx.site_at(pos).map(prepare_site))
+        })
+    }
+
     /// Rename every occurrence of the object name under the cursor in every
     /// open document, keeping each site's quoting style (quoted sites stay
     /// quoted; a name that no longer fits the bare-word syntax is quoted
@@ -654,6 +698,7 @@ impl LanguageServer for MqscServer {
 #[cfg(test)]
 mod tests {
     use super::rename_text;
+    use lsp_types::PrepareRenameResponse;
 
     #[test]
     fn quoted_sites_stay_quoted() {
@@ -667,5 +712,53 @@ mod tests {
         assert_eq!(rename_text("1BAD", false), "'1BAD'"); // conservative: quote digit start
         assert_eq!(rename_text("IT'S", false), "'IT''S'"); // MQSC doubles embedded quotes
         assert_eq!(rename_text("", true), "''"); // degenerate but never bare
+    }
+
+    fn site_at_range(quoted: bool) -> crate::analysis::NameSite {
+        crate::analysis::NameSite {
+            name: "SHOP.FRONT".into(),
+            word: "SHOP.FRONT".into(),
+            // the token `SHOP.FRONT` written 'quoted' at columns 14..26
+            range: lsp_types::Range::new(
+                lsp_types::Position::new(0, 14),
+                lsp_types::Position::new(0, 26),
+            ),
+            quoted,
+            defines: None,
+        }
+    }
+
+    #[test]
+    fn prepare_range_of_quoted_site_drops_the_quotes() {
+        match super::prepare_site(&site_at_range(true)) {
+            PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                assert_eq!(
+                    range,
+                    lsp_types::Range::new(
+                        lsp_types::Position::new(0, 15),
+                        lsp_types::Position::new(0, 25)
+                    )
+                );
+                assert_eq!(placeholder, "SHOP.FRONT");
+            }
+            other => panic!("expected range+placeholder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_range_of_bare_site_is_the_token() {
+        match super::prepare_site(&site_at_range(false)) {
+            PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                assert_eq!(
+                    range,
+                    lsp_types::Range::new(
+                        lsp_types::Position::new(0, 14),
+                        lsp_types::Position::new(0, 26)
+                    )
+                );
+                assert_eq!(placeholder, "SHOP.FRONT");
+            }
+            other => panic!("expected range+placeholder, got {other:?}"),
+        }
     }
 }
