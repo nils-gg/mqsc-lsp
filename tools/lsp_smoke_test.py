@@ -380,6 +380,31 @@ check("prepareRename inside 'DEAD.QUEUE' returns the quote-free range + placehol
       and r0.get("range", {}).get("end") == {"line": 8, "character": 24}
       and r0.get("placeholder") == "DEAD.QUEUE", str(r0))
 
+# rename AT the quoted site: the edit spans the whole token, so the quoted
+# form must survive (L0 and L8 are written 'DEAD.QUEUE'), and a client that
+# skipped prepareRename may echo its quote-included selection back as the
+# new name — the server must unwrap it, never write ''X''.
+print("\n== rename at the quoted site keeps quoting; quoted newName unwraps ==")
+m = request(31, "textDocument/rename", {"textDocument": {"uri": uri},
+                                       "position": {"line": 8, "character": 16},
+                                       "newName": "RENAMED.QUEUE"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri, [])
+ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"]) for e in ch)
+print("  ", ed)
+check("quoted rename sites stay quoted (L0 was bare, L8 quoted)",
+      ed == [(0, 14, "RENAMED.QUEUE"), (8, 13, "'RENAMED.QUEUE'")], str(ed))
+m = request(32, "textDocument/rename", {"textDocument": {"uri": uri},
+                                       "position": {"line": 8, "character": 16},
+                                       "newName": "'RENAMED.QUEUE'"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri, [])
+ed = sorted(e["newText"] for e in ch)
+check("newName echoed with quotes is unwrapped (no ''doubling'')",
+      ed == ["'RENAMED.QUEUE'", "RENAMED.QUEUE"], str(ed))
+m = request(33, "textDocument/rename", {"textDocument": {"uri": uri},
+                                       "position": {"line": 8, "character": 16},
+                                       "newName": "  "})
+check("blank newName rejected", m is not None and "error" in m, str(m))
+
 print("\n== log file (T-14, via MQSC_LSP_LOG) ==")
 try:
     with open(LOGPATH) as f:

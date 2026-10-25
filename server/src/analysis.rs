@@ -1176,7 +1176,7 @@ fn check_command(
 
 /// The literal behind a name token: a quoted string is unwrapped and `''`
 /// unescaped to `'`; a bare word is taken as it stands.
-fn unquote_name(raw: &str) -> String {
+pub fn unquote_name(raw: &str) -> String {
     if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
         raw[1..raw.len() - 1].replace("''", "'")
     } else {
