@@ -64,6 +64,19 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   `-D warnings`; CI enforces both
 
 ### Fixed
+- Rename is now gated through `textDocument/prepareRename` (advertised
+  with `prepareProvider: true`). With the previous bare `RenameProvider:
+  true` clients could not ask whether the cursor sits on a renameable
+  name or where that name starts, so editors guessed the word range
+  around `'QUOTED.NAME'` — the rename selection came with the surrounding
+  quotes — and a rename prompt opened on words that are not names (the
+  `DEFINE` verb, the object-type word `QLOCAL`), only to error after the
+  user had typed a new name. `prepare_rename` now answers from the same
+  `ObjectIndex` that definition/references use: `null` anywhere else
+  (Neovim says "Nothing to rename" instead of prompting), and at a name
+  site the quote-free range plus the name as placeholder — quoted sites
+  keep their quoting because the rename edits still replace the whole
+  token
 - A `+`/`-` continuation marker with nothing to continue (the rest of the
   file is blank lines, comments or EOF) no longer derails error recovery:
   `DEFINE QLOCAL(A) -\n<EOF>` used to report a phantom `Error[4] "Unexpected
