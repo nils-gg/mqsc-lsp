@@ -38,9 +38,9 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 -- Native completion wiring for <= 0.11: after typing a trigger character
--- (the server declares "(" "," ":") or after <C-x><C-o>, completion menu
--- comes from the server. (0.12's vim.lsp.completion.trigger does not exist
--- here, hence the omnifunc key in tools/record_demo.sh.)
+-- (the server declares " ", "(", "," ":") or after <C-x><C-o>, completion
+-- menu comes from the server. (0.12's vim.lsp.completion.trigger does not
+-- exist here, hence the omnifunc key in tools/record_demo.sh.)
 vim.api.nvim_create_autocmd("LspAttach", {
 	callback = function(ev)
 		local client = vim.lsp.get_client_by_id(ev.data.client_id)

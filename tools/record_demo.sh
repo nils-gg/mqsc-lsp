@@ -91,25 +91,55 @@ L ")"; S Escape
 wait_pane "completed name" "TARGET(ORDERS.IN)"
 L ":w"; S Enter; P 0.5; wait_file "ALTER QALIAS(SHOP.FRONT) TARGET(ORDERS.IN)"
 
-echo "[4] point out the remaining diagnostics"
+echo "[4] next-word completion: what can legally come next, by command slot"
+S G; P 0.3
+S O                            # open a line above the dangling continuation
+L "DEFINE "; P 1.5
+S C-x C-o; P 1.2               # verb committed -> the object-type slot
+wait_pane "object types after DEFINE" "AUTHINFO" "BUFFPOOL" "CFSTRUCT"
+P 1.0
+S C-e                          # dismiss the asserted menu: nvim would commit
+L "Q"; P 0.4                   # its highlighted candidate on mismatched typing
+S C-x C-o; P 1.2               # base "Q" -> only the Q* object types
+wait_pane "filtered to Q* object types" "QMODEL" "QREMOTE" "QUEUE"
+S C-n; P 0.5                   # step down from QALIAS to QLOCAL
+wait_pane "QLOCAL selected" "DEFINE QLOCAL"
+S C-y; P 0.3
+L "(ADMIN.DESK) "; P 1.5       # positional name supplied -> the parameter slot
+S C-x C-o; P 1.2
+wait_pane "parameters offered after the name" "ACCTQ"
+S C-e
+L "DEFPSIST("; P 1.0            # the group opens the value slot: YES/NO appear
+S C-x C-o; P 1.2
+wait_pane "enum values of DEFPSIST" "YES"
+S C-n; P 0.5                   # step down from NO to YES
+wait_pane "YES selected" "DEFPSIST(YES"
+S C-y; P 0.3                   # accept inside the group; what follows is only
+L ") DESCR('Admin desk alias')"; P 0.5   # non-trigger keys (the nvim-safe path)
+S Escape; P 0.5; S Escape; P 0.3          # first closes a popped menu, second ends insert
+wait_pane "finished command" "DEFINE QLOCAL(ADMIN.DESK) DEFPSIST(YES) DESCR('Admin desk alias')"
+L ":w"; S Enter; P 0.5
+wait_file "DEFINE QLOCAL(ADMIN.DESK) DEFPSIST(YES) DESCR('Admin desk alias')"
+
+echo "[5] point out the remaining diagnostics"
 L "/NO.SUCH.QUEUE"; S Enter; P 0.7
 wait_pane "undefined-object hint" "not DEFINEd"
 L "/WHOSE"; S Enter; P 0.5
 S g l
-wait_pane "name-length warning" "maximum is 48"
+wait_pane "name-length warning" "holds at most 48"
 P 1.2; S C-w o; P 0.3
 S G; P 0.4
 S g l
 wait_pane "dangling continuation" "never continued"
 P 1.4; S C-w o; P 0.4
-echo "[5] hover on the queue name: the server knows the definition"
+echo "[6] hover on the queue name: the server knows the definition"
 L "/ORDERS.IN"; S Enter; P 0.5
 S K
 wait_pane "hover float" "this is the definition"
 P 1.6
 S C-w o; P 0.4
 
-echo "[6] rename the queue at its definition; references follow"
+echo "[7] rename the queue at its definition; references follow"
 S Space r n; P 0.8
 S C-u; P 0.3  # drop the <cword> prefill
 L "ORDERS.INPUT"; S Enter
@@ -120,20 +150,20 @@ L ":w"; S Enter; P 0.5
   || { echo "FAIL: rename did not reach all references"; exit 1; }
 wait_file "ALTER QLOCAL(ORDERS.INPUT)"
 
-echo "[7] references: all uses of the queue in a quickfix window"
+echo "[8] references: all uses of the queue in a quickfix window"
 L "/ORDERS.INPUT"; S Enter; P 0.4
 S Space g r
 wait_pane "quickfix window" "Quickfix" "ORDERS.INPUT"
 P 1.3
 L ":cclose"; S Enter; P 0.4
 
-echo "[8] folds from the server (continuation chains, comment blocks)"
+echo "[9] folds from the server (continuation chains, comment blocks)"
 S z M
 wait_pane "closed folds" "lines"
 P 1.1
 S z R; P 0.6
 
-echo "[9] final view; quit"
+echo "[10] final view; quit"
 S g g; P 1.2
 L "/ORDERS.INPUT"; S Enter; P 1.0
 L ":q"; S Enter

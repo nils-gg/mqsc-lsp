@@ -17,9 +17,12 @@ reference, context-aware completion, symbols, folding, and semantic tokens.
 
 The ~40-second recording drives real Neovim against the real server
 ([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
-of deliberate mistakes): diagnostics appear inline on open, a code action
-fixes `MAXMSGS` → `MAXMSGL`, completion offers the names `DEFINE`d in the
-script, hover finds the definition of a queue name, rename follows every
+of deliberate mistakes): diagnostics appear inline on open — each message
+naming the offending token, what was expected, and the concrete fix — a code
+action fixes `MAXMSGS` → `MAXMSGL`, completion offers the logical next words
+by command slot (the names `DEFINE`d in the script inside `TARGET( … )`, the
+object types a verb accepts after `DEFINE `, and an object's parameters after
+its name), hover finds the definition of a queue name, rename follows every
 reference — including `LIKE`/`TARGET` parameters — quickfix lists the uses,
 and even the folds and the dangling `-` at end-of-file come from the server.
 Replay the committed cast locally with `asciinema play docs/demo.cast`, and
