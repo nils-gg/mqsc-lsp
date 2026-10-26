@@ -145,6 +145,29 @@ if m and m.get("result"):
     for i in items[:5]:
         print(f"   {i['label']:18} kind={i.get('kind')} detail={(i.get('detail') or '')[:70]!r}")
 
+print("\n== logical next words ==")
+check("completion triggers on the blank",
+      " " in ((caps.get("completionProvider") or {}).get("triggerCharacters") or []),
+      str((caps.get("completionProvider") or {}).get("triggerCharacters")))
+# cursor between verb and object word (line 0 "DEFINE |QLOCAL(DEAD.QUEUE)..."):
+# only DEFINE's object types, neither verbs nor parameters
+m = request(401, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 7},
+                                            "context": {"triggerKind": 2, "triggerCharacter": " "}})
+res = ((m or {}).get("result")) or {}
+labels = [i["label"] for i in (res["items"] if isinstance(res, dict) else res)]
+print("  ", labels[:12])
+check("DEFINE offers object types, not verbs/params",
+      "QLOCAL" in labels and "CHANNEL" in labels and "ALTER" not in labels and "DESCR" not in labels,
+      str(labels[:8]))
+# line 4 "DEF |QL(X)": synonym verb commits, object types follow
+m = request(402, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 4},
+                                            "context": {"triggerKind": 2, "triggerCharacter": " "}})
+res = ((m or {}).get("result")) or {}
+labels = [i["label"] for i in (res["items"] if isinstance(res, dict) else res)]
+print("  ", labels[:12])
+check("DEF (synonym verb) offers DEFINE's object types",
+      "QLOCAL" in labels and "DEFINE" not in labels, str(labels[:8]))
+
 print("\n== documentSymbol ==")
 m = request(8, "textDocument/documentSymbol", {"textDocument": {"uri": uri}})
 if m:

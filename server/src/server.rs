@@ -282,7 +282,11 @@ impl LanguageServer for MqscServer {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["(".into(), ",".into(), ":".into()]),
+                    // " " so the logical-next-word lists (object types
+                    // after a verb, names after the object word, params
+                    // after the name) open as soon as a token is committed;
+                    // "(", "," and ":" open value completion inside groups.
+                    trigger_characters: Some(vec![" ".into(), "(".into(), ",".into(), ":".into()]),
                     resolve_provider: Some(false),
                     completion_item: Some(CompletionOptionsCompletionItem {
                         label_details_support: Some(true),

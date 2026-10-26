@@ -1647,95 +1647,111 @@ pub fn completions(
                 ..Default::default()
             }];
             if let Some((_, _, e)) = command_context(cmd, src, m) {
-                let mut defs = collect_definitions(tree, src, m);
-                defs.add_external(extra_defs);
-                let pairs: Vec<(&str, &str)> = defs
-                    .by_obj
-                    .iter()
-                    .filter(|(obj, _)| name_group_matches(obj, e.object))
-                    .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
-                    .collect();
-                out.extend(name_items(&pairs));
+                out.extend(defined_name_items(tree, src, m, extra_defs, e.object));
             }
             filter_prefix(&mut out, &frag);
             return out;
         }
     }
 
-    let cmd_opt = command_containing(tree, off);
+    let cmd_opt = command_on_line(tree, off, line);
     let before_trimmed = before.trim_start();
 
+    // The cursor may sit on a continuation line: tree-sitter keeps the
+    // whole `+` chain in one command node, so a node that started before
+    // the cursor's line means this line is not "fresh" even when nothing
+    // is typed on it yet — a verb could not syntactically continue it.
+    let on_continuation = cmd_opt.map_or(false, |c| c.start_byte() < line);
+
     // fresh line: suggest verbs
-    if cmd_opt.is_none() || before_trimmed.is_empty() {
-        let mut out: Vec<CompletionItem> = m
-            .all_verbs()
-            .iter()
-            .map(|v| CompletionItem {
-                label: v.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some("MQSC command".into()),
-                filter_text: Some(v.to_string()),
-                sort_text: Some(format!("{:03}", v.chars().count())),
-                ..Default::default()
-            })
-            .collect();
+    if cmd_opt.is_none() || (before_trimmed.is_empty() && !on_continuation) {
+        let mut out = verb_items(m);
         filter_prefix(&mut out, &frag);
         return out;
     }
 
     let cmd = cmd_opt.unwrap();
     let items = command_items(cmd);
-    let verb = match items.first() {
-        Some(Item::Verb(n)) => node_text(*n, src),
+    let verb_node = match items.first() {
+        Some(Item::Verb(n)) => *n,
         _ => return vec![],
     };
+    let verb = node_text(verb_node, src);
 
-    // still typing the verb (only one child so far)
-    if items.len() == 1 {
-        let mut out: Vec<CompletionItem> = m
-            .all_verbs()
-            .iter()
-            .map(|v| CompletionItem {
-                label: v.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            })
-            .collect();
+    // Byte where the token under the cursor starts. `frag` is empty when
+    // the cursor sits after whitespace, so "next word" starts at the cursor.
+    let frag_start = off - frag.len();
+
+    // still inside the verb token ("DEF|" / "DEFINE|"): verbs are what a
+    // completion here can complete.
+    if verb_node.start_byte() >= frag_start {
+        let mut out = verb_items(m);
         filter_prefix(&mut out, &frag);
         return out;
     }
 
-    // object position: verb + one word, no groups yet
-    if items.len() <= 2
-        && matches!(items.get(1), Some(Item::Word(_)))
-        && m.resolve(verb, word_at(&items, 1, src)).is_none()
-    {
-        // word under the cursor is the object type being typed
-        let mut out: Vec<CompletionItem> = m
-            .objects_for(verb)
-            .into_iter()
-            .map(|o| CompletionItem {
-                label: o.to_string(),
-                kind: Some(CompletionItemKind::CLASS),
-                detail: Some(format!("{} {o}", verb.to_ascii_uppercase())),
+    // How many items after the verb are fully to the left of the token
+    // under the cursor: that many command slots (object word, object name,
+    // parameters) are already committed, so the cursor completes the next.
+    let item_end = |it: &Item| match it {
+        Item::Verb(n) | Item::Word(n) | Item::Arg(n) | Item::Wild(n) | Item::Val(n) => n.end_byte(),
+    };
+    let committed = items[1..]
+        .iter()
+        .filter(|it| item_end(it) <= frag_start)
+        .count();
+
+    // object-type slot: the only valid next words are the object types
+    // this verb accepts ("DEFINE " -> QLOCAL, CHANNEL, ...). A leading word
+    // that is no verb at all cannot have object types; recover by offering
+    // verbs like a fresh line.
+    if committed == 0 {
+        let mut out = if m.canon_verb(verb).is_some() {
+            object_type_items(m, verb)
+        } else {
+            verb_items(m)
+        };
+        filter_prefix(&mut out, &frag);
+        return out;
+    }
+
+    let (_verb, _obj, e) = match command_context(cmd, src, m) {
+        Some(x) => x,
+        None => return vec![],
+    };
+
+    // object-name slot: a command with a positional name takes that bare
+    // word next (`DEFINE QLOCAL <name>`), so offer the names this script
+    // (and the other open documents, T-17) already DEFINEd for a compatible
+    // object type — a parenthesised name is handled by the argument branch
+    // above. The verbs whose analyzer enforces a real name (MISSING_NAME)
+    // do not accept a '*' pattern here.
+    if committed == 1 && e.positional.is_some() {
+        let mut out = defined_name_items(tree, src, m, extra_defs, e.object);
+        if !matches!(e.verb, "DEFINE" | "ALTER" | "DELETE") {
+            out.push(CompletionItem {
+                label: "*".into(),
+                kind: Some(CompletionItemKind::TEXT),
+                detail: Some("generic name pattern".into()),
+                insert_text: Some("*".into()),
+                sort_text: Some("0*".into()),
                 ..Default::default()
-            })
-            .collect();
-        if out.is_empty() {
-            return out;
+            });
         }
         filter_prefix(&mut out, &frag);
         return out;
     }
 
-    let (_verb, obj, e) = match command_context(cmd, src, m) {
-        Some(x) => x,
-        None => return vec![],
-    };
-
-    // used parameters: words fully before the cursor
+    // used parameters: words fully before the cursor. The object-type word
+    // (slot 0) and the positional object name (slot 1) are never parameters
+    // yet can collide with parameter/attribute labels — counting the object
+    // word here hid the SUB parameter from `DISPLAY SUB <name> ` (the one
+    // such label collision the model contains).
     let mut used: HashSet<String> = HashSet::new();
-    for it in &items[1..] {
+    for (slot, it) in items[1..].iter().enumerate() {
+        if slot == 0 || (slot == 1 && e.positional.is_some()) {
+            continue;
+        }
         if let Item::Word(n) = it {
             if n.end_byte() < off {
                 used.insert(node_text(*n, src).to_ascii_uppercase());
@@ -1825,7 +1841,6 @@ pub fn completions(
     }
 
     filter_prefix(&mut out, &frag);
-    let _ = obj;
     out
 }
 
@@ -1841,6 +1856,57 @@ fn name_items(pairs: &[(&str, &str)]) -> Vec<CompletionItem> {
             ..Default::default()
         })
         .collect()
+}
+
+/// Completion items for the model's verbs — a fresh line, the verb token
+/// still under the cursor, or a leading word that is no verb at all.
+fn verb_items(m: &Model) -> Vec<CompletionItem> {
+    m.all_verbs()
+        .iter()
+        .map(|v| CompletionItem {
+            label: v.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("MQSC command".into()),
+            filter_text: Some(v.to_string()),
+            sort_text: Some(format!("{:03}", v.chars().count())),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// The object types `verb` accepts — the logical next words once the verb
+/// is committed (`DEFINE ` -> CHANNEL, QLOCAL, QALIAS, ...).
+fn object_type_items(m: &Model, verb: &str) -> Vec<CompletionItem> {
+    m.objects_for(verb)
+        .into_iter()
+        .map(|o| CompletionItem {
+            label: o.to_string(),
+            kind: Some(CompletionItemKind::CLASS),
+            detail: Some(format!("{} {o}", verb.to_ascii_uppercase())),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Names DEFINEd in this document (plus the other open ones, T-17) for an
+/// object type compatible with `cmd_obj` — the candidates for the
+/// object-name slot and the name group.
+fn defined_name_items(
+    tree: &Tree,
+    src: &[u8],
+    m: &Model,
+    extra_defs: &Definitions,
+    cmd_obj: &str,
+) -> Vec<CompletionItem> {
+    let mut defs = collect_definitions(tree, src, m);
+    defs.add_external(extra_defs);
+    let pairs: Vec<(&str, &str)> = defs
+        .by_obj
+        .iter()
+        .filter(|(obj, _)| name_group_matches(obj, cmd_obj))
+        .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
+        .collect();
+    name_items(&pairs)
 }
 
 /// Names typed into a command's object-name group: same type, or any
@@ -1865,13 +1931,6 @@ fn snippet_body(p: &Param) -> String {
         ValueKind::Name => "${1:name}".into(),
         ValueKind::Star => "${1:*}".into(),
         ValueKind::Flag => String::new(),
-    }
-}
-
-fn word_at<'t>(items: &[Item<'t>], idx: usize, src: &'t [u8]) -> Option<&'t str> {
-    match items.get(idx) {
-        Some(Item::Word(n)) => Some(node_text(*n, src)),
-        _ => None,
     }
 }
 
@@ -1955,6 +2014,34 @@ fn command_containing(tree: &Tree, off: usize) -> Option<Node<'_>> {
         }
     }
     None
+}
+
+/// The command the cursor completes: the one containing the cursor, or —
+/// when the cursor sits in trailing whitespace, which tree-sitter keeps
+/// out of the node, so after `DEFINE ` the node ends at the verb — the
+/// command starting on the cursor's line before it.
+fn command_on_line(tree: &Tree, off: usize, line_start: usize) -> Option<Node<'_>> {
+    command_containing(tree, off).or_else(|| {
+        let mut best: Option<Node> = None;
+        let mut stack = vec![tree.root_node()];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "command"
+                && n.start_byte() >= line_start
+                && n.start_byte() < off
+                && best.map_or(true, |b| n.start_byte() > b.start_byte())
+            {
+                best = Some(n);
+            }
+            for i in 0..n.child_count() {
+                if let Some(c) = n.child(i) {
+                    if c.start_byte() < off {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+        best
+    })
 }
 
 fn argument_containing(tree: &Tree, off: usize) -> Option<Node<'_>> {
@@ -2930,5 +3017,139 @@ mod tests {
         assert_eq!(syms[0].name, "DEFINE QLOCAL (FUNNY)");
         assert_eq!(syms[1].name, "DISPLAY QLOCAL (FUNNY)");
         assert!(syms[1].detail.as_deref().unwrap().contains("DESCR"));
+    }
+
+    // ------------------------------------------------ completion (next words)
+
+    /// Completion item labels for `text` with the cursor at (line, col).
+    fn compl_labels(text: &str, line: u32, col: u32) -> Vec<String> {
+        let m = Model::load();
+        let tree = parse(text);
+        completions(
+            text,
+            &tree,
+            m,
+            Position::new(line, col),
+            false,
+            &Definitions::default(),
+        )
+        .into_iter()
+        .map(|i| i.label)
+        .collect()
+    }
+
+    #[test]
+    fn committed_verb_completes_object_types() {
+        // after the verb the ONLY completions are the object types the
+        // verb accepts — no verbs, no parameters
+        let l = compl_labels("DEFINE ", 0, 7);
+        for want in ["CHANNEL", "QLOCAL", "QALIAS", "QMODEL", "QREMOTE", "QUEUE"] {
+            assert!(l.contains(&want.to_string()), "{l:?}");
+        }
+        for not in ["DEFINE", "ALTER", "DISPLAY", "DESCR", "REPLACE"] {
+            assert!(!l.contains(&not.to_string()), "{l:?}");
+        }
+        // trailing blanks still count as "right after the verb"
+        assert!(compl_labels("DEFINE     ", 0, 11).contains(&"CHANNEL".into()));
+        assert!(compl_labels("ALTER ", 0, 6).contains(&"QMGR".into()));
+        // synonym verbs canonicalise
+        assert!(compl_labels("DEF ", 0, 4).contains(&"QALIAS".into()));
+        assert!(compl_labels("SET ", 0, 4).contains(&"CHLAUTH".into()));
+        assert_eq!(compl_labels("ADD ", 0, 4), vec!["CHLAUTH".to_string()]);
+    }
+
+    #[test]
+    fn object_word_under_the_cursor_completes_object_types() {
+        // "Q" alone resolves as DEFINE Q = DEFINE QUEUE, but mid-typing the
+        // object word every Q* type must still be offered — not QUEUE's
+        // parameters (this was the old behavior: 0 or wrong completions)
+        let l = compl_labels("DEFINE Q", 0, 8);
+        assert_eq!(
+            l,
+            vec![
+                "QALIAS".to_string(),
+                "QLOCAL".to_string(),
+                "QMODEL".to_string(),
+                "QREMOTE".to_string(),
+                "QUEUE".to_string(),
+            ]
+        );
+        // cursor at the end of the fully typed object word
+        assert_eq!(
+            compl_labels("DEFINE QLOCAL", 0, 13),
+            vec!["QLOCAL".to_string()]
+        );
+    }
+
+    #[test]
+    fn object_name_slot_offers_defined_names() {
+        let text = "DEFINE QLOCAL(Q1)\nDEFINE CHANNEL(CH1)\nDEFINE QLOCAL ";
+        let l = compl_labels(text, 2, 14);
+        assert!(l.contains(&"Q1".to_string()), "{l:?}");
+        assert!(!l.contains(&"CH1".to_string()), "{l:?}"); // other object type
+        assert!(!l.contains(&"*".to_string()), "{l:?}"); // DEFINE needs a real name
+        assert!(!l.contains(&"DESCR".to_string()), "{l:?}"); // params come after
+                                                             // DISPLAY's name slot also accepts the '*' pattern
+        let l = compl_labels("DEFINE QLOCAL(Q1)\nDISPLAY QLOCAL ", 1, 15);
+        assert!(
+            l.contains(&"Q1".to_string()) && l.contains(&"*".to_string()),
+            "{l:?}"
+        );
+    }
+
+    #[test]
+    fn params_follow_the_name_and_used_ones_drop_out() {
+        let l = compl_labels("ALTER QLOCAL(Q1) ", 0, 17);
+        assert!(
+            l.contains(&"DESCR".to_string()) && l.contains(&"MAXMSGL".to_string()),
+            "{l:?}"
+        );
+        let l = compl_labels("DEFINE QLOCAL(Q1) REPLACE ", 0, 26);
+        assert!(!l.contains(&"REPLACE".to_string()), "{l:?}");
+        assert!(l.contains(&"DESCR".to_string()), "{l:?}");
+    }
+
+    #[test]
+    fn object_word_does_not_consume_its_own_parameter_label() {
+        // DISPLAY SUB has a parameter named SUB: the object-type word must
+        // not count as that parameter being used.
+        let l = compl_labels("DISPLAY SUB NAME1 ", 0, 18);
+        assert!(l.contains(&"SUB".to_string()), "{l:?}");
+    }
+
+    #[test]
+    fn verb_and_fresh_line_still_complete_verbs() {
+        let l = compl_labels("", 0, 0);
+        assert!(l.contains(&"DEFINE".to_string()) && l.contains(&"DISPLAY".to_string()));
+        let l = compl_labels("DE", 0, 2);
+        assert!(l.contains(&"DEFINE".to_string()));
+        assert!(!l.contains(&"QLOCAL".to_string())); // object types not yet
+                                                     // a committed leading word that is no verb recovers with verbs
+        let l = compl_labels("FOO ", 0, 4);
+        assert!(l.contains(&"DEFINE".to_string()), "{l:?}");
+    }
+
+    #[test]
+    fn continuation_lines_complete_the_command_slots() {
+        // The `+` chain is one command node spanning several lines. At the
+        // start of a continuation line the slots of THAT command complete —
+        // verbs would be syntactically impossible there.
+        let l = compl_labels("DEFINE QLOCAL(Q1) +\nDESCR('a')\n", 1, 0);
+        assert!(l.contains(&"DESCR".to_string()), "{l:?}");
+        assert!(l.contains(&"REPLACE".to_string()), "{l:?}");
+        for not in ["DEFINE", "ALTER", "DISPLAY"] {
+            assert!(!l.contains(&not.to_string()), "{l:?}");
+        }
+        // typing a param word on the continuation line still filters to it
+        assert_eq!(
+            compl_labels("DEFINE QLOCAL(Q1) +\nDESCR('a')\n", 1, 5),
+            vec!["DESCR".to_string()]
+        );
+        // a parameter used on an EARLIER line of the same command drops out,
+        // one typed later on the same line still counts as available
+        let l = compl_labels("DEFINE QLOCAL(Q1) REPLACE +\nDESCR('a') \n", 1, 12);
+        assert!(!l.contains(&"REPLACE".to_string()), "{l:?}");
+        assert!(!l.contains(&"DESCR".to_string()), "{l:?}");
+        assert!(l.contains(&"DEFPSIST".to_string()), "{l:?}");
     }
 }

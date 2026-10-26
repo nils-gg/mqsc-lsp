@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::Position;
 fn main() {
-    let doc = "DEFINE QLOCAL(DEAD.QUEUE) REPLACE\nDEFINE CHANNEL(SYSTEM.DEF.SDR) CHLTYPE(SDR) TRPTYPE(TCP) CONNAME('9.20.4.20(1412)') SEQWRAP(9999999)\nDISPLAY QLOCAL(*) WHERE(CURRENT_QS)\nALTER QLOCAL(NEW1) MAXMSGS\nDEF QL(X)\nDEFINE QLOCAL(Q1) DESCR('It works')\n";
+    let doc = "DEFINE QLOCAL(DEAD.QUEUE) REPLACE\nDEFINE CHANNEL(SYSTEM.DEF.SDR) CHLTYPE(SDR) TRPTYPE(TCP) CONNAME('9.20.4.20(1412)') SEQWRAP(9999999)\nDISPLAY QLOCAL(*) WHERE(CURRENT_QS)\nALTER QLOCAL(NEW1) MAXMSGS\nDEF QL(X)\nDEFINE QLOCAL(Q1) DESCR('It works')\nDEFINE \nDEFINE     \nALTER \nDISPLAY QUEUE \nDEF \nSET \nDEFINE Q\nDISPLAY QLOCAL \nALTER QLOCAL \nADD \nDEFINE QLOCAL(Q1) REPLACE \nDISPLAY SUB SUB1 \nDEFINE QLOCAL Q\nDEFINE QLOCAL(Q3) +\nDESCR('a')\n";
     for (line, ch) in [
         (0, 0),
         (0, 7),
@@ -22,6 +22,23 @@ fn main() {
         (5, 21),
         (5, 32),
         (5, 40),
+        (6, 7),   // after "DEFINE " -> object types
+        (7, 10),  // after "DEFINE " + trailing blanks
+        (8, 6),   // after "ALTER " -> object types
+        (9, 14),  // after "DISPLAY QUEUE " -> name slot: DEFINEd queues + '*'
+        (10, 4),  // after "DEF " -> object types
+        (11, 4),  // after "SET " -> object types
+        (12, 8),  // after "DEFINE Q" -> Q* object types
+        (13, 14), // cursor at end of "DISPLAY QLOCAL" -> object word
+        (14, 12), // cursor at end of "ALTER QLOCAL" -> object word
+        (15, 4),  // after "ADD " -> object types
+        (16, 26), // after "REPLACE " -> params, REPLACE dropped (used)
+        (17, 17), // "DISPLAY SUB SUB1 " -> params incl. SUB (object word)
+        (18, 15), // after "DEFINE QLOCAL Q" -> DEFINEd names starting Q
+        (19, 20), // after "DEFINE QLOCAL(Q3) +" -> params, DESCR still offered
+        (20, 0),  // start of a continuation line -> params, NOT verbs
+        (20, 5),  // "DESCR" typed on a continuation line -> DESCR itself
+        (20, 6),  // inside "DESCR(" on a continuation line -> group values
     ] {
         let tree = mqsc_lsp::analysis::parse(doc);
         let m = mqsc_lsp::model::Model::load();

@@ -55,7 +55,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 58 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 68 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
