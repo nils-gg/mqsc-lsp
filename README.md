@@ -15,7 +15,7 @@ reference, context-aware completion, symbols, folding, and semantic tokens.
 
 ![asciicast](docs/demo.gif)
 
-The ~40-second recording drives real Neovim against the real server
+The ~70-second recording drives real Neovim against the real server
 ([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
 of deliberate mistakes): diagnostics appear inline on open — each message
 naming the offending token, what was expected, and the concrete fix — a code
