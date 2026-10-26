@@ -515,10 +515,14 @@ pub fn suggest<'a, I: IntoIterator<Item = &'a str>>(
     max: usize,
 ) -> Vec<&'a str> {
     let w = word.to_ascii_uppercase();
+    let thr = 2.max(w.len() / 3);
     let mut hits: Vec<(usize, &str)> = pool
         .into_iter()
+        // edit distance is at least the length difference: reject hopeless
+        // candidates in O(1) so large candidate pools stay cheap
+        .filter(|c| c.len().abs_diff(w.len()) <= thr)
         .map(|c| (distance(&w, c), c))
-        .filter(|(d, _)| *d <= 2.max(w.len() / 3))
+        .filter(|(d, _)| *d <= thr)
         .collect();
     hits.sort_by_key(|(d, c)| (*d, *c));
     hits.truncate(max);
