@@ -128,7 +128,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
 | Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document), use count, "this is the definition" |
 | Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
-| codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5), preferred flag per diagnostic |
+| codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
 | definition / references / rename | object names: jump to the `DEFINE` (across open documents), list all sites, rename every site in every open document keeping quoted/bare style |
 | documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
 | workspace/symbol | every object `DEFINE`d in any open document, grouped by object type |
@@ -152,8 +152,15 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 9 | Warning | a *single* required parameter missing (suppressed for multi-alternative commands like DEFINE CHANNEL) |
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
-| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document |
+| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
+
+Messages follow an Elm-compiler-style contract: every one quotes the
+offending token, says what belongs there instead, and names the concrete fix
+— a suggestion (`did you mean …?`), an example shape (`MAXDEPTH(99)`,
+`DEFINE QLOCAL(NAME)`), or a precise edit (`'TCP'` is quoted, values are
+plain keywords — remove the quotes). Where a fix is mechanical it is also
+offered as a one-click codeAction.
 
 ### Configuration
 

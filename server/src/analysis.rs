@@ -119,6 +119,30 @@ fn mirror_case(sample: &str, canonical_upper: &str) -> String {
     }
 }
 
+/// Compact example value for a parameter, so messages can show the expected
+/// shape (`MAXMSGL(99)`, `DESCR('some text')`, `TARGET(NAME)`, ...) instead
+/// of only naming the parameter.
+fn value_example(p: &Param) -> String {
+    match &p.kind {
+        ValueKind::Flag => String::new(),
+        ValueKind::Integer => "99".into(),
+        ValueKind::Enum(vals) => vals.first().cloned().unwrap_or_else(|| "VALUE".into()),
+        ValueKind::Str | ValueKind::Free => "'some text'".into(),
+        ValueKind::Name => "NAME".into(),
+        ValueKind::Star => "*".into(),
+    }
+}
+
+/// Join candidates for a message, honestly ellipsizing when cut off.
+fn join_capped<'a, I: IntoIterator<Item = &'a str>>(items: I, max: usize) -> String {
+    let all: Vec<&str> = items.into_iter().collect();
+    let mut s = all.iter().take(max).cloned().collect::<Vec<_>>().join(", ");
+    if all.len() > max {
+        s.push_str(", …");
+    }
+    s
+}
+
 fn node_at(root: Node<'_>, off: usize) -> Node<'_> {
     let mut node = root;
     loop {
@@ -284,16 +308,22 @@ pub fn analyze(
                 lines.range(s, s + 1),
                 DiagnosticSeverity::WARNING,
                 CODE_LEXICAL,
-                "MQSC lines may contain blank characters only; replace tabs with blanks".into(),
+                "MQSC does not treat a tab as whitespace — this character becomes part of a \
+                 word and splits the command in the wrong place. Replace the tab with blanks."
+                    .into(),
             );
         }
-        if line.chars().count() > 2048 {
+        let len = line.chars().count();
+        if len > 2048 {
             let s = lines.line_start(i);
             d.push(
                 lines.range(s, s + 1),
                 DiagnosticSeverity::WARNING,
                 CODE_LEXICAL,
-                "MQSC lines are limited to 2048 characters".into(),
+                format!(
+                    "This line has {len} characters; MQSC allows at most 2048. Split the \
+                     command across lines: end a line with '+' to continue it on the next."
+                ),
             );
         }
     }
@@ -306,7 +336,9 @@ pub fn analyze(
             let off = n.start_byte();
             let word_at = first_word(n, src);
             let mut msg = if n.kind() == "MISSING" {
-                "Missing element".to_string()
+                "Incomplete command: something must follow here. A command is \
+                 `VERB OBJECTTYPE(NAME)` followed by `PARAM(value)` items."
+                    .to_string()
             } else {
                 "Syntax error".to_string()
             };
@@ -331,8 +363,12 @@ pub fn analyze(
             if n.kind() == "ERROR" {
                 let snippet: String = node_text(n, src).trim().chars().take(48).collect();
                 if !snippet.is_empty() {
-                    msg = format!("{msg}: `{snippet}`");
+                    msg = format!("{msg}: `{snippet}`.");
                 }
+                msg = format!(
+                    "{msg} Commands look like `VERB OBJECTTYPE(NAME)` plus `PARAM(value)` \
+                     items — check for a stray, missing or unclosed token here."
+                );
             }
             d.push(
                 lines.range(n.start_byte(), n.end_byte().max(n.start_byte() + 1)),
@@ -352,8 +388,9 @@ pub fn analyze(
                 DiagnosticSeverity::ERROR,
                 CODE_MISSING_CONT,
                 format!(
-                    "'{marker}' continuation marker is never continued: the file ends \
-                     without a continuation line for this command"
+                    "'{marker}' continuation marker is never continued: the rest of the file \
+                     has no continuation line for this command, so it is truncated. Add the \
+                     continued part on the next line, or remove the '{marker}'."
                 ),
             );
         }
@@ -622,19 +659,36 @@ fn check_obj_ref(
             if defs.names.contains(&name) || name.starts_with("SYSTEM") {
                 continue;
             }
-            d.push(
+            // suggest from the family this parameter accepts, not every
+            // DEFINEd name: smaller, and never suggests a type-incompatible
+            // name the quickfix would only get flagged again
+            let pool = names_for(defs, Some(r), cmd_obj);
+            let sugs = model::suggest(&name, pool.iter().map(|&(_, n)| n), 3);
+            let scope = if defs.from_other_files {
+                "this script or the other open documents"
+            } else {
+                "this script"
+            };
+            let msg = if sugs.is_empty() {
+                format!(
+                    "'{name}' is not DEFINEd in {scope}; it must already exist in the \
+                     queue manager (or is a typo)",
+                )
+            } else {
+                format!(
+                    "'{name}' is not DEFINEd in {scope} — closest names DEFINEd there are \
+                     {}; use one of them, or keep '{name}' only if it already exists in \
+                     the queue manager",
+                    sugs.join(", ")
+                )
+            };
+            let fixes = sugs.iter().map(|s| s.to_string()).collect();
+            d.push_fixes(
                 lines.range(v.start_byte(), v.end_byte()),
                 DiagnosticSeverity::HINT,
                 CODE_UNDEFINED_OBJECT,
-                format!(
-                    "'{name}' is not DEFINEd in {}; it must already exist in the \
-                     queue manager (or is a typo)",
-                    if defs.from_other_files {
-                        "this script or the other open documents"
-                    } else {
-                        "this script"
-                    }
-                ),
+                msg,
+                fixes,
             );
         }
     }
@@ -832,14 +886,19 @@ fn check_command(
         (None, _) => {
             if m.canon_verb(verb_txt).is_some() {
                 let objs = m.objects_for(verb_txt);
+                let verb_up = verb_txt.to_ascii_uppercase();
+                let example = objs
+                    .first()
+                    .map(|o| format!("{verb_up} {o}(NAME)"))
+                    .unwrap_or_else(|| format!("{verb_up} OBJECTTYPE(NAME)"));
                 d.push(
                     lines.range(verb_node.start_byte(), verb_node.end_byte()),
                     DiagnosticSeverity::INFORMATION,
                     CODE_UNKNOWN_OBJECT,
                     format!(
-                        "{} requires an object type: {}",
-                        verb_txt.to_ascii_uppercase(),
-                        objs.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+                        "{verb_up} needs an object type before the name — e.g. {example}; \
+                         {verb_up} accepts: {}",
+                        join_capped(objs.iter().copied(), 10)
                     ),
                 );
             }
@@ -854,16 +913,17 @@ fn check_command(
                 let verb_up = verb_txt.to_ascii_uppercase();
                 let msg = if sugs.is_empty() {
                     format!(
-                        "Unknown {verb_up} command '{up_w}'; expected one of {}",
-                        objs.iter().take(12).cloned().collect::<Vec<_>>().join(", ")
+                        "MQSC has no `{verb_up} {up_w}` — {verb_up} accepts these object \
+                         types: {}",
+                        join_capped(objs.iter().copied(), 12)
                     )
                 } else {
                     format!(
-                        "Unknown {verb_up} command '{up_w}'; did you mean {}?",
+                        "MQSC has no `{verb_up} {up_w}` — did you mean {}?",
                         sugs.iter()
                             .map(|s| format!("{verb_up} {s}"))
                             .collect::<Vec<_>>()
-                            .join(" / ")
+                            .join(" or ")
                     )
                 };
                 // the fix replaces the whole verb+object span
@@ -893,11 +953,15 @@ fn check_command(
             } else {
                 let sugs = model::suggest(verb_txt, m.all_verbs(), 3);
                 let msg = if sugs.is_empty() {
-                    format!("Unknown command '{verb_txt}'")
+                    format!(
+                        "MQSC has no command '{verb_txt}' — check the spelling; on a fresh \
+                         line completion lists all {} verbs",
+                        m.all_verbs().len()
+                    )
                 } else {
                     format!(
-                        "Unknown command '{verb_txt}'; did you mean {}?",
-                        sugs.join(", ")
+                        "MQSC has no command '{verb_txt}' — did you mean {}?",
+                        sugs.join(" or ")
                     )
                 };
                 let fixes = sugs.iter().map(|s| s.to_string()).collect();
@@ -956,7 +1020,10 @@ fn check_command(
                         lines.range(n.start_byte(), n.end_byte()),
                         DiagnosticSeverity::ERROR,
                         CODE_DUPLICATE,
-                        format!("Parameter {up} appears more than once; MQSC allows it once"),
+                        format!(
+                            "'{up}' appears more than once — MQSC uses each parameter at most \
+                             once per command. Remove this occurrence or merge the two values."
+                        ),
                     );
                 }
                 used.insert(up.clone());
@@ -998,15 +1065,16 @@ fn check_command(
                 let sugs = model::suggest(&up, pool.iter().copied(), 3);
                 let msg = if sugs.is_empty() {
                     format!(
-                        "'{w}' is not a parameter, attribute, or object name of {} {}",
+                        "'{w}' is not a parameter, attribute, or object name of {} {} — \
+                         completion and hover list what this command accepts",
                         e.verb, e.object
                     )
                 } else {
                     format!(
-                        "'{w}' is not a parameter of {} {}; did you mean {}?",
+                        "'{w}' is not a parameter of {} {} — did you mean {}?",
                         e.verb,
                         e.object,
-                        sugs.join(", ")
+                        sugs.join(" or ")
                     )
                 };
                 let fixes = sugs.iter().map(|s| s.to_string()).collect();
@@ -1033,11 +1101,19 @@ fn check_command(
                         check_obj_ref(&up, e.object, &values, src, lines, defs, d);
                     }
                     if values.is_empty() {
+                        let example = e
+                            .by_name
+                            .get(&up)
+                            .map(|&pi| value_example(&e.params[pi]))
+                            .unwrap_or_else(|| "value".to_string());
                         d.push(
                             lines.range(n.start_byte(), n.end_byte()),
                             DiagnosticSeverity::WARNING,
                             CODE_BAD_VALUE,
-                            format!("Parameter {up} has an empty value list"),
+                            format!(
+                                "`{up}()` has no value inside — add one, e.g. {up}({example}), \
+                                 or remove the empty parameter."
+                            ),
                         );
                     }
                     continue;
@@ -1053,7 +1129,12 @@ fn check_command(
                     lines.range(n.start_byte(), n.end_byte()),
                     DiagnosticSeverity::ERROR,
                     CODE_UNKNOWN_PARAM,
-                    "Unexpected argument group: values must follow a parameter name".into(),
+                    format!(
+                        "Unexpected `( … )` group: no parameter stands before these values. \
+                         Parentheses carry the object name right after the object type \
+                         (`{}(NAME)`) or a value right after a parameter (`PARAM(value)`).",
+                        e.object
+                    ),
                 );
             }
             Item::Wild(n) => {
@@ -1068,7 +1149,11 @@ fn check_command(
                     lines.range(n.start_byte(), n.end_byte()),
                     DiagnosticSeverity::ERROR,
                     CODE_UNKNOWN_PARAM,
-                    "Unexpected '*': only one positional object name/pattern is allowed".into(),
+                    format!(
+                        "'*' belongs to no parameter of {} {} — a '*' pattern is only valid \
+                         as the object name, and this command already has one.",
+                        e.verb, e.object
+                    ),
                 );
             }
             Item::Val(n) => {
@@ -1095,11 +1180,19 @@ fn check_command(
 
     // pending parameter word without its group
     if let Some((up, n)) = &pending {
+        let example = e
+            .by_name
+            .get(up)
+            .map(|&pi| value_example(&e.params[pi]))
+            .unwrap_or_else(|| "value".to_string());
         d.push(
             lines.range(n.start_byte(), n.end_byte()),
             DiagnosticSeverity::ERROR,
             CODE_BAD_VALUE,
-            format!("Parameter {up} requires a value in parentheses: {up}( ... )"),
+            format!(
+                "Parameter {up} was given without its value — write {up}({example}); the \
+                 value belongs between parentheses."
+            ),
         );
     }
 
@@ -1128,8 +1221,13 @@ fn check_command(
                 DiagnosticSeverity::WARNING,
                 CODE_MISSING_REQUIRED,
                 format!(
-                    "{} {} usually requires parameter {}",
-                    e.verb, e.object, p.name
+                    "{} {} is usually given parameter {} — expected something like \
+                     {}({})",
+                    e.verb,
+                    e.object,
+                    p.name,
+                    p.name,
+                    value_example(p)
                 ),
             );
         }
@@ -1140,7 +1238,11 @@ fn check_command(
             lines.range(ow.end_byte(), ow.end_byte() + 1),
             DiagnosticSeverity::WARNING,
             CODE_MISSING_NAME,
-            format!("{} {} requires the object name", e.verb, e.object),
+            format!(
+                "{} {} has no object name yet — write {} {}(NAME), or {} {}('NAME.*') \
+                 for a pattern",
+                e.verb, e.object, e.verb, e.object, e.verb, e.object
+            ),
         );
     }
 
@@ -1164,7 +1266,8 @@ fn check_command(
                         DiagnosticSeverity::WARNING,
                         CODE_NAME_TOO_LONG,
                         format!(
-                            "{} name '{shown}{more}' is {len} characters; the maximum is {max}",
+                            "A {} name holds at most {max} characters, but '{shown}{more}' \
+                             has {len} — shorten the name.",
                             e.object
                         ),
                     );
@@ -1239,24 +1342,98 @@ fn check_values(
                         .map(|w| !w.chars().all(|c| c.is_ascii_digit()))
                         .unwrap_or(false);
                 if !ok {
-                    d.push(
-                        lines.range(v.start_byte(), v.end_byte()),
-                        DiagnosticSeverity::WARNING,
-                        CODE_BAD_VALUE,
-                        format!("Parameter {up}: value `{raw}` is not an integer"),
-                    );
+                    // a quoted number is the right number with the wrong
+                    // packaging: name the exact fix instead of just denying
+                    let q_inner = if has_string {
+                        let inner = unquote_name(raw.trim());
+                        (!inner.is_empty() && inner.chars().all(|c| c.is_ascii_digit()))
+                            .then_some(inner)
+                    } else {
+                        None
+                    };
+                    match q_inner {
+                        Some(inner) => d.push_fixes(
+                            lines.range(v.start_byte(), v.end_byte()),
+                            DiagnosticSeverity::WARNING,
+                            CODE_BAD_VALUE,
+                            format!(
+                                "Parameter {up} expects a plain number — `{raw}` is a \
+                                 quoted string; remove the quotes: {up}({inner})."
+                            ),
+                            vec![inner],
+                        ),
+                        None => d.push(
+                            lines.range(v.start_byte(), v.end_byte()),
+                            DiagnosticSeverity::WARNING,
+                            CODE_BAD_VALUE,
+                            format!(
+                                "Parameter {up} expects a whole number, e.g. {up}(99) — \
+                                 `{raw}` is not an integer."
+                            ),
+                        ),
+                    }
                 }
             }
             ValueKind::Enum(vals) => {
                 if has_string {
-                    d.push(
+                    // A quoted value can never match an enum keyword — but it
+                    // is often exactly the keyword (or a misspelling of it)
+                    // with quotes around it: say precisely that.
+                    let inner = unquote_name(raw.trim());
+                    let ui = inner.to_ascii_uppercase();
+                    let list = join_capped(vals.iter().map(|s| s.as_str()), 10);
+                    let quoted_int = p.alt_integer
+                        && !inner.is_empty()
+                        && inner.chars().all(|c| c.is_ascii_digit());
+                    let exact = vals.iter().any(|x| *x == ui);
+                    let sugs = if exact || quoted_int {
+                        Vec::new()
+                    } else {
+                        model::suggest(&ui, vals.iter().map(|s| s.as_str()), 3)
+                    };
+                    let (msg, fixes) = if quoted_int {
+                        (
+                            format!(
+                                "Parameter {up} takes plain integers, e.g. {up}({inner}) — \
+                                 a quoted `{inner}` is a string, not a number.",
+                            ),
+                            vec![inner.clone()],
+                        )
+                    } else if exact {
+                        (
+                            format!(
+                                "Parameter {up}: `{raw}` is quoted, but {} values are plain \
+                                 keywords — remove the quotes: {up}({})",
+                                up,
+                                mirror_case(raw, &ui)
+                            ),
+                            vec![mirror_case(raw, &ui)],
+                        )
+                    } else if sugs.is_empty() {
+                        (
+                            format!(
+                                "Parameter {up}: `{raw}` is a quoted string; its values are \
+                                 plain keywords, one of: {list}.",
+                            ),
+                            Vec::new(),
+                        )
+                    } else {
+                        (
+                            format!(
+                                "Parameter {up}: `{raw}` matches no value — {} accepts the \
+                                 plain keywords {list}; did you mean {}? (no quotes)",
+                                up,
+                                sugs.join(" or ")
+                            ),
+                            sugs.iter().map(|s| mirror_case(raw, s)).collect(),
+                        )
+                    };
+                    d.push_fixes(
                         lines.range(v.start_byte(), v.end_byte()),
                         DiagnosticSeverity::WARNING,
                         CODE_BAD_VALUE,
-                        format!(
-                            "Parameter {up}: value must be one of {}",
-                            vals.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
-                        ),
+                        msg,
+                        fixes,
                     );
                 } else if let Some(w) = &has_word {
                     let uw = w.to_ascii_uppercase();
@@ -1269,13 +1446,17 @@ fn check_values(
                         && w.chars().all(|c| c.is_ascii_digit());
                     if !int_ok && !vals.iter().any(|x| x == &uw) {
                         let sugs = model::suggest(&uw, vals.iter().map(|s| s.as_str()), 3);
-                        let list = vals.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
+                        let list = join_capped(vals.iter().map(|s| s.as_str()), 10);
                         let msg = if sugs.is_empty() {
-                            format!("Parameter {up}: value `{raw}` must be one of: {list}")
+                            format!(
+                                "Parameter {up} accepts only these values: {list} — `{raw}` \
+                                 is not one of them."
+                            )
                         } else {
                             format!(
-                                "Parameter {up}: value `{raw}` must be one of {list} (did you mean {}?)",
-                                sugs.join(", ")
+                                "Parameter {up}: `{raw}` is not one of its accepted values \
+                                 ({list}) — did you mean {}?",
+                                sugs.join(" or ")
                             )
                         };
                         let fixes = sugs.iter().map(|s| mirror_case(raw, s)).collect();
@@ -1305,11 +1486,24 @@ fn check_values(
                 ValueKind::Str | ValueKind::Name | ValueKind::Star | ValueKind::Free
             ) || up == "GENERIC";
             if !allows {
+                let noun = match &p.kind {
+                    ValueKind::Integer => "a whole number".to_string(),
+                    ValueKind::Enum(vals) => {
+                        format!(
+                            "one of its listed keywords ({})",
+                            join_capped(vals.iter().map(|s| s.as_str()), 6)
+                        )
+                    }
+                    _ => "a plain value".to_string(),
+                };
                 d.push(
                     lines.range(v.start_byte(), v.end_byte()),
                     DiagnosticSeverity::WARNING,
                     CODE_WILDCARD,
-                    format!("Parameter {up}: wildcards are not valid in this value"),
+                    format!(
+                        "Parameter {up}: `{raw}` uses a wildcard, but this value must be \
+                         {noun} — remove '*', '+' and '?' from it.",
+                    ),
                 );
             }
         }
@@ -1334,7 +1528,11 @@ fn check_question_wildcards(tree: &Tree, src: &[u8], lines: &Lines, m: &Model, d
                             lines.range(x.start_byte(), x.end_byte()),
                             DiagnosticSeverity::WARNING,
                             CODE_WILDCARD,
-                            "The '?' wildcard is valid only in DISPLAY command patterns".into(),
+                            format!(
+                                "The '?' wildcard only works in DISPLAY name patterns — \
+                                 this command is `{verb}`; use '*' for a multi-character \
+                                 match here."
+                            ),
                         );
                     }
                     for i in 0..x.named_child_count() {
@@ -3151,5 +3349,69 @@ mod tests {
         assert!(!l.contains(&"REPLACE".to_string()), "{l:?}");
         assert!(!l.contains(&"DESCR".to_string()), "{l:?}");
         assert!(l.contains(&"DEFPSIST".to_string()), "{l:?}");
+    }
+
+    #[test]
+    fn messages_quote_the_token_and_show_the_fix() {
+        // Elm-style message contract: name the offending token, say what was
+        // expected, and show the concrete fix (example form or suggestion).
+        let msg = |text: &str, code: i32| -> String {
+            analyze(
+                text,
+                &parse(text),
+                Model::load(),
+                &Url::parse("file:///t.mqsc").unwrap(),
+                &Definitions::default(),
+            )
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(code)))
+            .unwrap_or_else(|| panic!("no diagnostic {code} in {text:?}"))
+            .message
+        };
+        // quoted enum keyword: exact diagnosis + quote-free rewrite shown
+        let d = msg("DEFINE QLOCAL(Q1) QSGDISP('QMGR')\n", CODE_BAD_VALUE);
+        assert!(
+            d.contains("plain keywords") && d.contains("remove the quotes"),
+            "{d}"
+        );
+        // quoted integer for an integer parameter: same treatment
+        assert!(
+            msg("ALTER QLOCAL(Q1) MAXDEPTH('10')\n", CODE_BAD_VALUE).contains("remove the quotes")
+        );
+        // missing name shows the command shape to write
+        let d = msg("DEFINE QLOCAL\n", CODE_MISSING_NAME);
+        assert!(d.contains("DEFINE QLOCAL(NAME)"), "{d}");
+        // unknown object: suggests the real command, whole verb+object span
+        assert!(msg("DEFINE QUBLOCAL(A)\n", CODE_UNKNOWN_OBJECT).contains("DEFINE QLOCAL"));
+        // a parameter left without its group shows a filled-in example
+        assert!(msg("DEFINE QLOCAL(Q1) MAXDEPTH\n", CODE_BAD_VALUE).contains("MAXDEPTH(99)"));
+    }
+
+    #[test]
+    fn undefined_name_hint_suggests_closest_defined_names() {
+        let text = "DEFINE QLOCAL(GHOST)\nDEFINE QALIAS(A) TARGET(GOST)\n";
+        let diags = analyze(
+            text,
+            &parse(text),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT)))
+            .expect("GOST must be hinted");
+        assert!(
+            d.message.contains("closest names DEFINEd there are GHOST"),
+            "{}",
+            d.message
+        );
+        // the suggestion also rides along as a one-click quickfix
+        assert_eq!(
+            d.data.as_ref().and_then(|v| v.get("quickfixes")),
+            Some(&serde_json::json!(["GHOST"])),
+            "{:?}",
+            d.data
+        );
     }
 }
