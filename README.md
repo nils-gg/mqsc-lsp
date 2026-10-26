@@ -127,7 +127,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | --- | --- |
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
 | Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document), use count, "this is the definition" |
-| Completion | verbs on fresh lines, object types after a verb, parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group), enum/flag values inside groups, object names `DEFINE`d in the script **or any other open document**, prefix filtering, docs in the detail pane |
+| Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5), preferred flag per diagnostic |
 | definition / references / rename | object names: jump to the `DEFINE` (across open documents), list all sites, rename every site in every open document keeping quoted/bare style |
 | documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
@@ -135,7 +135,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | foldingRange | multi-line continuation chains + comment blocks |
 | documentHighlight | same-word highlights |
 | semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes); full and range requests; enum values equal to the parameter default carry the `default` modifier |
-| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (`(`, `,`, `:` triggers), code actions, symbols, folding, highlights, semantic tokens, definition, references, rename, workspace symbols |
+| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (` `, `(`, `,`, `:` triggers — the blank opens the next-word list as soon as a token is committed), code actions, symbols, folding, highlights, semantic tokens, definition, references, rename, workspace symbols |
 
 ### Diagnostic codes
 
@@ -176,7 +176,8 @@ for all open documents are republished immediately.
 ### Object knowledge (across open documents)
 
 The server knows what the open documents define and uses it three ways:
-completion inside object-name groups and reference parameters offers the
+completion inside object-name groups, positional name slots and reference
+parameters offers the
 names `DEFINE`d anywhere among the open documents (order-independent),
 hint 12 marks references that **no open document** defines, and
 definition/references/rename/hover navigate between them. That hint is a
