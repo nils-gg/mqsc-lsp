@@ -158,6 +158,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 | 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
+| 15 | Warning | parameter not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated per-parameter availability (`availability` in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `BOQNAME` is z/OS-only, distributed `BACKOUT` needs 9.1). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
 
 Messages follow an Elm-compiler-style contract: every one quotes the
 offending token, says what belongs there instead, and names the concrete fix
@@ -181,9 +182,22 @@ Keys are the code number (`"12"`) or its name (`PARSE_ERROR`,
 `UNKNOWN_VERB`, `UNKNOWN_OBJECT`, `UNKNOWN_PARAM`, `BAD_VALUE`,
 `DUPLICATE_PARAM`, `MISSING_CONTINUATION`, `LEXICAL`, `MISSING_REQUIRED`,
 `MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`, `NAME_TOO_LONG`,
-`MISSING_MANDATORY`). Values: `error`,
+`MISSING_MANDATORY`, `NOT_IN_TARGET`). Values: `error`,
 `warning`, `information`, `hint`, `off`. On a settings change, diagnostics
 for all open documents are republished immediately.
+
+Two further keys declare what the scripts target, enabling diagnostic 15:
+
+```json
+{ "mqsc": { "targetVersion": "9.0", "platform": "distributed" } }
+```
+
+`targetVersion` accepts `9` or `9.4` (a patch level like `9.4.1` is read as
+`9.4`); `platform` is `"distributed"` or `"zos"`. Either side alone is
+enough; both unset (the default) disable diagnostic 15 entirely — nothing
+in the availability table is ever consulted. Values that do not parse are
+ignored, like unrecognized severities. The `--check` CLI honors them via
+`--settings` too (the file may carry them flat or under `"mqsc"`).
 
 ### Object knowledge (across open documents)
 
@@ -229,7 +243,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 90 unit tests + 3 grammar-corpus tests
+cargo test                                       # 102 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -274,7 +288,9 @@ non-zero when a check fails.
   clearly-labelled curated add-on merged over the extracted model at load
   time: post-2011 commands, the distributed `BACKOUT` spelling of the
   backout-queue parameter, per-type `name_max` limits, per-type `mandatory`
-  property rules (diagnostic 14).
+  property rules (diagnostic 14), and the per-parameter `availability`
+  table behind diagnostic 15 (version/platform, consulted only when a
+  target is configured).
 - **Model gaps are warnings, never errors.** The extractor recovers some
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade

@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::analysis;
 use crate::model::Model;
-use crate::settings::{apply_diagnostic_settings, diagnostic_settings, settings_warnings};
+use crate::settings::{apply_diagnostic_settings, diagnostic_settings, settings_warnings, Target};
 
 fn sev_name(s: Option<DiagnosticSeverity>) -> &'static str {
     match s {
@@ -41,7 +41,17 @@ fn check_one(display: &str, text: &str, settings: Option<&Value>, out: &mut Stri
     let uri = Url::from_directory_path(if display == "-" { "<stdin>" } else { display })
         .unwrap_or_else(|_| Url::parse("file:///-").unwrap());
     let tree = analysis::parse(text);
-    let mut diags = analysis::analyze(text, &tree, m, &uri, &analysis::Definitions::default());
+    // a settings root may also carry mqsc.targetVersion / mqsc.platform:
+    // the availability rules (code 15) are otherwise dormant here too
+    let target = settings.map(Target::from_settings).unwrap_or_default();
+    let mut diags = analysis::analyze_with_target(
+        text,
+        &tree,
+        m,
+        &uri,
+        &analysis::Definitions::default(),
+        &target,
+    );
     if let Some(root) = settings {
         if let Some(map) = diagnostic_settings(root) {
             apply_diagnostic_settings(&mut diags, map);

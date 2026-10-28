@@ -18,8 +18,10 @@ and follow the published contribution schemas.
   definition/references/rename (across open files), document and workspace
   symbols, folding, semantic tokens
 - Settings UI for the binary path, the server log file (writes
-  `MQSC_LSP_LOG`) and a severity override per diagnostic code
-  (`default|error|warning|information|hint|off`), applied live via
+  `MQSC_LSP_LOG`), the MQ target (`mqsc.targetVersion` /
+  `mqsc.platform`, which enable diagnostic 15 NOT_IN_TARGET; empty by
+  default = no availability checks) and a severity override per diagnostic
+  code (`default|error|warning|information|hint|off`), applied live via
   `workspace/didChangeConfiguration`
 
 ## What the extension does NOT do

@@ -13,6 +13,7 @@ use serde_json::json;
 use tree_sitter::{Language, Node, Tree};
 
 use crate::model::{self, Model, Param, ValueKind};
+use crate::settings::{AvailViolation, Target};
 
 extern "C" {
     fn tree_sitter_mqsc() -> *const tree_sitter::ffi::TSLanguage;
@@ -195,6 +196,10 @@ const CODE_WILDCARD: i32 = 11;
 const CODE_UNDEFINED_OBJECT: i32 = 12;
 const CODE_NAME_TOO_LONG: i32 = 13;
 const CODE_MISSING_MANDATORY: i32 = 14;
+/// Parameter exists in the model but not for the user-configured MQ version
+/// or platform (`mqsc.targetVersion` / `mqsc.platform`). Never fires when no
+/// target is configured.
+const CODE_NOT_IN_TARGET: i32 = 15;
 
 /// Friendly settings key for a diagnostic code (see README Configuration).
 pub fn diag_name(code: i32) -> &'static str {
@@ -213,6 +218,7 @@ pub fn diag_name(code: i32) -> &'static str {
         CODE_UNDEFINED_OBJECT => "UNDEFINED_OBJECT",
         CODE_NAME_TOO_LONG => "NAME_TOO_LONG",
         CODE_MISSING_MANDATORY => "MISSING_MANDATORY",
+        CODE_NOT_IN_TARGET => "NOT_IN_TARGET",
         _ => "OTHER",
     }
 }
@@ -291,12 +297,30 @@ fn command_items(cmd: Node<'_>) -> Vec<Item<'_>> {
     items
 }
 
+/// Analyze with no target configured: every availability rule dormant
+/// (the pre-Phase-4 behavior). Tests and callers without settings use this.
 pub fn analyze(
+    text: &str,
+    tree: &Tree,
+    m: &Model,
+    uri: &Url,
+    extra_defs: &Definitions,
+) -> Vec<Diagnostic> {
+    analyze_with_target(text, tree, m, uri, extra_defs, &Target::default())
+}
+
+/// Analyze under a configured MQ target: parameters whose curated
+/// availability rule conflicts with `target` get code 15 NOT_IN_TARGET,
+/// and a not-in-model parameter that the target's version/platform does
+/// provide stays unflagged. With `target` unset this is byte-identical to
+/// `analyze`.
+pub fn analyze_with_target(
     text: &str,
     tree: &Tree,
     m: &Model,
     _uri: &Url,
     extra_defs: &Definitions,
+    target: &Target,
 ) -> Vec<Diagnostic> {
     let src = text.as_bytes();
     let lines = Lines::new(text);
@@ -411,7 +435,7 @@ pub fn analyze(
     let mut cursor = root.walk();
     for cmd in root.named_children(&mut cursor) {
         if cmd.kind() == "command" {
-            check_command(cmd, src, &lines, m, &defs, &mut d);
+            check_command(cmd, src, &lines, m, &defs, target, &mut d);
         }
     }
 
@@ -753,6 +777,61 @@ struct RefSubject<'a> {
     targtype: Option<&'a str>,
 }
 
+/// Code 15 NOT_IN_TARGET: a parameter the script uses is not available for
+/// the user-configured MQ target (mqsc.targetVersion / mqsc.platform),
+/// per the overlay's curated `availability` rules. Fires nowhere unless a
+/// target is configured, and never for rules without usable data — the
+/// conservative convention of name_max/mandatory throughout.
+fn check_target_avail(
+    m: &Model,
+    target: &Target,
+    pname: &str,
+    cmd_obj: &str,
+    node: Node<'_>,
+    lines: &Lines,
+    d: &mut Diags,
+) {
+    if !target.configured() {
+        return;
+    }
+    let Some(rule) = m.availability_for(pname, cmd_obj) else {
+        return;
+    };
+    let Some(violation) = target.gate(rule) else {
+        return;
+    };
+    let version = target
+        .version
+        .map_or_else(|| "unset".to_string(), |v| v.to_string());
+    let head = match violation {
+        AvailViolation::TooOld(since) => format!(
+            "'{pname}' is available from MQ {since} — mqsc.targetVersion is {version}. \
+             Remove the parameter or raise targetVersion to the queue manager's version."
+        ),
+        AvailViolation::TooNew(until) => format!(
+            "'{pname}' is available up to MQ {until} — mqsc.targetVersion is {version}. \
+             Remove the parameter or lower targetVersion to the queue manager's version."
+        ),
+        AvailViolation::WrongPlatform(rp) => format!(
+            "'{pname}' is only available on {rp} — mqsc.platform is {}.",
+            target
+                .platform
+                .map_or_else(|| "unset".to_string(), |p| p.to_string())
+        ),
+    };
+    let msg = if rule.note.is_empty() {
+        head
+    } else {
+        format!("{head} {}", rule.note)
+    };
+    d.push(
+        lines.range(node.start_byte(), node.end_byte()),
+        DiagnosticSeverity::WARNING,
+        CODE_NOT_IN_TARGET,
+        msg,
+    );
+}
+
 /// Code 12: an object-name reference (TARGET, XMITQ, LIKE, ...) that no
 /// DEFINE in this script provides. Hint severity on purpose: runmqsc
 /// scripts routinely reference queue-manager objects that exist already.
@@ -1036,6 +1115,7 @@ fn check_command(
     lines: &Lines,
     m: &Model,
     defs: &Definitions,
+    target: &Target,
     d: &mut Diags,
 ) {
     let items = command_items(cmd);
@@ -1229,6 +1309,10 @@ fn check_command(
                     if wants_group && !matches!(p.kind, ValueKind::Flag) {
                         pending = Some((up.clone(), *n));
                     }
+                    // code 15: the model knows the parameter, the configured
+                    // target may not (one report per use: the group that
+                    // follows rides with this word)
+                    check_target_avail(m, target, &up, e.object, *n, lines, d);
                     continue;
                 }
                 if e.attr_set.contains(&up) {
@@ -1246,6 +1330,20 @@ fn check_command(
                     // instead of an "Unexpected argument group" cascade.
                     let next_is_group = matches!(items.get(idx + k + 1), Some(Item::Arg(_)));
                     if !next_is_group {
+                        continue;
+                    }
+                }
+                // A word that is not a parameter of this command but whose
+                // availability IS curated: the 2011-based model cannot know
+                // modern parameters, the configured target can. With a
+                // target that provides it, it is not an unknown parameter;
+                // with a target it violates, it gets code 15 instead.
+                if target.configured() {
+                    if let Some(rule) = m.availability_for(&up, e.object) {
+                        if target.gate(rule).is_some() {
+                            check_target_avail(m, target, &up, e.object, *n, lines, d);
+                        }
+                        mute_next_group = true; // the group belongs to it
                         continue;
                     }
                 }
@@ -2063,11 +2161,38 @@ pub fn hover(
 }
 
 fn doc_for(m: &Model, p: &Param, obj: &str) -> String {
-    if !p.description.is_empty() {
+    let base = if !p.description.is_empty() {
         p.description.clone()
     } else {
         m.param_doc(&p.name, obj).unwrap_or("").to_string()
-    }
+    };
+    // curated availability facts (overlay), shown wherever the parameter is
+    // documented — informational, independent of any configured target
+    let avail = match m.availability_for(&p.name, obj) {
+        Some(r) => {
+            let mut bits: Vec<String> = Vec::new();
+            if let Some(pl) = r
+                .platform
+                .as_deref()
+                .and_then(crate::settings::Platform::parse)
+            {
+                bits.push(format!("available on {pl} only"));
+            }
+            if let Some(s) = r.since.as_deref() {
+                bits.push(format!("from MQ {s}"));
+            }
+            if let Some(u) = r.until.as_deref() {
+                bits.push(format!("up to MQ {u}"));
+            }
+            if bits.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n_Availability (curated): {}._", bits.join(", "))
+            }
+        }
+        None => String::new(),
+    };
+    format!("{base}{avail}")
 }
 
 fn preceding_word<'t>(
@@ -2928,6 +3053,45 @@ mod tests {
 
     fn has(text: &str, code: i32) -> bool {
         codes(text).contains(&code)
+    }
+
+    /// Same under a configured target (T-19): availability rules are live.
+    fn codes_t(text: &str, target: &Target) -> Vec<i32> {
+        let m = Model::load();
+        let tree = parse(text);
+        let uri = Url::parse("file:///fixture.mqsc").unwrap();
+        analyze_with_target(text, &tree, m, &uri, &Definitions::default(), target)
+            .into_iter()
+            .filter_map(|d| match d.code {
+                Some(lsp::NumberOrString::Number(c)) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn target(version: &str, platform: &str) -> Target {
+        Target {
+            version: crate::settings::MqVersion::parse(version),
+            platform: crate::settings::Platform::parse(platform),
+        }
+    }
+
+    /// Message of the first `code` diagnostic under a target.
+    fn msg_t(text: &str, code: i32, target: &Target) -> String {
+        let m = Model::load();
+        let tree = parse(text);
+        analyze_with_target(
+            text,
+            &tree,
+            m,
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+            target,
+        )
+        .into_iter()
+        .find(|d| d.code == Some(lsp::NumberOrString::Number(code)))
+        .unwrap_or_else(|| panic!("no diagnostic {code} in {text:?}"))
+        .message
     }
 
     /// Message of the first diagnostic with `code`, for message-contract tests.
@@ -4220,5 +4384,99 @@ mod tests {
         // BOQNAME(NO) and DEADQ(NONE) special values are not, and the INITQ
         // of START CHINIT names a queue MANAGER, not a queue (no hint).
         assert_eq!(hint_lines, vec![1, 3], "{diags:?}");
+    }
+
+    // ------------------------------------------------- T-19 target availability
+
+    #[test]
+    fn no_target_means_no_availability_checks() {
+        // pre-Phase-4 behavior: BACKOUT on a 9.0-era script is nobody's business
+        assert!(!has("DEFINE QLOCAL(A) BACKOUT(Q)\n", CODE_NOT_IN_TARGET));
+        // and the plain helpers stay target-less even for a z/OS-only param
+        assert!(!has("DEFINE QLOCAL(A) BOQNAME(QM1)\n", CODE_NOT_IN_TARGET));
+    }
+
+    #[test]
+    fn too_old_param_flags_with_the_introduced_version() {
+        let t = target("9.0", "distributed");
+        let c = codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t);
+        assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        let m = msg_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", CODE_NOT_IN_TARGET, &t);
+        assert!(m.contains("9.1") && m.contains("targetVersion"), "{m}");
+    }
+
+    #[test]
+    fn new_enough_target_leaves_it_alone() {
+        let t = target("9.4", "distributed");
+        assert!(!codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t).contains(&CODE_NOT_IN_TARGET));
+        // exactly the `since` version is available, not too old
+        let t = target("9.1", "distributed");
+        assert!(!codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t).contains(&CODE_NOT_IN_TARGET));
+    }
+
+    #[test]
+    fn wrong_platform_flags_and_names_the_other_platform() {
+        let t = target("9.4", "distributed");
+        let m = msg_t("DEFINE QLOCAL(A) BOQNAME(QM1)\n", CODE_NOT_IN_TARGET, &t);
+        assert!(m.contains("z/OS"), "{m}");
+        // and on z/OS the same script is clean for that param
+        let z = target("9.4", "zos");
+        assert!(!codes_t("DEFINE QLOCAL(A) BOQNAME(QM1)\n", &z).contains(&CODE_NOT_IN_TARGET));
+        // CLUSNL on distributed likewise
+        assert!(codes_t("ALTER QLOCAL(A) CLUSNL(X)\n", &t).contains(&CODE_NOT_IN_TARGET));
+    }
+
+    #[test]
+    fn obj_restricted_rule_only_fires_for_those_objects() {
+        // BACKOUT is curated for QLOCAL/QREMOTE only: on a QMODEL it is an
+        // unknown parameter (code 4), and with a target it stays code 4 —
+        // the obj-restricted rule must not make it code 15.
+        let t = target("9.0", "distributed");
+        let c = codes_t("ALTER QMODEL(M) BACKOUT(Q)\n", &t);
+        assert!(c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
+        assert!(!c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+    }
+
+    #[test]
+    fn curated_param_in_model_follows_the_target() {
+        // TOQLOCAL is a base-model MOVE parameter but z/OS-only per the
+        // curated rule: a z/OS target accepts it, a distributed target
+        // flags 15 (the Word branch covers model-known params too), and
+        // with no target nothing fires.
+        let z = target("9.4", "zos");
+        let c = codes_t("MOVE QLOCAL(A) TOQLOCAL(B)\n", &z);
+        assert!(!c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
+        assert!(!c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        let d = target("9.4", "distributed");
+        let c = codes_t("MOVE QLOCAL(A) TOQLOCAL(B)\n", &d);
+        assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        assert!(!c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
+        assert!(!codes("MOVE QLOCAL(A) TOQLOCAL(B)\n").contains(&CODE_NOT_IN_TARGET));
+    }
+
+    #[test]
+    fn availability_lookup_prefers_obj_rule_and_normalizes_synonyms() {
+        let m = Model::load();
+        // general rule (no obj) found for any command carrying it
+        assert!(m.availability_for("CLUSNL", "QALIAS").is_some());
+        // obj-restricted rule matches only its objects
+        assert!(m.availability_for("BACKOUT", "QREMOTE").is_some());
+        assert!(m.availability_for("BACKOUT", "QMODEL").is_none());
+        // parameter case does not matter; object must be canonical, like
+        // name_max_len/mandatory_rules — callers pass Command::object
+        assert!(m.availability_for("backout", "qlocal").is_some());
+    }
+
+    #[test]
+    fn hover_documents_curated_availability() {
+        let m = Model::load();
+        let e = m.entry(m.commands["ALTER"]["QLOCAL"]);
+        let p = e.params.iter().find(|p| p.name == "BACKOUT").unwrap();
+        let doc = doc_for(m, p, "QLOCAL");
+        assert!(doc.contains("Availability (curated)"), "{doc}");
+        assert!(doc.contains("9.1"), "{doc}");
+        // a param without a rule carries no annotation
+        let p = e.params.iter().find(|p| p.name == "DESCR").unwrap();
+        assert!(!doc_for(m, p, "QLOCAL").contains("Availability"));
     }
 }

@@ -62,7 +62,18 @@ the full picture; this file only lists what is easy to get wrong.
   limits and "this parameter is required" prose only in text the extractor
   cannot capture. Code 14 never fires on SYSTEM.* names (hint-12
   convention) and the table is tuned so the dmpmqcfg corpus stays clean
-  apart from genuinely dangling definitions.
+  apart from genuinely dangling definitions. A third curated section,
+  `availability` (per-parameter `platform`/`since`/`until`/`obj` rules, see
+  `model::AvailRule`) drives code 15 `NOT_IN_TARGET` — but unlike 13/14 it
+  is **settings-gated**: `settings::Target` (`mqsc.targetVersion` /
+  `mqsc.platform`, parsed by `Target::from_settings`, decided by
+  `Target::gate` since→until→platform) must be configured or the whole
+  table is never consulted; the corpus must stay byte-identical with no
+  target. `Model::availability_for` prefers obj-restricted rules and takes
+  **canonical** object names (its `norm_syn` only uppercases — synonym
+  resolution is the caller's job, pass `Command::object`). Hover/completion
+  show the facts unconditionally via `doc_for` ("Availability
+  (curated)").
 - `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
   stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
   tower wrapper catches handler panics into `-32603` responses — handlers
@@ -76,7 +87,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 90 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 102 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
