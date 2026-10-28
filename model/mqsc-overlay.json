@@ -23,7 +23,15 @@
     "known with confidence are listed — everything else is never flagged.",
     "Values cross-checked against the 324-file z/OS dmpmqcfg corpus (no",
     "real object exceeds its entry; QLOCAL/QALIAS/PROCESS names of exactly",
-    "48 characters exist there, confirming the queue-name limit)."
+    "48 characters exist there, confirming the queue-name limit).",
+    "Backout-queue parameters: distributed MQ 9.1+ spells the parameter",
+    "BACKOUT (QLOCAL/QREMOTE — no evidence it exists on QMODEL, so none",
+    "added there); the 2011 reference only knows the z/OS spelling BOQNAME,",
+    "whose ALTER QLOCAL/QMODEL entries extracted as the special-value enum",
+    "[NO,YES] and are replaced with string here because the same reference",
+    "entry describes a queue name. Both spellings are object references in",
+    "the curated table in analysis.rs; the z/OS special values NO/YES and",
+    "the NONE sentinel are exempted from hint 12 there, not modelled here."
   ],
   "commands": {
     "SET": {
@@ -606,6 +614,12 @@
     "DEFINE QLOCAL": {
       "add_params": [
         {
+          "name": "BACKOUT",
+          "kind": "string",
+          "optional": true,
+          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
+        },
+        {
           "name": "CUSTOM",
           "kind": "string",
           "optional": true
@@ -657,6 +671,18 @@
     },
     "ALTER QLOCAL": {
       "add_params": [
+        {
+          "name": "BACKOUT",
+          "kind": "string",
+          "optional": true,
+          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
+        },
+        {
+          "name": "BOQNAME",
+          "kind": "string",
+          "optional": true,
+          "description": "Backout requeue name. Takes a queue name; z/OS also accepts the special values NO and YES. (Replaces the base-model enum, which captured only those special values.)"
+        },
         {
           "name": "CUSTOM",
           "kind": "string",
@@ -742,6 +768,12 @@
     "ALTER QMODEL": {
       "add_params": [
         {
+          "name": "BOQNAME",
+          "kind": "string",
+          "optional": true,
+          "description": "Backout requeue name. Takes a queue name; z/OS also accepts the special values NO and YES. (Replaces the base-model enum, which captured only those special values.)"
+        },
+        {
           "name": "CUSTOM",
           "kind": "string",
           "optional": true
@@ -820,6 +852,12 @@
     "DEFINE QREMOTE": {
       "add_params": [
         {
+          "name": "BACKOUT",
+          "kind": "string",
+          "optional": true,
+          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
+        },
+        {
           "name": "CUSTOM",
           "kind": "string",
           "optional": true
@@ -833,6 +871,12 @@
     },
     "ALTER QREMOTE": {
       "add_params": [
+        {
+          "name": "BACKOUT",
+          "kind": "string",
+          "optional": true,
+          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
+        },
         {
           "name": "CUSTOM",
           "kind": "string",
