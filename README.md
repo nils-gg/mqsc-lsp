@@ -157,6 +157,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
 | 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
+| 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
 
 Messages follow an Elm-compiler-style contract: every one quotes the
 offending token, says what belongs there instead, and names the concrete fix
@@ -179,7 +180,8 @@ both shapes are accepted:
 Keys are the code number (`"12"`) or its name (`PARSE_ERROR`,
 `UNKNOWN_VERB`, `UNKNOWN_OBJECT`, `UNKNOWN_PARAM`, `BAD_VALUE`,
 `DUPLICATE_PARAM`, `MISSING_CONTINUATION`, `LEXICAL`, `MISSING_REQUIRED`,
-`MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`, `NAME_TOO_LONG`). Values: `error`,
+`MISSING_NAME`, `WILDCARD`, `UNDEFINED_OBJECT`, `NAME_TOO_LONG`,
+`MISSING_MANDATORY`). Values: `error`,
 `warning`, `information`, `hint`, `off`. On a settings change, diagnostics
 for all open documents are republished immediately.
 
@@ -211,7 +213,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 58 unit tests + 3 grammar-corpus tests
+cargo test                                       # 81 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -255,7 +257,8 @@ non-zero when a check fails.
   What real usage proved necessary lives in `model/mqsc-overlay.json`, a
   clearly-labelled curated add-on merged over the extracted model at load
   time: post-2011 commands, the distributed `BACKOUT` spelling of the
-  backout-queue parameter, per-type `name_max` limits.
+  backout-queue parameter, per-type `name_max` limits, per-type `mandatory`
+  property rules (diagnostic 14).
 - **Model gaps are warnings, never errors.** The extractor recovers some
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
@@ -267,11 +270,14 @@ non-zero when a check fails.
   `*.mqsc` is the natural next step.
 - **False positives are measured, not eliminated**: on a 324-file
   `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
-  the count sits at 19,613 after the model/overlay/grammar fixes (-92.5%);
-  codes 3/5/9 are at zero and the remainder is 19,578 × hint 12 by design
+  the count sits at ≈19.9k after the model/overlay/grammar fixes (-92.5%);
+  codes 3/5/9/13 are at zero and the bulk (19,865 × hint 12) is by design
   (cross-file references without the sibling open, MQ 9.x parameters).
-  Track regressions with `tools/corpus_measure.py` (non-UTF-8 files are
-  linted through a lossy decode, never skipped).
+  Code 14 contributes 21 warnings — real dangling `DEFINE QALIAS` objects
+  (no `TARGET`) found live in those queue managers, which is the point of
+  the check; its curated `mandatory` table was tuned until nothing else
+  flagged. Track regressions with `tools/corpus_measure.py` (non-UTF-8
+  files are linted through a lossy decode, never skipped).
 - The process exits when stdin is closed after the `exit` notification
   (standard tower-lsp lifecycle); TCP sessions end with their connection.
 
