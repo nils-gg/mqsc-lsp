@@ -194,8 +194,14 @@ definition/references/rename/hover navigate between them. That hint is a
 deliberate heuristic: `SYSTEM.*` names are never flagged, a set of scripts
 without any `DEFINE` is never flagged, and only the curated
 object-reference parameters (queue aliases' `TARGET`, channels' `XMITQ`,
-`LIKE`, dynamic-queue `MODEL`, the `MOVE` queue parameters …) are checked,
-because the 2011 model types them all as plain strings. Invalidation:
+`LIKE`, dynamic-queue `MODEL`, backout queues `BACKOUT`/`BOQNAME`,
+`DEADQ`, `DEFXMITQ`, initiation queue `INITQ`, the `MOVE` queue
+parameters …) are checked, because the 2011 model types them all as plain
+strings. Context guards ride along: `START CHINIT`'s `INITQ` names a queue
+*manager*, not a queue, and documented special values (`BOQNAME(NO)`,
+`DEADQ(NONE)`) are never flagged. Renaming a queue rewrites every one of
+these reference sites, so `ALTER QLOCAL(ORDERS) BACKOUT(OLD)` follows
+`DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
 opening or closing a document re-publishes every other document's
 diagnostics; typing only re-analyses the edited document (per keystroke,
 re-analysing all siblings would be quadratic). Closed documents count
@@ -246,6 +252,10 @@ non-zero when a check fails.
   clauses on DISPLAY are accepted as plain parameters (the reference predates
   them), but they are not validated. The reference is also not z/OS-current:
   `RUN`/`REPLACE` `REPLMSG`/`REPLSTR` parameter families are not in the model.
+  What real usage proved necessary lives in `model/mqsc-overlay.json`, a
+  clearly-labelled curated add-on merged over the extracted model at load
+  time: post-2011 commands, the distributed `BACKOUT` spelling of the
+  backout-queue parameter, per-type `name_max` limits.
 - **Model gaps are warnings, never errors.** The extractor recovers some
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
