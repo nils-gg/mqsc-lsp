@@ -7,6 +7,22 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Changed
+- Internal (no behavior change): all cross-document knowledge moved from
+  `server.rs` into a new `workspace::WorkspaceIndex` module — the open
+  document map, the poison-tolerant lock accessors, and every merge/join
+  loop (diagnostics' sibling DEFINE merge, the cross-file hover map,
+  definition/references/rename site joins, workspace/symbol enumeration)
+  now share one API (`external_defs`, `definitions`, `sites`,
+  `rename_sites`) that joins exclusively on `(name, namespace)`
+  `SymbolKey`s. This is the centralization step of workspace indexing:
+  closed on-disk `*.mqsc` files (with open documents always overriding
+  their on-disk entry) and watched reindexing will extend this module.
+  Verified behavior-free: dmpmqcfg corpus byte-identical, smoke suite
+  unchanged, six new index unit tests cover the lifecycle, the
+  namespace-split join, quoting-carrying rename sites and replacement
+  semantics
+
 ### Added
 - MQ version/platform targeting (diagnostic 15 `NOT_IN_TARGET`): the new
   settings `mqsc.targetVersion` (`"9"`, `"9.4"`, patch levels read as

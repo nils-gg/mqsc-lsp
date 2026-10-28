@@ -1,8 +1,11 @@
 //! tower-lsp server implementation for MQSC.
+//!
+//! Cross-document knowledge lives in [`crate::workspace`]; this module is
+//! only the LSP protocol layer on top of it (PR 6 centralization).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 
 use lsp_types::*;
 use tower_lsp::jsonrpc::Result as RpcResult;
@@ -11,22 +14,13 @@ use tower_lsp::{async_trait, Client, LanguageServer};
 use crate::analysis;
 use crate::model::Model;
 use crate::settings::{apply_diagnostic_settings, diagnostic_settings, Target};
-
-/// A document opened in the editor: its text and the parse tree built for
-/// that text. All requests reuse the cached tree instead of re-parsing.
-/// `defs` is this document's own DEFINE index, cached so the cross-file
-/// workspace view (T-17) is a cheap merge.
-struct Doc {
-    text: String,
-    // tree_sitter::Tree is Send but not Sync, so it needs a lock for shared
-    // handler access; handlers only ever use &Tree (analysis never edits).
-    tree: Mutex<tree_sitter::Tree>,
-    defs: analysis::Definitions,
-}
+use crate::workspace::{rd, wr, WorkspaceIndex};
 
 pub struct MqscServer {
     pub client: Client,
-    docs: RwLock<HashMap<Url, Doc>>,
+    /// Everything known about object names across documents (open ones
+    /// today; PR 7 adds closed workspace files behind the same API).
+    index: WorkspaceIndex,
     /// Client settings, see README "Configuration":
     /// `{"diagnostics": {"CODE_NAME_OR_NUMBER": "error"|"warning"|"information"|"hint"|"off"}}`
     settings: RwLock<Option<serde_json::Value>>,
@@ -34,29 +28,11 @@ pub struct MqscServer {
     snippet_support: AtomicBool,
 }
 
-// Poison-tolerant lock access (REVIEW.md M1). A panic inside a handler
-// unwinds through whatever guards it held and would otherwise poison the
-// shared locks permanently — every later request then answers PoisonError
-// forever (a zombie server). Nothing guarded here has an invariant a panic
-// can corrupt: analysis only reads the tree, and Doc map operations are
-// single atomic inserts/removes — so every access recovers via into_inner.
-// Keep this in sync with telemetry.rs's `Observed`: that layer turns the
-// panic into a -32603 response; these accessors stop it from spreading.
-fn rd<T>(l: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
-    l.read().unwrap_or_else(|e| e.into_inner())
-}
-fn wr<T>(l: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    l.write().unwrap_or_else(|e| e.into_inner())
-}
-fn mtx<T>(l: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    l.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 impl MqscServer {
     pub fn new(client: Client) -> Self {
         MqscServer {
             client,
-            docs: RwLock::new(HashMap::new()),
+            index: WorkspaceIndex::default(),
             settings: RwLock::new(None),
             snippet_support: AtomicBool::new(false),
         }
@@ -68,77 +44,46 @@ impl MqscServer {
     /// a name defined in a sibling script stops the code-12 hint.
     async fn refresh(&self, uri: &Url) {
         let diags = {
-            let docs = rd(&self.docs);
-            match docs.get(uri) {
-                Some(doc) => {
-                    let mut extra = analysis::Definitions::default();
-                    for (u, other) in docs.iter() {
-                        if u != uri {
-                            extra.add_external(&other.defs);
-                        }
-                    }
-                    let cfg = rd(&self.settings);
-                    let target = cfg.as_ref().map(Target::from_settings).unwrap_or_default();
-                    let tree = mtx(&doc.tree);
-                    let t0 = std::time::Instant::now();
-                    let mut diags = analysis::analyze_with_target(
-                        &doc.text,
-                        &tree,
-                        Model::load(),
-                        uri,
-                        &extra,
-                        &target,
-                    );
-                    crate::tlog!(
-                        "analyze {uri} len={} diags={} open_docs={} in {}ms",
-                        doc.text.len(),
-                        diags.len(),
-                        docs.len(),
-                        t0.elapsed().as_millis()
-                    );
-                    if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
-                        apply_diagnostic_settings(&mut diags, map);
-                    }
-                    diags
+            let extra = self.index.external_defs(uri);
+            let open_docs = self.index.len();
+            let cfg = rd(&self.settings);
+            let target = cfg.as_ref().map(Target::from_settings).unwrap_or_default();
+            let built = self.index.with_doc(uri, |text, tree| {
+                let t0 = std::time::Instant::now();
+                let mut diags =
+                    analysis::analyze_with_target(text, tree, Model::load(), uri, &extra, &target);
+                crate::tlog!(
+                    "analyze {uri} len={} diags={} open_docs={} in {}ms",
+                    text.len(),
+                    diags.len(),
+                    open_docs,
+                    t0.elapsed().as_millis()
+                );
+                if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
+                    apply_diagnostic_settings(&mut diags, map);
                 }
+                diags
+            });
+            match built {
+                Some(diags) => diags,
                 None => return,
             }
-        }; // guards dropped before the await
+        }; // settings guard dropped before the await
         self.client
             .publish_diagnostics(uri.clone(), diags, None)
             .await;
     }
 
-    /// Definitions from all open documents except `uri` (cached per doc, so
-    /// this merge is cheap).
-    fn external_defs(&self, uri: &Url) -> analysis::Definitions {
-        let mut merged = analysis::Definitions::default();
-        for (u, doc) in rd(&self.docs).iter() {
-            if u != uri {
-                merged.add_external(&doc.defs);
-            }
-        }
-        merged
-    }
-
     /// Cross-file definitions for hover: name -> (file display name,
-    /// 0-based line, object type), scanned from the other open documents.
+    /// 0-based line, object type), from the other documents in the index.
     fn external_defs_map(&self, uri: &Url) -> analysis::ExternalDefs {
         let mut map: analysis::ExternalDefs = Default::default();
-        let docs = rd(&self.docs);
-        for (u, doc) in docs.iter() {
-            if u == uri {
-                continue;
-            }
-            let tree = mtx(&doc.tree);
-            let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            for s in idx.definitions() {
-                map.entry(s.name.clone()).or_default().push((
-                    display_file(u),
-                    s.range.start.line,
-                    s.defines.clone().unwrap_or_else(|| "OBJECT".into()),
-                ));
-            }
+        for d in self.index.definitions(Some(uri)) {
+            map.entry(d.name).or_default().push((
+                display_file(&d.uri),
+                d.range.start.line,
+                d.defines.unwrap_or_else(|| "OBJECT".into()),
+            ));
         }
         map
     }
@@ -148,46 +93,9 @@ impl MqscServer {
     /// changed for every other document. Not called on did_change — that
     /// would be O(open documents) per keystroke.
     async fn refresh_others(&self, skip: &Url) {
-        let others: Vec<Url> = rd(&self.docs)
-            .keys()
-            .filter(|u| *u != skip)
-            .cloned()
-            .collect();
-        for u in others {
+        for u in self.index.uris_excluding(skip) {
             self.refresh(&u).await;
         }
-    }
-
-    /// Collect the name sites of one symbol — name AND namespace, the same
-    /// rule `analysis::ObjectScope` gives diagnostics and completion —
-    /// over every open document (T-17). `definitions_only: Some(true)`
-    /// keeps only DEFINE sites, `Some(false)` only uses.
-    fn sites_of_key(
-        &self,
-        key: &analysis::SymbolKey,
-        definitions_only: Option<bool>,
-    ) -> Vec<Location> {
-        let mut out = Vec::new();
-        let ns = key.scope.namespace();
-        let docs = rd(&self.docs);
-        for (u, doc) in docs.iter() {
-            let tree = mtx(&doc.tree);
-            let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            for s in idx.sites_in(&key.name, ns) {
-                let keep = match definitions_only {
-                    Some(true) => s.defines.is_some(),
-                    Some(false) => s.defines.is_none(),
-                    None => true,
-                };
-                if keep {
-                    out.push(Location {
-                        uri: u.clone(),
-                        range: s.range,
-                    });
-                }
-            }
-        }
-        out
     }
 
     fn with_doc<T>(
@@ -195,12 +103,8 @@ impl MqscServer {
         uri: &Url,
         f: impl FnOnce(&str, &tree_sitter::Tree) -> RpcResult<T>,
     ) -> RpcResult<T> {
-        let docs = rd(&self.docs);
-        match docs.get(uri) {
-            Some(doc) => {
-                let tree = mtx(&doc.tree);
-                f(&doc.text, &tree)
-            }
+        match self.index.with_doc(uri, f) {
+            Some(result) => result,
             None => Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
                 "document not open: {uri}"
             ))),
@@ -367,7 +271,7 @@ impl LanguageServer for MqscServer {
             Some(params.settings)
         };
         // severities may have changed: republish everything we know about
-        let uris: Vec<Url> = rd(&self.docs).keys().cloned().collect();
+        let uris = self.index.uris();
         for uri in uris {
             self.refresh(&uri).await;
         }
@@ -385,14 +289,7 @@ impl LanguageServer for MqscServer {
             defs.names.len(),
             t0.elapsed().as_millis()
         );
-        wr(&self.docs).insert(
-            uri.clone(),
-            Doc {
-                text,
-                tree: Mutex::new(tree),
-                defs,
-            },
-        );
+        self.index.open(uri.clone(), text, tree, defs);
         self.refresh(&uri).await;
         // T-17: this document's DEFINEs change the hints of every other
         // open document too; opening is rare enough to refresh all of them.
@@ -415,14 +312,7 @@ impl LanguageServer for MqscServer {
             defs.names.len(),
             t0.elapsed().as_millis()
         );
-        wr(&self.docs).insert(
-            uri.clone(),
-            Doc {
-                text,
-                tree: Mutex::new(tree),
-                defs,
-            },
-        );
+        self.index.open(uri.clone(), text, tree, defs);
         // Sibling documents are deliberately NOT re-analysed on every keystroke
         // (O(open documents) per change); their cross-file hints refresh on
         // their own next change and on open/close events.
@@ -431,7 +321,7 @@ impl LanguageServer for MqscServer {
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
         crate::tlog!("didClose {}", p.text_document.uri);
-        wr(&self.docs).remove(&p.text_document.uri);
+        self.index.close(&p.text_document.uri);
         // the remaining documents lost their external definitions (T-17)
         self.refresh_others(&p.text_document.uri).await;
     }
@@ -449,7 +339,7 @@ impl LanguageServer for MqscServer {
         let uri = &p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
         let snippet = self.snippet_support.load(Ordering::Relaxed);
-        let extra = self.external_defs(uri);
+        let extra = self.index.external_defs(uri);
         self.with_doc(uri, |text, tree| {
             let items = analysis::completions(text, tree, Model::load(), pos, snippet, &extra);
             Ok(Some(CompletionResponse::Array(items)))
@@ -563,7 +453,7 @@ impl LanguageServer for MqscServer {
             Ok(idx.symbol_at(pos))
         })?;
         let Some(key) = key else { return Ok(None) };
-        let mut locs = self.sites_of_key(&key, Some(true));
+        let mut locs = self.index.sites(&key, Some(true));
         if locs.is_empty() {
             return Ok(None);
         }
@@ -597,7 +487,7 @@ impl LanguageServer for MqscServer {
         } else {
             Some(false)
         };
-        let mut locs = self.sites_of_key(&key, definitions_only);
+        let mut locs = self.index.sites(&key, definitions_only);
         locs.sort_by_key(|l| {
             (
                 l.uri.to_string(),
@@ -661,26 +551,19 @@ impl LanguageServer for MqscServer {
         };
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut def_types: Vec<String> = Vec::new();
-        let docs = rd(&self.docs);
-        let ns = key.scope.namespace();
-        for (u, doc) in docs.iter() {
-            let tree = mtx(&doc.tree);
-            let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            let mut edits = Vec::new();
-            for s in idx.sites_in(&key.name, ns) {
-                if let Some(t) = &s.defines {
-                    if !def_types.contains(t) {
-                        def_types.push(t.clone());
-                    }
+        for site in self.index.rename_sites(&key) {
+            if let Some(t) = &site.defines {
+                if !def_types.contains(t) {
+                    def_types.push(t.clone());
                 }
-                edits.push(TextEdit {
-                    range: s.range,
-                    new_text: rename_text(&new_name, s.quoted),
+            }
+            changes
+                .entry(site.loc.uri.clone())
+                .or_default()
+                .push(TextEdit {
+                    range: site.loc.range,
+                    new_text: rename_text(&new_name, site.quoted),
                 });
-            }
-            if !edits.is_empty() {
-                changes.insert(u.clone(), edits);
-            }
         }
         if def_types.len() > 1 {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
@@ -705,28 +588,23 @@ impl LanguageServer for MqscServer {
     #[allow(deprecated)]
     async fn symbol(&self, p: WorkspaceSymbolParams) -> RpcResult<Option<Vec<SymbolInformation>>> {
         let query = p.query.to_ascii_uppercase();
-        let mut out = Vec::new();
-        let docs = rd(&self.docs);
-        for (uri, doc) in docs.iter() {
-            let tree = mtx(&doc.tree);
-            let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            for s in idx.definitions() {
-                if !query.is_empty() && !s.name.contains(&query) {
-                    continue;
-                }
-                out.push(SymbolInformation {
-                    name: s.word.clone(),
-                    kind: SymbolKind::METHOD, // matches the documentSymbol kinds
-                    tags: None,
-                    deprecated: None,
-                    location: Location {
-                        uri: uri.clone(),
-                        range: s.range,
-                    },
-                    container_name: s.defines.clone(),
-                });
-            }
-        }
+        let out = self
+            .index
+            .definitions(None)
+            .into_iter()
+            .filter(|d| query.is_empty() || d.name.contains(&query))
+            .map(|d| SymbolInformation {
+                name: d.word,
+                kind: SymbolKind::METHOD, // matches the documentSymbol kinds
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: d.uri,
+                    range: d.range,
+                },
+                container_name: d.defines,
+            })
+            .collect();
         Ok(Some(out))
     }
 
