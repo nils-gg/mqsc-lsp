@@ -16,6 +16,151 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 use serde_json::Value;
 
 use crate::analysis::diag_name;
+use crate::model::AvailRule;
+
+// ------------------------------------------------- target version/platform (T-19)
+
+/// MQ release used for availability comparisons, `"major.minor"` granularity
+/// (a patch level in the input is read as its minor release).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct MqVersion {
+    pub major: u16,
+    pub minor: u16,
+}
+
+impl MqVersion {
+    /// Accepts `"9"`, `"9.4"`, `"9.4.1"` (patch ignored); anything else is
+    /// not a version.
+    pub fn parse(s: &str) -> Option<MqVersion> {
+        let s = s.trim();
+        let mut it = s.split('.');
+        let major = it.next()?.trim().parse().ok()?;
+        let minor = match it.next() {
+            None => 0,
+            Some(m) => m.trim().parse().ok()?,
+        };
+        // a third component may only be a patch number (9.4.1.0 style)
+        for extra in it {
+            if !extra.trim().chars().all(|c| c.is_ascii_digit()) || extra.trim().is_empty() {
+                return None;
+            }
+        }
+        Some(MqVersion { major, minor })
+    }
+}
+
+impl std::fmt::Display for MqVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+/// Platform the scripts are aimed at (config `mqsc.platform`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Platform {
+    Distributed,
+    Zos,
+}
+
+impl Platform {
+    /// Accepts `"distributed"`, `"zos"`, `"z/os"`, `"z-os"` (case-insensitive).
+    pub fn parse(s: &str) -> Option<Platform> {
+        match s
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['/', '-'], "")
+            .as_str()
+        {
+            "distributed" => Some(Platform::Distributed),
+            "zos" => Some(Platform::Zos),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Platform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Platform::Distributed => write!(f, "distributed"),
+            Platform::Zos => write!(f, "z/OS"),
+        }
+    }
+}
+
+/// What the user says the scripts target: `mqsc.targetVersion` and
+/// `mqsc.platform`, both optional. With nothing configured NO availability
+/// rule applies — the analyzer behaves exactly as before the feature.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Target {
+    pub version: Option<MqVersion>,
+    pub platform: Option<Platform>,
+}
+
+/// How a parameter use falls outside the configured target.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AvailViolation {
+    /// target version is older than the rule's `since`
+    TooOld(MqVersion),
+    /// target version is newer than the rule's `until`
+    TooNew(MqVersion),
+    /// rule only exists on the other platform
+    WrongPlatform(Platform),
+}
+
+impl Target {
+    /// Is any part of the target configured? Unset targets never violate.
+    pub fn configured(&self) -> bool {
+        self.version.is_some() || self.platform.is_some()
+    }
+
+    /// Read `targetVersion`/`platform` from a settings root (either at the
+    /// top level or nested under `mqsc`, like the diagnostics map). Values
+    /// that do not parse are ignored, same as unrecognized severities.
+    pub fn from_settings(root: &Value) -> Target {
+        let get = |key: &str| {
+            root.get("mqsc")
+                .and_then(|m| m.get(key))
+                .or_else(|| root.get(key))
+                .and_then(|v| v.as_str())
+        };
+        Target {
+            version: get("targetVersion").and_then(MqVersion::parse),
+            platform: get("platform").and_then(Platform::parse),
+        }
+    }
+
+    /// Does `rule` conflict with this target? Only an explicit mismatch is
+    /// reported; unset target sides pass, and malformed rule data (a
+    /// non-version `since`, an unknown platform word) is treated as unknown
+    /// rather than flagged.
+    pub fn gate(&self, rule: &AvailRule) -> Option<AvailViolation> {
+        if !self.configured() {
+            return None;
+        }
+        if let (Some(v), Some(since)) = (self.version, rule.since.as_deref()) {
+            if let Some(since) = MqVersion::parse(since) {
+                if v < since {
+                    return Some(AvailViolation::TooOld(since));
+                }
+            }
+        }
+        if let (Some(v), Some(until)) = (self.version, rule.until.as_deref()) {
+            if let Some(until) = MqVersion::parse(until) {
+                if v > until {
+                    return Some(AvailViolation::TooNew(until));
+                }
+            }
+        }
+        if let (Some(p), Some(rp)) = (self.platform, rule.platform.as_deref()) {
+            if let Some(rp) = Platform::parse(rp) {
+                if p != rp {
+                    return Some(AvailViolation::WrongPlatform(rp));
+                }
+            }
+        }
+        None
+    }
+}
 
 /// Extract the `diagnostics` map from a settings value (either root or nested
 /// under an `mqsc` section). Returns `None` when absent or not an object.
@@ -77,9 +222,9 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
     let Some(obj) = map.as_object() else {
         return Vec::new();
     };
-    // The 14 CODE_* constants in analysis (1..=14); diag_name maps unknown
+    // The 15 CODE_* constants in analysis (1..=15); diag_name maps unknown
     // numbers to "OTHER".
-    let names: Vec<&str> = (1..=14).map(diag_name).collect();
+    let names: Vec<&str> = (1..=15).map(diag_name).collect();
     let mut out = Vec::new();
     for (k, v) in obj {
         let known = match k.parse::<i32>() {
@@ -88,7 +233,7 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
         };
         if !known {
             out.push(format!(
-                "unknown diagnostic code '{k}' (not a number 1-14 or a diag name)"
+                "unknown diagnostic code '{k}' (not a number 1-15 or a diag name)"
             ));
         }
         match v.as_str() {
@@ -174,6 +319,114 @@ mod tests {
         }];
         apply_diagnostic_settings(&mut d, &json!({"12": "off"}));
         assert_eq!(d.len(), 1);
+    }
+
+    fn rule(
+        param: &str,
+        obj: &[&str],
+        since: Option<&str>,
+        until: Option<&str>,
+        platform: Option<&str>,
+    ) -> AvailRule {
+        AvailRule {
+            param: param.into(),
+            obj: obj.iter().map(|s| s.to_string()).collect(),
+            since: since.map(|s| s.to_string()),
+            until: until.map(|s| s.to_string()),
+            platform: platform.map(|s| s.to_string()),
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn version_parses_compares_and_displays() {
+        let v = |s: &str| MqVersion::parse(s);
+        assert_eq!(v("9.4"), Some(MqVersion { major: 9, minor: 4 }));
+        assert_eq!(v("9"), Some(MqVersion { major: 9, minor: 0 }));
+        assert_eq!(v(" 9.4.1 "), Some(MqVersion { major: 9, minor: 4 }));
+        assert_eq!(v("9.x"), None);
+        assert_eq!(v(""), None);
+        assert!(v("9.0") < v("9.1"));
+        assert!(v("8.9") < v("9.0"));
+        assert_eq!(MqVersion { major: 9, minor: 1 }.to_string(), "9.1");
+    }
+
+    #[test]
+    fn platform_accepts_spellings_and_displays_canonically() {
+        assert_eq!(Platform::parse("distributed"), Some(Platform::Distributed));
+        assert_eq!(Platform::parse("Z/OS"), Some(Platform::Zos));
+        assert_eq!(Platform::parse("z-os"), Some(Platform::Zos));
+        assert_eq!(Platform::parse("mainframe"), None);
+        assert_eq!(Platform::Zos.to_string(), "z/OS");
+        assert_eq!(Platform::Distributed.to_string(), "distributed");
+    }
+
+    #[test]
+    fn target_read_from_both_levels_and_garbage_ignored() {
+        let flat = json!({"targetVersion": "9.4", "platform": "zos"});
+        let t = Target::from_settings(&flat);
+        assert_eq!(
+            (t.version, t.platform),
+            (MqVersion::parse("9.4"), Platform::parse("zos"))
+        );
+        let nested = json!({"mqsc": {"targetVersion": "9.0", "diagnostics": {}}});
+        let t = Target::from_settings(&nested);
+        assert_eq!(t.version, MqVersion::parse("9.0"));
+        assert_eq!(t.platform, None);
+        let junk = json!({"mqsc": {"targetVersion": "banana", "platform": 7}});
+        assert!(!Target::from_settings(&junk).configured());
+        assert!(!Target::from_settings(&json!({})).configured());
+    }
+
+    #[test]
+    fn gate_needs_a_target_and_reports_the_first_conflict() {
+        let unset = Target::default();
+        let r = rule(
+            "BACKOUT",
+            &["QLOCAL"],
+            Some("9.1"),
+            None,
+            Some("distributed"),
+        );
+        assert_eq!(unset.gate(&r), None, "no target: rules dormant");
+
+        let old = Target {
+            version: MqVersion::parse("9.0"),
+            platform: Platform::parse("distributed"),
+        };
+        assert_eq!(
+            old.gate(&r),
+            Some(AvailViolation::TooOld(MqVersion { major: 9, minor: 1 }))
+        );
+
+        let main = Target {
+            version: MqVersion::parse("9.4"),
+            platform: Platform::parse("zos"),
+        };
+        assert_eq!(
+            main.gate(&r),
+            Some(AvailViolation::WrongPlatform(Platform::Distributed))
+        );
+
+        let ok = Target {
+            version: MqVersion::parse("9.4"),
+            platform: Platform::parse("distributed"),
+        };
+        assert_eq!(ok.gate(&r), None);
+
+        let gone = Target {
+            version: MqVersion::parse("9.4"),
+            platform: None,
+        };
+        let gone_r = rule("OLD", &[], None, Some("9.2"), None);
+        assert_eq!(
+            gone.gate(&gone_r),
+            Some(AvailViolation::TooNew(MqVersion { major: 9, minor: 2 }))
+        );
+
+        // malformed rule data is unknown data, not a violation
+        let junk_r = rule("X", &[], Some("nonsense"), None, Some("atari"));
+        assert_eq!(old.gate(&junk_r), None);
     }
 
     #[test]

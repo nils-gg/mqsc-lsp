@@ -12,7 +12,7 @@ const DIAG_CODES = [
 	'PARSE_ERROR', 'UNKNOWN_VERB', 'UNKNOWN_OBJECT', 'UNKNOWN_PARAM',
 	'BAD_VALUE', 'DUPLICATE_PARAM', 'MISSING_CONTINUATION', 'LEXICAL',
 	'MISSING_REQUIRED', 'MISSING_NAME', 'WILDCARD', 'UNDEFINED_OBJECT',
-	'NAME_TOO_LONG',
+	'NAME_TOO_LONG', 'MISSING_MANDATORY', 'NOT_IN_TARGET',
 ];
 
 /** The `mqsc.diagnostics.*` settings minus the "default" entries, in the
@@ -49,6 +49,14 @@ function serverOptions(cfg) {
 function activate(context) {
 	const cfg = vscode.workspace.getConfiguration('mqsc');
 	const initOptions = { diagnostics: diagnosticsSettings(cfg) };
+	// target version/platform (diagnostic 15): the server ignores empty or
+	// unparseable values, so pass them through when set
+	for (const key of ['targetVersion', 'platform']) {
+		const v = cfg.get(key);
+		if (v) {
+			initOptions[key] = v;
+		}
+	}
 
 	client = new LanguageClient(
 		'mqsc', // must match the language id in package.json

@@ -7,6 +7,22 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Added
+- MQ version/platform targeting (diagnostic 15 `NOT_IN_TARGET`): the new
+  settings `mqsc.targetVersion` (`"9"`, `"9.4"`, patch levels read as
+  their minor release) and `mqsc.platform` (`"distributed"` / `"zos"`)
+  declare what the scripts target; a parameter whose curated availability
+  (`availability` section of `model/mqsc-overlay.json`, like `name_max`
+  and `mandatory`) contradicts the target — introduced after
+  `targetVersion`, removed in it, or belonging to the other platform —
+  is flagged where it is used ("BACKOUT is available from MQ 9.1…",
+  "BOQNAME is only available on z/OS…"). With no target configured the
+  check is entirely dormant (corpus output byte-identical); hover and
+  completion annotate the curated facts unconditionally. A curated
+  parameter the 2011-based model does not know stops being an unknown
+  parameter (code 4) once the configured target provides it. The `--check`
+  CLI honors the target through `--settings`
+
 ### Fixed
 - `textDocument/references` now honors the client's
   `context.includeDeclaration` flag: with `false` the DEFINE sites stay

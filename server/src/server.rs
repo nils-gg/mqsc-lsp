@@ -10,7 +10,7 @@ use tower_lsp::{async_trait, Client, LanguageServer};
 
 use crate::analysis;
 use crate::model::Model;
-use crate::settings::{apply_diagnostic_settings, diagnostic_settings};
+use crate::settings::{apply_diagnostic_settings, diagnostic_settings, Target};
 
 /// A document opened in the editor: its text and the parse tree built for
 /// that text. All requests reuse the cached tree instead of re-parsing.
@@ -77,9 +77,18 @@ impl MqscServer {
                             extra.add_external(&other.defs);
                         }
                     }
+                    let cfg = rd(&self.settings);
+                    let target = cfg.as_ref().map(Target::from_settings).unwrap_or_default();
                     let tree = mtx(&doc.tree);
                     let t0 = std::time::Instant::now();
-                    let mut diags = analysis::analyze(&doc.text, &tree, Model::load(), uri, &extra);
+                    let mut diags = analysis::analyze_with_target(
+                        &doc.text,
+                        &tree,
+                        Model::load(),
+                        uri,
+                        &extra,
+                        &target,
+                    );
                     crate::tlog!(
                         "analyze {uri} len={} diags={} open_docs={} in {}ms",
                         doc.text.len(),
@@ -87,7 +96,6 @@ impl MqscServer {
                         docs.len(),
                         t0.elapsed().as_millis()
                     );
-                    let cfg = rd(&self.settings);
                     if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
                         apply_diagnostic_settings(&mut diags, map);
                     }

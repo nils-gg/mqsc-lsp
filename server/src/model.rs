@@ -81,6 +81,30 @@ pub struct MandatoryRule {
     pub example: String,
 }
 
+/// One curated availability rule for a parameter (overlay `availability`
+/// section). Like `name_max`/`mandatory` this is a documented heuristic:
+/// only parameters whose version/platform availability is known with
+/// confidence are listed — everything else is never flagged. `obj` limits
+/// the rule to certain canonical object types (empty = every command that
+/// has the parameter); `platform` is `"zos"` or `"distributed"`; `since`/
+/// `until` are `"major.minor"` MQ versions. Rules only ever apply when the
+/// user configured a target (see `settings::Target`) — with no target set
+/// they change nothing. Drives diagnostic 15 NOT_IN_TARGET.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AvailRule {
+    pub param: String,
+    #[serde(default)]
+    pub obj: Vec<String>,
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
@@ -94,6 +118,9 @@ struct RawModel {
     /// like name_max; see MandatoryRule)
     #[serde(default)]
     mandatory: HashMap<String, Vec<MandatoryRule>>,
+    /// curated parameter availability (overlay-only data; see AvailRule)
+    #[serde(default)]
+    availability: Vec<AvailRule>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -122,6 +149,9 @@ struct Overlay {
     /// curated mandatory-property rules per DEFINE object type
     #[serde(default)]
     mandatory: HashMap<String, Vec<MandatoryRule>>,
+    /// curated parameter availability rules (see AvailRule)
+    #[serde(default)]
+    availability: Vec<AvailRule>,
 }
 
 impl RawModel {
@@ -175,6 +205,8 @@ impl RawModel {
         self.name_max.extend(ov.name_max);
         // curated mandatory-property rules: likewise overlay-only
         self.mandatory.extend(ov.mandatory);
+        // curated availability rules: overlay-only, appended (base carries none)
+        self.availability.extend(ov.availability);
     }
 }
 
@@ -256,6 +288,10 @@ pub struct Model {
     /// overlay's `mandatory` section). Drives diagnostic 14
     /// MISSING_MANDATORY.
     mandatory: HashMap<String, Vec<MandatoryRule>>,
+    /// curated parameter availability (from the overlay's `availability`
+    /// section). Drives diagnostic 15 NOT_IN_TARGET; only consulted when a
+    /// target version/platform is configured.
+    availability: Vec<AvailRule>,
 }
 
 fn norm_syn(s: &str) -> String {
@@ -413,6 +449,7 @@ impl Model {
                 param_docs: raw.param_docs,
                 name_max: raw.name_max,
                 mandatory: raw.mandatory,
+                availability: raw.availability,
             }
         })
     }
@@ -491,6 +528,23 @@ impl Model {
         self.mandatory
             .get(&norm_syn(object))
             .map_or(&[], Vec::as_slice)
+    }
+
+    /// Curated availability rule for `param` as used on `object` (an
+    /// object-restricted rule wins over a general one for the parameter).
+    /// Overlay data only; absence means availability is unknown = never
+    /// flagged.
+    pub fn availability_for(&self, param: &str, object: &str) -> Option<&AvailRule> {
+        let obj = norm_syn(object);
+        let param = param.to_ascii_uppercase();
+        self.availability
+            .iter()
+            .find(|r| r.param == param && r.obj.iter().any(|o| norm_syn(o) == obj))
+            .or_else(|| {
+                self.availability
+                    .iter()
+                    .find(|r| r.param == param && r.obj.is_empty())
+            })
     }
 
     /// documentation text for a parameter name, preferring contexts that

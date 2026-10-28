@@ -53,7 +53,13 @@
     "additionally exempts the documented cluster-alias (CLUSTER/CLUSNL) and",
     "blank-XMITQ generic-qremote forms, which carry a deliberately blank",
     "RQMNAME; what remains flagged in the corpus are 21 dangling QALIAS",
-    "definitions (no TARGET at all), which is the point of the check."
+    "definitions (no TARGET at all), which is the point of the check.",
+    "availability: curated MQ version/platform availability for individual",
+    "parameters, driving diagnostic 15 NOT_IN_TARGET. Rules only ever",
+    "apply when mqsc.targetVersion / mqsc.platform is configured; with no",
+    "target set, nothing in this table changes any diagnostic. Like",
+    "name_max/mandatory: only parameters whose availability is documented",
+    "with confidence are listed - everything else is never flagged."
   ],
   "commands": {
     "SET": {
@@ -1586,58 +1592,124 @@
   "mandatory": {
     "QALIAS": [
       {
-        "any": ["TARGET", "LIKE"],
+        "any": [
+          "TARGET",
+          "LIKE"
+        ],
         "why": "an alias queue must name the queue or topic it points to (a LIKE template can carry the target).",
         "example": "DEFINE QALIAS(ALIAS.ONE) TARGET(BASE.Q)"
       }
     ],
     "QREMOTE": [
       {
-        "any": ["RNAME", "RQMNAME", "LIKE", "CLUSTER", "CLUSNL"],
-        "when": { "param": "XMITQ", "unless_values": [" "] },
+        "any": [
+          "RNAME",
+          "RQMNAME",
+          "LIKE",
+          "CLUSTER",
+          "CLUSNL"
+        ],
+        "when": {
+          "param": "XMITQ",
+          "unless_values": [
+            " "
+          ]
+        },
         "why": "a remote queue should say what it maps to on the far side (without RNAME the object's own name is quietly used as the remote queue name); cluster alias queues and the blank-XMITQ generic form deliberately carry neither.",
         "example": "DEFINE QREMOTE(RQ.ORDERS) RNAME(ORDERS) RQMNAME(REMOTE.QMGR)"
       }
     ],
     "CHANNEL": [
       {
-        "any": ["CHLTYPE"],
+        "any": [
+          "CHLTYPE"
+        ],
         "why": "the reference marks CHLTYPE required on every channel definition; it follows directly after the channel name.",
         "example": "DEFINE CHANNEL(A.TO.B) CHLTYPE(SDR) XMITQ(B.TO.A)"
       },
       {
-        "any": ["XMITQ"],
-        "when": { "param": "CHLTYPE", "values": ["SDR", "SVR"] },
+        "any": [
+          "XMITQ"
+        ],
+        "when": {
+          "param": "CHLTYPE",
+          "values": [
+            "SDR",
+            "SVR"
+          ]
+        },
         "why": "sender and server channels move their messages through a transmission queue; the reference marks XMITQ required for these channel types.",
         "example": "DEFINE CHANNEL(A.TO.B) CHLTYPE(SDR) XMITQ(B.TO.A)"
       }
     ],
     "TOPIC": [
       {
-        "any": ["TOPICSTR", "LIKE"],
+        "any": [
+          "TOPICSTR",
+          "LIKE"
+        ],
         "why": "the reference marks TOPICSTR required for a topic object, and it may not be empty; a LIKE template can carry it.",
         "example": "DEFINE TOPIC(WEATHER) TOPICSTR('weather/europe')"
       }
     ],
     "SUB": [
       {
-        "any": ["TOPICSTR", "TOPICOBJ"],
+        "any": [
+          "TOPICSTR",
+          "TOPICOBJ"
+        ],
         "why": "a subscription must say which topic it applies to: a topic string, the name of a topic object, or both.",
         "example": "DEFINE SUB(WEATHER.S1) TOPICSTR('weather/europe') DEST(LOCAL.Q)"
       },
       {
-        "any": ["DEST"],
-        "when": { "param": "DESTCLAS", "unless_values": ["MANAGED"] },
+        "any": [
+          "DEST"
+        ],
+        "when": {
+          "param": "DESTCLAS",
+          "unless_values": [
+            "MANAGED"
+          ]
+        },
         "why": "a subscription needs a destination: give DEST, or ask MQ to create one with DESTCLAS(MANAGED).",
         "example": "DEFINE SUB(WEATHER.S1) TOPICSTR('weather/europe') DEST(LOCAL.Q)"
       }
     ],
     "BUFFPOOL": [
       {
-        "any": ["BUFFERS"],
+        "any": [
+          "BUFFERS"
+        ],
         "why": "the reference marks BUFFERS required for a buffer pool definition (the number of 4K buffers the pool holds).",
         "example": "DEFINE BUFFPOOL(25) BUFFERS(5000)"
       }
     ]
-  }
+  },
+  "availability": [
+    {
+      "param": "BACKOUT",
+      "obj": [
+        "QLOCAL",
+        "QREMOTE"
+      ],
+      "platform": "distributed",
+      "since": "9.1",
+      "note": "Distributed MQ spells the backout queue BACKOUT from 9.1; z/OS uses BOQNAME."
+    },
+    {
+      "param": "BOQNAME",
+      "platform": "zos",
+      "note": "The z/OS spelling of the backout queue (distributed MQ uses BACKOUT)."
+    },
+    {
+      "param": "CLUSNL",
+      "platform": "zos",
+      "note": "Cluster name list on a queue object is the z/OS mechanism; distributed MQ uses CLUSTER()."
+    },
+    {
+      "param": "TOQLOCAL",
+      "platform": "zos",
+      "note": "z/OS MOVE destination queue parameter (distributed MOVE uses different spellings)."
+    }
+  ]
 }

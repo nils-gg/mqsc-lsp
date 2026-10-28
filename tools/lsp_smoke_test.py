@@ -73,6 +73,8 @@ DEFINE QALIAS(A4) DESCR('missing target')
 DEFINE QLOCAL(SHOP.FRONT) DESCR('queue side of a name collision')
 DEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN) TRPTYPE(TCP) DESCR('channel side')
 DEFINE QALIAS(A5) TARGET(SHOP.FRONT)
+ALTER QLOCAL(C6) BOQNAME(NO)
+DEFINE QLOCAL(C6) BACKOUT(C6)
 """
 uri = "file:///tmp/sample.mqsc"
 
@@ -327,7 +329,7 @@ got = sorted(s["name"] for s in syms)
 print("   all symbols:", got)
 check("workspace/symbol lists all DEFINEd objects (X counts via DEF/QL synonyms)",
       got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "A4", "A5", "X",
-                     "SHOP.FRONT", "SHOP.FRONT"]), str(got))
+                     "SHOP.FRONT", "SHOP.FRONT", "C6"]), str(got))
 
 print("\n== codeAction is_preferred is per diagnostic (T-20) ==")
 d_a = {"range": {"start": {"line": 5, "character": 18}, "end": {"line": 5, "character": 23}},
@@ -447,6 +449,50 @@ after = sum(1 for d in diags2 if d.get("code") == 12)
 print("   code-12 hints after:", after, "| total diags:", len(diags2))
 check("hint 12 present before config", before > 0)
 check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+check("no code 15 anywhere while no target is configured",
+      not any(d.get("code") == 15 for d in diags2),
+      str([d for d in diags2 if d.get("code") == 15]))
+
+print("\n== target availability (code 15, T-19 phase 4) ==")
+# L14 '... BACKOUT(BQ2)': curated since 9.1/distributed; L13 BOQNAME: z/OS-only.
+# Hover documents the curated facts even with no target configured.
+m = request(47, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 14, "character": 20}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on BACKOUT shows the curated availability (from MQ 9.1)",
+      "Availability (curated)" in v and "9.1" in v, v[-120:])
+send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+      "params": {"settings": {"mqsc": {"targetVersion": "9.0", "platform": "distributed",
+                                        "diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
+send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+    "textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": DOC}]}})
+diags3 = []
+while True:
+    m = pump(3)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
+        diags3 = m["params"]["diagnostics"]
+d15 = [(d["range"]["start"]["line"], d["message"]) for d in diags3 if d.get("code") == 15]
+print("   code 15 under target 9.0/distributed:", [(l, m[:60]) for l, m in d15])
+check("code 15: BACKOUT too old for targetVersion 9.0 (line 14 names 9.1)",
+      any(l == 14 and "9.1" in msg for l, msg in d15), str(d15))
+check("code 15: BOQNAME is z/OS-only vs distributed platform (line 13)",
+      any(l == 13 and "z/OS" in msg for l, msg in d15), str(d15))
+send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+      "params": {"settings": {"mqsc": {}}}})
+send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+    "textDocument": {"uri": uri, "version": 4}, "contentChanges": [{"text": DOC}]}})
+diags4 = []
+while True:
+    m = pump(3)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
+        diags4 = m["params"]["diagnostics"]
+check("clearing the target makes every code 15 disappear",
+      not any(d.get("code") == 15 for d in diags4),
+      str([d for d in diags4 if d.get("code") == 15]))
 
 print("\n== prepareRename: verbs refuse; a quoted name selects WITHOUT quotes ==")
 m = request(28, "textDocument/prepareRename", {"textDocument": {"uri": uri},

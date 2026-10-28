@@ -49,6 +49,22 @@
           "default": "",
           "markdownDescription": "Optional file for server diagnostics (request timings, parse/analyze durations, panics). Passed to the server as `MQSC_LSP_LOG`. Empty = no logging."
         },
+        "mqsc.targetVersion": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "MQ version the scripts target, e.g. `9.4` (major or `major.minor`; a patch level is read as its minor release). Enables diagnostic 15 NOT_IN_TARGET for parameters newer than this release. Empty = no version checks."
+        },
+        "mqsc.platform": {
+          "type": "string",
+          "enum": ["", "distributed", "zos"],
+          "default": "",
+          "enumDescriptions": [
+            "no platform checks",
+            "distributed MQ (Linux/Windows/AIX...)",
+            "z/OS MQ"
+          ],
+          "markdownDescription": "Platform the scripts target. Enables diagnostic 15 NOT_IN_TARGET for parameters that only exist on the other platform (e.g. `BOQNAME` is z/OS-only). Empty = no platform checks."
+        },
         "mqsc.diagnostics.PARSE_ERROR": {
           "type": "string",
           "enum": ["default", "error", "warning", "information", "hint", "off"],
@@ -132,6 +148,12 @@
           "enum": ["default", "error", "warning", "information", "hint", "off"],
           "default": "default",
           "description": "Severity for code 14: DEFINE missing a mandatory property (QALIAS TARGET, QREMOTE RNAME/RQMNAME, CHANNEL CHLTYPE and XMITQ for SDR/SVR, TOPIC TOPICSTR, SUB topic/DEST, BUFFPOOL BUFFERS)."
+        },
+        "mqsc.diagnostics.NOT_IN_TARGET": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 15: parameter not available for the configured mqsc.targetVersion / mqsc.platform (curated availability; never fires when no target is configured)."
         }
       }
     }
