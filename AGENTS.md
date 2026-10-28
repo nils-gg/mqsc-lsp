@@ -24,7 +24,11 @@ the full picture; this file only lists what is easy to get wrong.
   `XMITQ`, `LIKE` etc. are typed plain `string`. The real object-reference
   parameters (driving hint 12 and defined-name completion) live in the
   curated `object_ref_param` table in analysis.rs — a documented heuristic,
-  not model data. Don't "fix" it by keying off `ValueKind::Name`.
+  not model data. Don't "fix" it by keying off `ValueKind::Name`. The scope
+  a ref parameter resolves in goes through `ref_scope`, which also applies
+  the z/OS `TARGTYPE` value gate (`TARGTYPE(TOPIC)` makes a queue alias's
+  `TARGET` a TOPIC reference; skipping this gate flags 2,328 valid topic
+  aliases on the dmpmqcfg corpus).
 - Name resolution is **(name, namespace)**, never bare name: every queue
   type shares one MQ namespace, other object classes have their own. The
   rule lives in `analysis::ObjectScope` (+ `type_namespace`); `NameSite`
@@ -32,7 +36,10 @@ the full picture; this file only lists what is easy to get wrong.
   completion all join through `ObjectIndex::sites_in` /
   `ObjectScope::accepts_type` so they cannot disagree about what a name
   means. Rename refuses (does not mass-edit) when one namespace holds
-  same-named definitions of two different types.
+  same-named definitions of two different types. `Definitions::by_obj`
+  registers a name under **every** type that DEFINEs it (the flat `names`
+  set must not gate it — a QLOCAL and a CHANNEL named alike both need
+  listing, or code-12 and completion lose the second type).
 - `server.rs` caches one `Doc { text, tree, defs }` per open document
   (`Tree` is Send-but-not-Sync, hence the per-tree `Mutex`; `defs` is the
   doc's own DEFINE index, making the T-17 cross-file view a cheap merge).
@@ -69,7 +76,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 81 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 90 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session

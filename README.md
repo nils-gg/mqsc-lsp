@@ -200,8 +200,11 @@ object-reference parameters (queue aliases' `TARGET`, channels' `XMITQ`,
 `DEADQ`, `DEFXMITQ`, initiation queue `INITQ`, the `MOVE` queue
 parameters …) are checked, because the 2011 model types them all as plain
 strings. Context guards ride along: `START CHINIT`'s `INITQ` names a queue
-*manager*, not a queue, and documented special values (`BOQNAME(NO)`,
-`DEADQ(NONE)`) are never flagged. Renaming a queue rewrites every one of
+*manager*, not a queue, a `TARGTYPE(TOPIC)` z/OS alias points its `TARGET`
+at the TOPIC namespace instead of the queue one (without that value gate
+hint 12 flags every topic-publishing alias), and documented special values
+(`BOQNAME(NO)`, `DEADQ(NONE)`) are never flagged. Renaming a queue rewrites
+every one of
 these reference sites, so `ALTER QLOCAL(ORDERS) BACKOUT(OLD)` follows
 `DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
 
@@ -226,7 +229,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 81 unit tests + 3 grammar-corpus tests
+cargo test                                       # 90 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -284,8 +287,13 @@ non-zero when a check fails.
 - **False positives are measured, not eliminated**: on a 324-file
   `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
   the count sits at ≈19.9k after the model/overlay/grammar fixes (-92.5%);
-  codes 3/5/9/13 are at zero and the bulk (19,865 × hint 12) is by design
+  codes 3/5/9/13 are at zero and the bulk (19,882 × hint 12) is by design
   (cross-file references without the sibling open, MQ 9.x parameters).
+  Hint 12's existence test is namespace-qualified (a `TARGET` looking for a
+  queue is not satisfied by a same-named CHANNEL or TOPIC, and a z/OS
+  `TARGTYPE(TOPIC)` alias looks for a TOPIC), which surfaced 17 genuinely
+  mis-classified alias targets in that corpus while flagging none of the
+  2,328 correctly-declared topic aliases.
   Code 14 contributes 21 warnings — real dangling `DEFINE QALIAS` objects
   (no `TARGET`) found live in those queue managers, which is the point of
   the check; its curated `mandatory` table was tuned until nothing else

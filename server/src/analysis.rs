@@ -505,8 +505,15 @@ pub fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
         for v in value_nodes(*g) {
             for name in value_name_words(v, src) {
                 defs.any_defines = true;
-                if defs.names.insert(name.clone()) {
-                    defs.by_obj.entry(obj.clone()).or_default().push(name);
+                defs.names.insert(name.clone());
+                // register per object TYPE independently of the flat set:
+                // one spelling may be DEFINEd under several classes (a
+                // QLOCAL and a CHANNEL `SHOP.FRONT`), and namespace-aware
+                // resolution needs each type's own list — the flat-set
+                // gate used to hide every type but the first
+                let list = defs.by_obj.entry(obj.clone()).or_default();
+                if !list.contains(&name) {
+                    list.push(name);
                 }
             }
         }
@@ -648,6 +655,32 @@ fn obj_ref_scope(r: ObjRef, cmd_obj: &str) -> ObjectScope {
     }
 }
 
+/// Value of the command's TARGTYPE parameter, uppercased (z/OS only):
+/// `DEFINE/ALTER QALIAS ... TARGTYPE(QLOCAL|QALIAS|TOPIC)` declares what
+/// object class the alias's TARGET actually names.
+fn command_targtype(items: &[Item<'_>], src: &[u8]) -> Option<String> {
+    items.windows(2).find_map(|w| match (&w[0], &w[1]) {
+        (Item::Word(n), Item::Arg(g)) if node_text(*n, src).eq_ignore_ascii_case("TARGTYPE") => {
+            value_nodes(*g)
+                .first()
+                .map(|v| unquote_name(node_text(*v, src).trim()).to_ascii_uppercase())
+        }
+        _ => None,
+    })
+}
+
+/// Scope for a curated object-ref parameter, with the command's TARGTYPE
+/// gate: a z/OS queue alias `TARGTYPE(TOPIC)` points its TARGET at a TOPIC,
+/// not at a queue — treating it as a queue reference flagged thousands of
+/// perfectly good topic aliases on the dmpmqcfg corpus.
+fn ref_scope(pname: &str, r: ObjRef, cmd_obj: &str, targtype: Option<&str>) -> ObjectScope {
+    if pname == "TARGET" && cmd_obj.starts_with('Q') && targtype == Some("TOPIC") {
+        ObjectScope::Exact("TOPIC".to_string())
+    } else {
+        obj_ref_scope(r, cmd_obj)
+    }
+}
+
 /// A name plus the namespace it was read in — the unit every resolution
 /// feature (definition, references, rename, diagnostics, completion)
 /// joins on, so they can never disagree about what a name means.
@@ -657,20 +690,12 @@ pub struct SymbolKey {
     pub scope: ObjectScope,
 }
 
-/// Defined names matching a reference family, as (object type, name) pairs.
-/// `None` means every defined name.
-fn names_for<'a>(
-    defs: &'a Definitions,
-    r: Option<ObjRef>,
-    cmd_obj: &str,
-) -> Vec<(&'a str, &'a str)> {
-    let scope = r.map(|rr| obj_ref_scope(rr, cmd_obj));
+/// Defined names whose type the scope accepts, as (object type, name)
+/// pairs.
+fn names_for<'a>(defs: &'a Definitions, scope: &ObjectScope) -> Vec<(&'a str, &'a str)> {
     defs.by_obj
         .iter()
-        .filter(|(obj, _)| match &scope {
-            Some(s) => s.accepts_type(obj),
-            None => true,
-        })
+        .filter(|(obj, _)| scope.accepts_type(obj))
         .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
         .collect()
 }
@@ -698,37 +723,59 @@ impl Definitions {
         }
     }
 
-    /// Whether code 12 may fire at all for a reference family in this script:
-    /// only when the script DEFINEs at least one object of a matching type.
-    /// A dump that only contains, say, QALIAS definitions never gets TARGET
-    /// hints (the real queues live in other scripts) — see README
-    /// "Same-script object knowledge".
-    fn arms(&self, r: ObjRef, cmd_obj: &str) -> bool {
-        match r {
-            ObjRef::QueueFamily => self.by_obj.keys().any(|o| o.starts_with('Q')),
-            ObjRef::SameType => self.by_obj.contains_key(cmd_obj),
-        }
+    /// Whether code 12 may fire at all for a reference scope in this script:
+    /// only when the script DEFINEs at least one object of a type the scope
+    /// accepts. A dump that only contains, say, QALIAS definitions never
+    /// gets TARGET hints (the real queues live in other scripts) — see
+    /// README "Same-script object knowledge".
+    fn arms(&self, scope: &ObjectScope) -> bool {
+        self.by_obj.keys().any(|o| scope.accepts_type(o))
     }
+
+    /// Whether `name` is DEFINEd as an object TYPE compatible with `scope`
+    /// — the same rule navigation resolves on (`ObjectScope`), so "exists"
+    /// never means two different things: a name that lives only in another
+    /// namespace (a CHANNEL where a queue is expected) does not resolve
+    /// here, exactly as it would not be found by goto-definition.
+    pub fn contains_compatible(&self, name: &str, scope: &ObjectScope) -> bool {
+        self.by_obj
+            .iter()
+            .any(|(obj, names)| scope.accepts_type(obj) && names.iter().any(|n| n == name))
+    }
+}
+
+/// What a code-12 existence check is about: the parameter word, the
+/// object class its command works on, and the TARGTYPE gate qualifying
+/// a z/OS alias TARGET (keeps `check_obj_ref` within sane arity).
+struct RefSubject<'a> {
+    pname: &'a str,
+    cmd_obj: &'a str,
+    targtype: Option<&'a str>,
 }
 
 /// Code 12: an object-name reference (TARGET, XMITQ, LIKE, ...) that no
 /// DEFINE in this script provides. Hint severity on purpose: runmqsc
 /// scripts routinely reference queue-manager objects that exist already.
 fn check_obj_ref(
-    pname: &str,
-    cmd_obj: &str,
+    s: RefSubject<'_>,
     values: &[Node<'_>],
     src: &[u8],
     lines: &Lines,
     defs: &Definitions,
     d: &mut Diags,
 ) {
+    let (pname, cmd_obj) = (s.pname, s.cmd_obj);
     let Some(r) = object_ref_param(pname, cmd_obj) else {
         return;
     };
-    if !defs.any_defines || !defs.arms(r, cmd_obj) {
+    let scope = ref_scope(pname, r, cmd_obj, s.targtype);
+    if !defs.any_defines || !defs.arms(&scope) {
         return;
     }
+    // existence is namespace-qualified: "does a DEFINE this parameter
+    // could actually point at provide this name?" — the same ObjectScope
+    // rule goto-definition resolves on, so a name that exists only as a
+    // different object class reads as unresolved here too
     for v in values {
         for name in value_name_words(*v, src) {
             // Blank/' ' values (legal in dumps, e.g. SHORTUSR(' ')) are never typos.
@@ -743,13 +790,13 @@ fn check_obj_ref(
                 continue;
             }
             // IBM ships every SYSTEM.* object; never flag those.
-            if defs.names.contains(&name) || name.starts_with("SYSTEM") {
+            if defs.contains_compatible(&name, &scope) || name.starts_with("SYSTEM") {
                 continue;
             }
             // suggest from the family this parameter accepts, not every
             // DEFINEd name: smaller, and never suggests a type-incompatible
             // name the quickfix would only get flagged again
-            let pool = names_for(defs, Some(r), cmd_obj);
+            let pool = names_for(defs, &scope);
             let sugs = model::suggest(&name, pool.iter().map(|&(_, n)| n), 3);
             let scope = if defs.from_other_files {
                 "this script or the other open documents"
@@ -931,6 +978,8 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
         let is_define = m.canon_verb(verb) == Some("DEFINE");
         let _ = obj_txt;
         let items = command_items(cmd);
+        // the TARGTYPE gate for object-ref params (z/OS alias TARGET class)
+        let targtype = command_targtype(&items, src);
         // track the last parameter word for object-ref parameters
         let mut owner: Option<String> = None;
         for (i, it) in items.iter().enumerate() {
@@ -945,10 +994,10 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
                     let scope = if positional {
                         Some(ObjectScope::for_object_type(e.object))
                     } else {
-                        owner
-                            .as_deref()
-                            .and_then(|w| object_ref_param(w, e.object))
-                            .map(|r| obj_ref_scope(r, e.object))
+                        owner.as_deref().and_then(|w| {
+                            object_ref_param(w, e.object)
+                                .map(|r| ref_scope(w, r, e.object, targtype.as_deref()))
+                        })
                     };
                     let Some(scope) = scope else {
                         continue;
@@ -1145,6 +1194,8 @@ fn check_command(
         .map(|w| w.param.as_str())
         .collect();
     let mut when_vals: HashMap<String, String> = HashMap::new();
+    // the TARGTYPE gate for object-ref params (z/OS alias TARGET class)
+    let targtype = command_targtype(&items, src);
 
     for (k, item) in items[idx..].iter().enumerate() {
         match item {
@@ -1248,7 +1299,18 @@ fn check_command(
                     if let Some(&pi) = e.by_name.get(&up) {
                         let p = &e.params[pi];
                         check_values(p, &up, &values, src, lines, d);
-                        check_obj_ref(&up, e.object, &values, src, lines, defs, d);
+                        check_obj_ref(
+                            RefSubject {
+                                pname: &up,
+                                cmd_obj: e.object,
+                                targtype: targtype.as_deref(),
+                            },
+                            &values,
+                            src,
+                            lines,
+                            defs,
+                            d,
+                        );
                     }
                     if values.is_empty() {
                         let example = e
@@ -1321,7 +1383,18 @@ fn check_command(
                         value_nodes(*n)
                     };
                     check_values(p, &up, &vs, src, lines, d);
-                    check_obj_ref(&up, e.object, &vs, src, lines, defs, d);
+                    check_obj_ref(
+                        RefSubject {
+                            pname: &up,
+                            cmd_obj: e.object,
+                            targtype: targtype.as_deref(),
+                        },
+                        &vs,
+                        src,
+                        lines,
+                        defs,
+                        d,
+                    );
                     if when_params.contains(up.as_str()) {
                         if let Some(v) = vs.first() {
                             when_vals.insert(
@@ -2048,9 +2121,11 @@ pub fn completions(
                         // this very script already DEFINEd (plus the other
                         // open documents, T-17)
                         if let Some(r) = object_ref_param(&w, e.object) {
+                            let tt = command_targtype(&command_items(cmd), src);
+                            let scope = ref_scope(&w, r, e.object, tt.as_deref());
                             let mut defs = collect_definitions(tree, src, m);
                             defs.add_external(extra_defs);
-                            out.extend(name_items(&names_for(&defs, Some(r), e.object)));
+                            out.extend(name_items(&names_for(&defs, &scope)));
                         }
                         // (value_completions already filtered its items;
                         // re-filtering both sets together is harmless)
@@ -3230,6 +3305,54 @@ mod tests {
     }
 
     #[test]
+    fn code12_existence_is_namespace_qualified() {
+        // "defined" means DEFINEd as an object this parameter could point
+        // at — the ObjectScope rule goto-definition uses, not bare spelling.
+        // A channel named SHOP.FRONT does not satisfy a TARGET looking for
+        // a queue, and a same-named queue is the only thing that does.
+        assert!(has(
+            "DEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN)\nDEFINE QALIAS(A) TARGET(SHOP.FRONT)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        assert!(!has(
+            "DEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN)\nDEFINE QLOCAL(SHOP.FRONT)\nDEFINE QALIAS(A) TARGET(SHOP.FRONT)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        // the reverse: LIKE on a CHANNEL wants a CHANNEL template — a QLOCAL
+        // of the same spelling is a different object and leaves it dangling
+        assert!(has(
+            "DEFINE QLOCAL(MY.MODEL)\nDEFINE CHANNEL(C) CHLTYPE(SDR) TRPTYPE(TCP) LIKE(MY.MODEL)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        assert!(!has(
+            "DEFINE QLOCAL(MY.MODEL)\nDEFINE CHANNEL(MY.MODEL) CHLTYPE(SDR) TRPTYPE(TCP)\nDEFINE CHANNEL(C) CHLTYPE(SDR) TRPTYPE(TCP) LIKE(MY.MODEL)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+    }
+
+    #[test]
+    fn code12_targtype_topic_points_target_at_topics() {
+        // z/OS alias TARGTYPE(TOPIC): the TARGET names a TOPIC — a defined
+        // topic satisfies it (the dmpmqcfg topic-publishing pattern that a
+        // plain queue-family check flagged 2,328 times) …
+        assert!(!has(
+            "DEFINE TOPIC(P) TOPICSTR('t')\nDEFINE QALIAS(A) TARGTYPE(TOPIC) TARGET(P)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        // … while a queue of that spelling does not, once the script proves
+        // it tracks topics at all (arms() convention)
+        assert!(has(
+            "DEFINE TOPIC(OTHER) TOPICSTR('o')\nDEFINE QLOCAL(P)\nDEFINE QALIAS(A) TARGTYPE(TOPIC) TARGET(P)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+        // without the gate TARGET stays a queue reference
+        assert!(!has(
+            "DEFINE QLOCAL(P)\nDEFINE QALIAS(A) TARGET(P)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
+    }
+
+    #[test]
     fn code13_object_name_length() {
         let n48 = "Q".repeat(48);
         let n49 = "Q".repeat(49);
@@ -3635,6 +3758,21 @@ mod tests {
             (from_channel.name.as_str(), from_channel.scope.namespace()),
             ("SHOP.FRONT", "CHANNEL")
         );
+    }
+
+    #[test]
+    fn targtype_topic_directs_target_site_at_the_topic_namespace() {
+        // the alias TARGET sits in the TOPIC namespace, not the queue one:
+        // same spelling, the topic is the referenced object
+        let text = "DEFINE TOPIC(PILOT)\nDEFINE QLOCAL(PILOT)\nDEFINE QALIAS(A) TARGTYPE(TOPIC) TARGET(PILOT)\n";
+        let idx = index_of(text);
+        let t = idx.symbol_at(Position::new(2, 42)).expect("TARGET name");
+        assert_eq!((t.name.as_str(), t.scope.namespace()), ("PILOT", "TOPIC"));
+        let defs = idx.definitions_in("PILOT", "TOPIC");
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].range.start.line, 0);
+        // the queue still owns its own namespace
+        assert_eq!(idx.definitions_in("PILOT", "QUEUE").len(), 1);
     }
 
     #[test]
