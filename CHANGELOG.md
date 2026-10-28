@@ -8,6 +8,12 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Fixed
+- `textDocument/references` now honors the client's
+  `context.includeDeclaration` flag: with `false` the DEFINE sites stay
+  out of the result (previously every site was always returned on the
+  assumption that clients filter it themselves — they don't, they trust
+  the server), so "Find all references" from a declaration-only object
+  correctly reports nothing and a use site lists exactly the uses
 - Hint 12's existence test is namespace-qualified with the same
   `ObjectScope` rule navigation resolves on: a `TARGET` looking for a
   queue is no longer satisfied by a same-named CHANNEL, and a `LIKE` on a

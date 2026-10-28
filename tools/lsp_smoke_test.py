@@ -283,6 +283,22 @@ v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
 check("hover on the CHANNEL name never mentions the queue type",
       "CHANNEL" in v and "QLOCAL" not in v, v.replace("\n", " ")[:100])
 
+# includeDeclaration compliance: false means the DEFINE sites stay out
+m = request(45, "textDocument/references", {"textDocument": {"uri": uri},
+                                            "position": {"line": 5, "character": 14},
+                                            "context": {"includeDeclaration": False}})
+locs = (m or {}).get("result") or []
+starts = sorted((l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs)
+check("includeDeclaration=false drops the Q1 DEFINE, keeps the TARGET use",
+      starts == [(6, 25)], str(starts))
+# a declaration-only symbol then has nothing left to report
+m = request(46, "textDocument/references", {"textDocument": {"uri": uri},
+                                            "position": {"line": 11, "character": 15},
+                                            "context": {"includeDeclaration": False}})
+locs = (m or {}).get("result") or []
+check("includeDeclaration=false on a declaration-only name yields no sites",
+      locs == [], str(locs))
+
 print("\n== hover on object names (T-18) ==")
 m = request(16, "textDocument/hover", {"textDocument": {"uri": uri},
                                        "position": {"line": 5, "character": 14}})

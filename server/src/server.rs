@@ -582,9 +582,14 @@ impl LanguageServer for MqscServer {
             Ok(idx.symbol_at(pos))
         })?;
         let Some(key) = key else { return Ok(None) };
-        // every site of the symbol, definitions included (clients honour
-        // includeDeclaration themselves)
-        let mut locs = self.sites_of_key(&key, None);
+        // every site of the symbol; the client's includeDeclaration flag
+        // decides whether the DEFINE sites belong to the answer
+        let definitions_only = if p.context.include_declaration {
+            None
+        } else {
+            Some(false)
+        };
+        let mut locs = self.sites_of_key(&key, definitions_only);
         locs.sort_by_key(|l| {
             (
                 l.uri.to_string(),
