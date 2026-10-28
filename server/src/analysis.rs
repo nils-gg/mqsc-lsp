@@ -567,6 +567,14 @@ fn object_ref_param(pname: &str, cmd_obj: &str) -> Option<ObjRef> {
         }),
         "TARGET" | "TGTQ" | "XMITQ" | "MODEL" | "MDURMDL" | "MNDURMDL" | "FROMQ" | "TOQLOCAL"
         | "TOQALIAS" | "TOQNAME" => Some(ObjRef::QueueFamily),
+        // Backout queue in both spellings (distributed BACKOUT, z/OS
+        // BOQNAME), plus the other queue-name-valuing QMGR/queue params.
+        // The documented special values (BOQNAME(NO/YES), DEADQ(NONE)...)
+        // are exempted in check_obj_ref, not hidden from this table.
+        "BACKOUT" | "BOQNAME" | "DEADQ" | "DEFXMITQ" => Some(ObjRef::QueueFamily),
+        // INITQ on QLOCAL/QMODEL names the initiation queue; on START
+        // CHINIT it names a *queue manager* (the initiator to start).
+        "INITQ" if cmd_obj.starts_with('Q') => Some(ObjRef::QueueFamily),
         _ => None,
     }
 }
@@ -653,6 +661,13 @@ fn check_obj_ref(
         for name in value_name_words(*v, src) {
             // Blank/' ' values (legal in dumps, e.g. SHORTUSR(' ')) are never typos.
             if name.trim().is_empty() {
+                continue;
+            }
+            // Documented special values of the queue-ref params are toggles,
+            // not names: z/OS BOQNAME(NO|YES), DEADQ(NONE)/DEFXMITQ(NONE).
+            if (matches!(pname, "BACKOUT" | "BOQNAME") && (name == "NO" || name == "YES"))
+                || (matches!(pname, "DEADQ" | "DEFXMITQ") && name == "NONE")
+            {
                 continue;
             }
             // IBM ships every SYSTEM.* object; never flag those.
@@ -3438,5 +3453,44 @@ mod tests {
             })
             .collect();
         assert!(bad.is_empty(), "BACKOUT/BOQNAME must be accepted: {bad:?}");
+    }
+
+    #[test]
+    fn backout_params_register_rename_sites() {
+        // Renaming a queue must rewrite references hiding in backout/dead/
+        // default-xmit params — in both the BACKOUT and BOQNAME spellings.
+        let text = "DEFINE QLOCAL(BOQ)\nDEFINE QLOCAL(ORDERS) BACKOUT(BOQ)\n\
+                    ALTER QLOCAL(ORDERS) BACKOUT(BOQ)\nALTER QMODEL(M) BOQNAME(BOQ)\n\
+                    ALTER QMGR DEADQ(BOQ) DEFXMITQ(BOQ)\n";
+        let idx = index_of(text);
+        let a: Vec<_> = idx.sites_of("BOQ").collect();
+        assert_eq!(a.len(), 6, "{a:?}");
+        assert_eq!(a[0].defines.as_deref(), Some("QLOCAL"));
+        assert!(a[1..].iter().all(|s| s.defines.is_none()));
+        let lines: Vec<u32> = a[1..].iter().map(|s| s.range.start.line).collect();
+        assert_eq!(lines, vec![1, 2, 3, 4, 4]);
+    }
+
+    #[test]
+    fn backout_refs_are_checked_special_values_are_not() {
+        let text = "DEFINE QLOCAL(BACKOUT.Q)\nDEFINE QLOCAL(ORDERS) BACKOUT(GHOST)\n\
+                    ALTER QLOCAL(ORDERS) BOQNAME(NO)\nDEFINE QLOCAL(M1) INITQ(GHOST)\n\
+                    START CHINIT(A) INITQ(B)\nALTER QMGR DEADQ(NONE)\n";
+        let diags = analyze(
+            text,
+            &parse(text),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        );
+        let hint_lines: Vec<u32> = diags
+            .iter()
+            .filter(|d| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT)))
+            .map(|d| d.range.start.line)
+            .collect();
+        // BACKOUT(GHOST) and the QLOCAL INITQ(GHOST) are flagged; the z/OS
+        // BOQNAME(NO) and DEADQ(NONE) special values are not, and the INITQ
+        // of START CHINIT names a queue MANAGER, not a queue (no hint).
+        assert_eq!(hint_lines, vec![1, 3], "{diags:?}");
     }
 }
