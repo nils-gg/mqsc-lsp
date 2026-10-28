@@ -40,12 +40,19 @@ the full picture; this file only lists what is easy to get wrong.
   registers a name under **every** type that DEFINEs it (the flat `names`
   set must not gate it — a QLOCAL and a CHANNEL named alike both need
   listing, or code-12 and completion lose the second type).
-- `server.rs` caches one `Doc { text, tree, defs }` per open document
-  (`Tree` is Send-but-not-Sync, hence the per-tree `Mutex`; `defs` is the
-  doc's own DEFINE index, making the T-17 cross-file view a cheap merge).
-  Handlers receive `(&str, &Tree)` via `with_doc`; never re-parse in a
-  handler and never hold a lock guard across an `.await` (futures must stay
-  Send). Invalidation policy: did_open/did_close refresh **all** documents
+- `workspace.rs` owns the workspace index: one `OpenDoc { text, tree, defs }`
+  per open document (`Tree` is Send-but-not-Sync, hence the per-tree
+  `Mutex`; `defs` is the doc's own DEFINE index, making the T-17 cross-file
+  view a cheap merge). ALL cross-document merge/join loops live there —
+  diagnostics' `external_defs`, hover's define map, definition/references/
+  rename `sites`/`rename_sites` (joined on `SymbolKey` = name+namespace),
+  and `definitions()` for workspace/symbol; PR 7 (closed `*.mqsc` files,
+  open-doc override) and PR 8 (watched reindex) extend that module, not
+  `server.rs`. `server.rs` is protocol-only on top of it; handlers receive
+  `(&str, &Tree)` via `with_doc`; never re-parse in a handler and never
+  hold a lock guard across an `.await` (futures must stay Send).
+  Poison-tolerant `rd/wr/mtx` accessors live with the map they guard.
+  Invalidation policy: did_open/did_close refresh **all** documents
   (cross-file defines changed for everyone), did_change refreshes only
   itself — per-keystroke sibling refresh would be quadratic.
 - `model/mqsc-overlay.json` is likewise `include_str!`-embedded and merged
@@ -87,7 +94,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 102 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 108 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session

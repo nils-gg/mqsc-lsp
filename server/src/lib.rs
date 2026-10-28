@@ -6,3 +6,4 @@ pub mod model;
 pub mod server;
 pub mod settings;
 pub mod telemetry;
+pub mod workspace;

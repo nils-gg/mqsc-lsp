@@ -243,7 +243,7 @@ again once you reopen them; the server never touches the filesystem.
 
 ```sh
 cd server
-cargo test                                       # 102 unit tests + 3 grammar-corpus tests
+cargo test                                       # 108 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
