@@ -150,15 +150,22 @@ impl MqscServer {
         }
     }
 
-    /// Collect name sites over every open document (T-17). `definitions_only:
-    /// Some(true)` keeps only DEFINE sites, `Some(false)` only uses.
-    fn sites_of_name(&self, name: &str, definitions_only: Option<bool>) -> Vec<Location> {
+    /// Collect the name sites of one symbol — name AND namespace, the same
+    /// rule `analysis::ObjectScope` gives diagnostics and completion —
+    /// over every open document (T-17). `definitions_only: Some(true)`
+    /// keeps only DEFINE sites, `Some(false)` only uses.
+    fn sites_of_key(
+        &self,
+        key: &analysis::SymbolKey,
+        definitions_only: Option<bool>,
+    ) -> Vec<Location> {
         let mut out = Vec::new();
+        let ns = key.scope.namespace();
         let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
             let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            for s in idx.sites_of(name) {
+            for s in idx.sites_in(&key.name, ns) {
                 let keep = match definitions_only {
                     Some(true) => s.defines.is_some(),
                     Some(false) => s.defines.is_none(),
@@ -533,21 +540,22 @@ impl LanguageServer for MqscServer {
     }
 
     /// T-16/T-17: jump from any use of an object name to its DEFINE — across
-    /// ALL open documents. Duplicate names (same name under several object
-    /// types exist in real dumps) all come back as locations, sorted for a
-    /// stable pick list.
+    /// ALL open documents, inside the object's namespace (a QUEUE and a
+    /// same-named CHANNEL never share a definition list). Duplicate names
+    /// inside one namespace (a queue defined both here and in a sibling)
+    /// all come back as locations, sorted for a stable pick list.
     async fn goto_definition(
         &self,
         p: GotoDefinitionParams,
     ) -> RpcResult<Option<GotoDefinitionResponse>> {
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
-        let name = self.with_doc(&uri, |text, tree| {
+        let key = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+            Ok(idx.symbol_at(pos))
         })?;
-        let Some(name) = name else { return Ok(None) };
-        let mut locs = self.sites_of_name(&name, Some(true));
+        let Some(key) = key else { return Ok(None) };
+        let mut locs = self.sites_of_key(&key, Some(true));
         if locs.is_empty() {
             return Ok(None);
         }
@@ -569,14 +577,14 @@ impl LanguageServer for MqscServer {
     async fn references(&self, p: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
-        let name = self.with_doc(&uri, |text, tree| {
+        let key = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+            Ok(idx.symbol_at(pos))
         })?;
-        let Some(name) = name else { return Ok(None) };
-        // every site of the name, definitions included (clients honour
+        let Some(key) = key else { return Ok(None) };
+        // every site of the symbol, definitions included (clients honour
         // includeDeclaration themselves)
-        let mut locs = self.sites_of_name(&name, None);
+        let mut locs = self.sites_of_key(&key, None);
         locs.sort_by_key(|l| {
             (
                 l.uri.to_string(),
@@ -604,10 +612,17 @@ impl LanguageServer for MqscServer {
         })
     }
 
-    /// Rename every occurrence of the object name under the cursor in every
-    /// open document, keeping each site's quoting style (quoted sites stay
-    /// quoted; a name that no longer fits the bare-word syntax is quoted
-    /// everywhere).
+    /// Rename every occurrence of the object under the cursor — name AND
+    /// namespace, so a QUEUE and a same-named CHANNEL are separate rename
+    /// targets — in every open document, keeping each site's quoting style
+    /// (quoted sites stay quoted; a name that no longer fits the bare-word
+    /// syntax is quoted everywhere).
+    ///
+    /// Safety gate: the target object must resolve uniquely. If the name is
+    /// DEFINEd under more than one object type inside the namespace (a
+    /// QLOCAL and a QALIAS of the same name — which real MQ rejects, but a
+    /// broken script can contain), a rename cannot tell which object every
+    /// reference means, and refuses rather than rewriting every spelling.
     async fn rename(&self, p: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
@@ -622,30 +637,46 @@ impl LanguageServer for MqscServer {
                 ))
             }
         };
-        let name = self.with_doc(&uri, |text, tree| {
+        let key = self.with_doc(&uri, |text, tree| {
             let idx = analysis::object_index(text, tree, Model::load());
-            Ok(idx.site_at(pos).map(|s| s.name.clone()))
+            Ok(idx.symbol_at(pos))
         })?;
-        let Some(name) = name else {
+        let Some(key) = key else {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(
                 "rename needs the cursor on an object name",
             ));
         };
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut def_types: Vec<String> = Vec::new();
         let docs = rd(&self.docs);
+        let ns = key.scope.namespace();
         for (u, doc) in docs.iter() {
             let tree = mtx(&doc.tree);
             let idx = analysis::object_index(&doc.text, &tree, Model::load());
-            let edits: Vec<TextEdit> = idx
-                .sites_of(&name)
-                .map(|s| TextEdit {
+            let mut edits = Vec::new();
+            for s in idx.sites_in(&key.name, ns) {
+                if let Some(t) = &s.defines {
+                    if !def_types.contains(t) {
+                        def_types.push(t.clone());
+                    }
+                }
+                edits.push(TextEdit {
                     range: s.range,
                     new_text: rename_text(&new_name, s.quoted),
-                })
-                .collect();
+                });
+            }
             if !edits.is_empty() {
                 changes.insert(u.clone(), edits);
             }
+        }
+        if def_types.len() > 1 {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                "'{}' is DEFINEd as {} in the open documents — the rename \
+                 cannot tell which object the shared name refers to; rename \
+                 from a definition after disambiguating the spelling",
+                key.name,
+                def_types.join(" and ")
+            )));
         }
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),
@@ -764,6 +795,7 @@ mod tests {
             ),
             quoted,
             defines: None,
+            scope: crate::analysis::ObjectScope::QueueFamily,
         }
     }
 

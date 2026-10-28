@@ -204,6 +204,19 @@ strings. Context guards ride along: `START CHINIT`'s `INITQ` names a queue
 `DEADQ(NONE)`) are never flagged. Renaming a queue rewrites every one of
 these reference sites, so `ALTER QLOCAL(ORDERS) BACKOUT(OLD)` follows
 `DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
+
+Names resolve inside object namespaces, and that rule is shared by every
+feature. All queue types (QLOCAL/QMODEL/QALIAS/QREMOTE/QCLUSTER and the
+QUEUE umbrella) share ONE namespace in MQ, while channels, topics and
+every other class keep their own. A QLOCAL and a CHANNEL both named
+`SHOP.FRONT` are two objects: goto-definition from a `TARGET(SHOP.FRONT)`
+reaches the queue, references from the channel name list channel sites
+only, renaming the queue leaves the channel alone, and hover speaks of
+the object of its own namespace. A rename whose name is `DEFINE`d under
+two different types inside one namespace (a QLOCAL and a QALIAS sharing a
+spelling — real MQ rejects that, a broken script can hold it) refuses
+with an explicit error instead of rewriting every matching spelling.
+Invalidation:
 opening or closing a document re-publishes every other document's
 diagnostics; typing only re-analyses the edited document (per keystroke,
 re-analysing all siblings would be quadratic). Closed documents count

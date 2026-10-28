@@ -25,6 +25,14 @@ the full picture; this file only lists what is easy to get wrong.
   parameters (driving hint 12 and defined-name completion) live in the
   curated `object_ref_param` table in analysis.rs — a documented heuristic,
   not model data. Don't "fix" it by keying off `ValueKind::Name`.
+- Name resolution is **(name, namespace)**, never bare name: every queue
+  type shares one MQ namespace, other object classes have their own. The
+  rule lives in `analysis::ObjectScope` (+ `type_namespace`); `NameSite`
+  carries its scope, and definition/references/rename/hover/code-12/
+  completion all join through `ObjectIndex::sites_in` /
+  `ObjectScope::accepts_type` so they cannot disagree about what a name
+  means. Rename refuses (does not mass-edit) when one namespace holds
+  same-named definitions of two different types.
 - `server.rs` caches one `Doc { text, tree, defs }` per open document
   (`Tree` is Send-but-not-Sync, hence the per-tree `Mutex`; `defs` is the
   doc's own DEFINE index, making the T-17 cross-file view a cheap merge).
