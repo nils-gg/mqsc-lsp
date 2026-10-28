@@ -8,6 +8,16 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Fixed
+- Object-name resolution is now (name, namespace)-aware everywhere: a
+  QLOCAL and a same-named CHANNEL are two objects, and completion,
+  definition, references, hover and rename all resolve through one
+  shared rule (queue types share MQ's one queue namespace; every other
+  class has its own). Before, navigation conflated spellings —
+  goto-definition from `TARGET(FOO)` could land on `DEFINE CHANNEL(FOO)`,
+  and a rename of the queue rewrote the channel's sites too. A rename
+  whose name resolves ambiguously inside one namespace (same spelling
+  DEFINEd under two object types) now refuses with an explicit error
+  instead of editing every matching spelling
 - `semanticTokens/range` responses are document-relative like full
   responses (the deltas the client accumulates start at the document
   origin, not at the requested range start), and the filter returns every

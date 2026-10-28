@@ -70,6 +70,9 @@ DEFINE QALIAS(A2) TARGET(Q1) REPLACE
 DEFINE QALIAS(A3) TARGET(NO.SUCH.Q) REPLACE
 ALTER QLOCAL('DEAD.QUEUE') MAXDEPTH(99)
 DEFINE QALIAS(A4) DESCR('missing target')
+DEFINE QLOCAL(SHOP.FRONT) DESCR('queue side of a name collision')
+DEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN) TRPTYPE(TCP) DESCR('channel side')
+DEFINE QALIAS(A5) TARGET(SHOP.FRONT)
 """
 uri = "file:///tmp/sample.mqsc"
 
@@ -247,6 +250,39 @@ ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["n
 print("  ", ed)
 check("rename rewrites both Q1 sites", ed == [(5, 14, "QNEW"), (6, 25, "QNEW")], str(ed))
 
+print("\n== type-aware identity: SHOP.FRONT names a QUEUE (L10) and a CHANNEL (L11) ==")
+# definition from the TARGET use (L12) must resolve to the QUEUE define only,
+# never the same-named channel
+m = request(41, "textDocument/definition", {"textDocument": {"uri": uri},
+                                           "position": {"line": 12, "character": 25}})
+res = (m or {}).get("result")
+locs = res if isinstance(res, list) else ([res] if res else [])
+starts = sorted((l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs)
+check("definition from TARGET(SHOP.FRONT) resolves only to the QLOCAL define",
+      starts == [(10, 14)], str(starts))
+# references from the CHANNEL define cover the channel namespace alone
+m = request(42, "textDocument/references", {"textDocument": {"uri": uri},
+                                           "position": {"line": 11, "character": 15},
+                                           "context": {"includeDeclaration": True}})
+locs = (m or {}).get("result") or []
+starts = sorted((l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs)
+check("references on the CHANNEL name exclude the queue define and TARGET use",
+      starts == [(11, 15)], str(starts))
+# rename from the QLOCAL define rewrites queue sites only — the channel stays
+m = request(43, "textDocument/rename", {"textDocument": {"uri": uri},
+                                        "position": {"line": 10, "character": 14},
+                                        "newName": "BACK.DOOR"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri, [])
+ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"]) for e in ch)
+check("renaming the QUEUE leaves the same-named CHANNEL untouched",
+      ed == [(10, 14, "BACK.DOOR"), (12, 25, "BACK.DOOR")], str(ed))
+# hover on the channel define speaks about the channel alone
+m = request(44, "textDocument/hover", {"textDocument": {"uri": uri},
+                                       "position": {"line": 11, "character": 15}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on the CHANNEL name never mentions the queue type",
+      "CHANNEL" in v and "QLOCAL" not in v, v.replace("\n", " ")[:100])
+
 print("\n== hover on object names (T-18) ==")
 m = request(16, "textDocument/hover", {"textDocument": {"uri": uri},
                                        "position": {"line": 5, "character": 14}})
@@ -274,7 +310,8 @@ syms = (m or {}).get("result") or []
 got = sorted(s["name"] for s in syms)
 print("   all symbols:", got)
 check("workspace/symbol lists all DEFINEd objects (X counts via DEF/QL synonyms)",
-      got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "A4", "X"]), str(got))
+      got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "A4", "A5", "X",
+                     "SHOP.FRONT", "SHOP.FRONT"]), str(got))
 
 print("\n== codeAction is_preferred is per diagnostic (T-20) ==")
 d_a = {"range": {"start": {"line": 5, "character": 18}, "end": {"line": 5, "character": 23}},

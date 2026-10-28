@@ -581,11 +581,80 @@ fn object_ref_param(pname: &str, cmd_obj: &str) -> Option<ObjRef> {
     }
 }
 
-fn obj_ref_matches(r: ObjRef, def_obj: &str, cmd_obj: &str) -> bool {
-    match r {
-        ObjRef::QueueFamily => def_obj.starts_with('Q'),
-        ObjRef::SameType => def_obj == cmd_obj,
+/// The semantic namespace a name site belongs to: which object a written
+/// name refers to (or introduces). MQ keeps one name namespace per object
+/// class, and every queue type — QLOCAL/QMODEL/QALIAS/QREMOTE/QCLUSTER and
+/// the QUEUE umbrella — shares ONE namespace: `DISPLAY QUEUE` finds local
+/// queues, a `TARGET` may point at any of them, while a CHANNEL of the
+/// same spelling is a different object entirely. Everything that resolves
+/// a name (navigation, rename, code-12 existence, completion pools) goes
+/// through this one rule; comparing the bare spelling conflates same-named
+/// objects of different classes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectScope {
+    /// any queue-like object (canonical model type starting with `Q`)
+    QueueFamily,
+    /// exactly this canonical model object type
+    Exact(String),
+}
+
+/// Namespace key of a canonical object type: the shared queue namespace
+/// for queue types, the type itself otherwise. Two name sites name the
+/// same object exactly when their namespaces — and names — match.
+pub fn type_namespace(obj: &str) -> &str {
+    if obj.starts_with('Q') {
+        "QUEUE"
+    } else {
+        obj
     }
+}
+
+impl ObjectScope {
+    /// The namespace this scope resolves inside of.
+    pub fn namespace(&self) -> &str {
+        match self {
+            ObjectScope::QueueFamily => "QUEUE",
+            ObjectScope::Exact(t) => type_namespace(t),
+        }
+    }
+
+    /// Does a definition of canonical type `def_obj` satisfy this scope?
+    pub fn accepts_type(&self, def_obj: &str) -> bool {
+        match self {
+            ObjectScope::QueueFamily => def_obj.starts_with('Q'),
+            ObjectScope::Exact(t) => t == def_obj,
+        }
+    }
+
+    /// Scope of a positional object-name slot (and of an object-name group
+    /// of a command) whose object type is `cmd_obj`.
+    pub fn for_object_type(cmd_obj: &str) -> Self {
+        if cmd_obj.starts_with('Q') {
+            ObjectScope::QueueFamily
+        } else {
+            ObjectScope::Exact(cmd_obj.to_string())
+        }
+    }
+}
+
+/// Scope of a curated object-reference parameter inside a command over
+/// `cmd_obj` — the ObjRef table's family, made concrete.
+fn obj_ref_scope(r: ObjRef, cmd_obj: &str) -> ObjectScope {
+    match r {
+        ObjRef::QueueFamily => ObjectScope::QueueFamily,
+        // SameType: the reference names the very class the command works
+        // on, so the queue collapse already happened in for_object_type.
+        ObjRef::SameType => ObjectScope::for_object_type(cmd_obj),
+    }
+}
+
+/// A name plus the namespace it was read in — the unit every resolution
+/// feature (definition, references, rename, diagnostics, completion)
+/// joins on, so they can never disagree about what a name means.
+#[derive(Debug, Clone)]
+pub struct SymbolKey {
+    pub name: String,
+    pub scope: ObjectScope,
 }
 
 /// Defined names matching a reference family, as (object type, name) pairs.
@@ -595,10 +664,11 @@ fn names_for<'a>(
     r: Option<ObjRef>,
     cmd_obj: &str,
 ) -> Vec<(&'a str, &'a str)> {
+    let scope = r.map(|rr| obj_ref_scope(rr, cmd_obj));
     defs.by_obj
         .iter()
-        .filter(|(obj, _)| match r {
-            Some(rr) => obj_ref_matches(rr, obj, cmd_obj),
+        .filter(|(obj, _)| match &scope {
+            Some(s) => s.accepts_type(obj),
             None => true,
         })
         .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
@@ -732,6 +802,11 @@ pub struct NameSite {
     pub quoted: bool,
     /// canonical model object type for a DEFINE site; `None` for uses
     pub defines: Option<String>,
+    /// which object class this appearance names: a DEFINE introduces the
+    /// object in its own class' namespace, a use in the namespace the
+    /// slot expects (positional name → the command's, ref parameters →
+    /// the curated family). Resolution matches name AND namespace.
+    pub scope: ObjectScope,
 }
 
 /// Every name site in one document. A name counts only where the command
@@ -758,6 +833,35 @@ impl ObjectIndex {
 
     pub fn sites_of<'a>(&'a self, name_upper: &'a str) -> impl Iterator<Item = &'a NameSite> {
         self.sites.iter().filter(move |s| s.name == name_upper)
+    }
+
+    /// The symbol under `pos`: its normalised name plus the namespace the
+    /// slot says it lives in. Every cross-feature lookup starts here.
+    pub fn symbol_at(&self, pos: Position) -> Option<SymbolKey> {
+        self.site_at(pos).map(|s| SymbolKey {
+            name: s.name.clone(),
+            scope: s.scope.clone(),
+        })
+    }
+
+    /// Every site naming `name` inside namespace `ns` — THE join rule all
+    /// resolution shares (see `ObjectScope`): a DEFINE of a queue and a
+    /// DEFINE of a same-named channel simply never meet in one result.
+    pub fn sites_in<'a>(
+        &'a self,
+        name: &'a str,
+        ns: &'a str,
+    ) -> impl Iterator<Item = &'a NameSite> {
+        self.sites
+            .iter()
+            .filter(move |s| s.name == name && s.scope.namespace() == ns)
+    }
+
+    /// The DEFINE sites of `name` within namespace `ns`.
+    pub fn definitions_in<'a>(&'a self, name: &'a str, ns: &'a str) -> Vec<&'a NameSite> {
+        self.sites_in(name, ns)
+            .filter(|s| s.defines.is_some())
+            .collect()
     }
 
     pub fn definitions_of<'a>(&'a self, name_upper: &'a str) -> Vec<&'a NameSite> {
@@ -838,14 +942,17 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
                     // word (items[1] word, items[2] arg); any other group is
                     // a parameter's, taken from its owner word.
                     let positional = i == 2 && matches!(items.get(1), Some(Item::Word(_)));
-                    let ref_param = !positional
-                        && owner
+                    let scope = if positional {
+                        Some(ObjectScope::for_object_type(e.object))
+                    } else {
+                        owner
                             .as_deref()
                             .and_then(|w| object_ref_param(w, e.object))
-                            .is_some();
-                    if !(positional || ref_param) {
+                            .map(|r| obj_ref_scope(r, e.object))
+                    };
+                    let Some(scope) = scope else {
                         continue;
-                    }
+                    };
                     for v in value_nodes(*g) {
                         if let Some((name, word, node)) = name_value_node(v, src) {
                             if name.trim().is_empty() {
@@ -862,6 +969,7 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
                                 } else {
                                     None
                                 },
+                                scope: scope.clone(),
                             });
                         }
                     }
@@ -1713,24 +1821,32 @@ pub fn hover(
     // otherwise misread names that collide with attribute words.
     let idx = object_index(text, tree, m);
     if let Some(site) = idx.site_at(pos) {
+        // Summarise only the object this appearance NAMES: when a queue
+        // and a channel share the spelling, hovering the channel must not
+        // mix in the queue's definition or uses.
+        let ns = site.scope.namespace();
         let uses = idx
-            .sites_of(&site.name)
+            .sites_in(&site.name, ns)
             .filter(|s| s.defines.is_none())
             .count();
-        let defs = idx.definitions_of(&site.name);
+        let defs = idx.definitions_in(&site.name, ns);
         let md = if defs.is_empty() {
             // not defined in this document — is it DEFINEd in another open
-            // one? (T-17)
-            match ext_defs.get(&site.name) {
-                Some(ext) if !ext.is_empty() => {
+            // one? (T-17) Same-namespace entries only.
+            let ext: Vec<&(String, u32, String)> = ext_defs
+                .get(&site.name)
+                .map(|v| v.iter().filter(|e| type_namespace(&e.2) == ns).collect())
+                .unwrap_or_default();
+            match ext.first() {
+                Some((file, line, _)) => {
                     let types: Vec<&str> = ext.iter().map(|(_, _, t)| t.as_str()).collect();
                     format!(
                         "**{} `{}`** — DEFINEd at line {} of `{}` (another open document){}\n\n\
                          {} {} in this script.",
                         types.join("/"),
                         site.name,
-                        ext[0].1 + 1,
-                        ext[0].0,
+                        line + 1,
+                        file,
                         if ext.len() > 1 {
                             format!(" — {} DEFINE locations there", ext.len())
                         } else {
@@ -1740,7 +1856,7 @@ pub fn hover(
                         if uses == 1 { "use" } else { "uses" },
                     )
                 }
-                _ => format!(
+                None => format!(
                     "**`{}`** — an object name, but not DEFINEd in this script.\n\n\
                      It must already exist in the queue manager.",
                     site.name
@@ -2209,20 +2325,14 @@ fn defined_name_items(
 ) -> Vec<CompletionItem> {
     let mut defs = collect_definitions(tree, src, m);
     defs.add_external(extra_defs);
+    let want = ObjectScope::for_object_type(cmd_obj);
     let pairs: Vec<(&str, &str)> = defs
         .by_obj
         .iter()
-        .filter(|(obj, _)| name_group_matches(obj, cmd_obj))
+        .filter(|(obj, _)| want.accepts_type(obj))
         .flat_map(|(obj, ns)| ns.iter().map(|n| (obj.as_str(), n.as_str())))
         .collect();
     name_items(&pairs)
-}
-
-/// Names typed into a command's object-name group: same type, or any
-/// queue-like type when either side is queue-like (DISPLAY QUEUE and the
-/// QLOCAL/QMODEL/... aliases name the same objects).
-fn name_group_matches(def_obj: &str, cmd_obj: &str) -> bool {
-    def_obj == cmd_obj || (def_obj.starts_with('Q') && cmd_obj.starts_with('Q'))
 }
 
 /// Snippet placeholder for a parameter's value: `NAME(${1:...})` with the
@@ -3466,6 +3576,98 @@ mod tests {
         assert_eq!(b.len(), 2, "{b:?}");
         assert_eq!(b[0].defines.as_deref(), Some("QALIAS"));
         assert_eq!(b[1].range.start.line, 3);
+    }
+
+    #[test]
+    fn object_scope_namespace_rules() {
+        // every queue kind shares ONE namespace; the queue namespace and a
+        // channel (or topic, process, ...) never collide
+        assert_eq!(type_namespace("QLOCAL"), "QUEUE");
+        assert_eq!(type_namespace("QCLUSTER"), "QUEUE");
+        assert_eq!(type_namespace("QUEUE"), "QUEUE");
+        assert_eq!(type_namespace("CHANNEL"), "CHANNEL");
+        let q = ObjectScope::for_object_type("QALIAS");
+        assert_eq!(q, ObjectScope::QueueFamily);
+        assert_eq!(q.namespace(), "QUEUE");
+        assert!(q.accepts_type("QLOCAL") && q.accepts_type("QREMOTE") && q.accepts_type("QUEUE"));
+        assert!(!q.accepts_type("CHANNEL") && !q.accepts_type("TOPIC"));
+        let c = ObjectScope::for_object_type("CHANNEL");
+        assert_eq!(c, ObjectScope::Exact("CHANNEL".to_string()));
+        assert!(c.accepts_type("CHANNEL"));
+        assert!(!c.accepts_type("QLOCAL"));
+        // LIKE on a queue command is the queue family; on other commands it
+        // names the command's own class
+        assert_eq!(
+            obj_ref_scope(ObjRef::SameType, "QMODEL"),
+            ObjectScope::QueueFamily
+        );
+        assert_eq!(
+            obj_ref_scope(ObjRef::SameType, "CHANNEL"),
+            ObjectScope::Exact("CHANNEL".to_string())
+        );
+    }
+
+    #[test]
+    fn object_index_sites_carry_their_namespace() {
+        // the plan's conflation case: a queue and a channel with one name
+        let text = "DEFINE QLOCAL(SHOP.FRONT)\nDEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN)\nDEFINE QALIAS(A) TARGET(SHOP.FRONT)\nDISPLAY CHANNEL(SHOP.FRONT)\n";
+        let idx = index_of(text);
+        // queue side: the QLOCAL DEFINE plus the TARGET use — the channel
+        // pair never joins queue results
+        let queue: Vec<_> = idx.sites_in("SHOP.FRONT", "QUEUE").collect();
+        assert_eq!(queue.len(), 2, "{queue:?}");
+        assert_eq!(queue[0].defines.as_deref(), Some("QLOCAL"));
+        assert!(queue[1].defines.is_none());
+        assert_eq!(queue[1].range.start.line, 2); // TARGET(SHOP.FRONT)
+                                                  // channel side: its DEFINE plus the DISPLAY use
+        let chan: Vec<_> = idx.sites_in("SHOP.FRONT", "CHANNEL").collect();
+        assert_eq!(chan.len(), 2, "{chan:?}");
+        assert_eq!(chan[0].defines.as_deref(), Some("CHANNEL"));
+        assert_eq!(chan[1].range.start.line, 3);
+        // the cursor's symbol identity: same NAME, different object
+        let from_target = idx.symbol_at(Position::new(2, 25)).expect("TARGET name");
+        assert_eq!(
+            (from_target.name.as_str(), from_target.scope.namespace()),
+            ("SHOP.FRONT", "QUEUE")
+        );
+        let from_channel = idx.symbol_at(Position::new(1, 16)).expect("channel name");
+        assert_eq!(
+            (from_channel.name.as_str(), from_channel.scope.namespace()),
+            ("SHOP.FRONT", "CHANNEL")
+        );
+    }
+
+    #[test]
+    fn hover_summarises_the_object_of_its_namespace() {
+        let text = "DEFINE QLOCAL(SHOP.FRONT)\nDEFINE CHANNEL(SHOP.FRONT) CHLTYPE(SVRCONN)\nDEFINE QALIAS(A) TARGET(SHOP.FRONT)\n";
+        let m = Model::load();
+        let tree = parse(text);
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        // on the channel DEFINE: speaks about the channel object alone
+        let md =
+            md_of(hover(text, &tree, m, Position::new(1, 16), &Default::default()).expect("ch"));
+        assert!(
+            md.contains("CHANNEL") && md.contains("this is the definition"),
+            "{md}"
+        );
+        assert!(
+            !md.contains("QLOCAL"),
+            "queue leaked into channel hover: {md}"
+        );
+        // on the TARGET use: resolves to the QUEUE definition (line 1), not the channel
+        let md =
+            md_of(hover(text, &tree, m, Position::new(2, 25), &Default::default()).expect("t"));
+        assert!(
+            md.contains("QLOCAL") && md.contains("DEFINEd at line 1"),
+            "{md}"
+        );
+        assert!(
+            !md.contains("CHANNEL"),
+            "channel leaked into queue hover: {md}"
+        );
     }
 
     #[test]
