@@ -52,6 +52,35 @@ pub struct CommandEntry {
     pub footnotes: Vec<String>,
 }
 
+/// One `when` clause: the rule applies only when `param` was supplied with
+/// one of `values` (any value if the list is empty), and not with one of
+/// `unless_values`. When the parameter is absent, the rule applies iff
+/// `values` is empty (a value-gated rule needs the value to fire).
+#[derive(Debug, Clone, Deserialize)]
+pub struct MandatoryWhen {
+    pub param: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub unless_values: Vec<String>,
+}
+
+/// One mandatory-property rule for a `DEFINE <object>` command: at least one
+/// parameter of `any` must be present (`why` and `example` word the
+/// diagnostic). Curated data — the 2011 railroad diagrams bracket every
+/// parameter, so the model's `optional` flag cannot express MQ's "this
+/// parameter is required" prose. Drives diagnostic 14 MISSING_MANDATORY.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MandatoryRule {
+    pub any: Vec<String>,
+    #[serde(default)]
+    pub when: Option<MandatoryWhen>,
+    #[serde(default)]
+    pub why: String,
+    #[serde(default)]
+    pub example: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
@@ -61,6 +90,10 @@ struct RawModel {
     /// (overlay-only data; the base model JSON never carries this key)
     #[serde(default)]
     name_max: HashMap<String, usize>,
+    /// curated required parameters per DEFINE object type (overlay-only data
+    /// like name_max; see MandatoryRule)
+    #[serde(default)]
+    mandatory: HashMap<String, Vec<MandatoryRule>>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -86,6 +119,9 @@ struct Overlay {
     /// curated object type -> max positional name length (chars)
     #[serde(default)]
     name_max: HashMap<String, usize>,
+    /// curated mandatory-property rules per DEFINE object type
+    #[serde(default)]
+    mandatory: HashMap<String, Vec<MandatoryRule>>,
 }
 
 impl RawModel {
@@ -137,6 +173,8 @@ impl RawModel {
         }
         // curated name-length table: the overlay is the single source
         self.name_max.extend(ov.name_max);
+        // curated mandatory-property rules: likewise overlay-only
+        self.mandatory.extend(ov.mandatory);
     }
 }
 
@@ -214,6 +252,10 @@ pub struct Model {
     /// (from the overlay's `name_max` section; absent = limit unknown,
     /// never flagged). Drives diagnostic 13 NAME_TOO_LONG.
     name_max: HashMap<String, usize>,
+    /// curated required parameters per DEFINE object type (from the
+    /// overlay's `mandatory` section). Drives diagnostic 14
+    /// MISSING_MANDATORY.
+    mandatory: HashMap<String, Vec<MandatoryRule>>,
 }
 
 fn norm_syn(s: &str) -> String {
@@ -370,6 +412,7 @@ impl Model {
                 verbs: VERBS,
                 param_docs: raw.param_docs,
                 name_max: raw.name_max,
+                mandatory: raw.mandatory,
             }
         })
     }
@@ -434,6 +477,20 @@ impl Model {
     /// cannot capture. Backs diagnostic 13 NAME_TOO_LONG.
     pub fn name_max_len(&self, object: &str) -> Option<usize> {
         self.name_max.get(&norm_syn(object)).copied()
+    }
+
+    /// Curated mandatory-property rules for `DEFINE <object>` (empty for
+    /// object types with no curated requirements, and never applied to other
+    /// verbs: ALTER/DELETE act on objects that already carry these
+    /// properties). The table is the overlay's `mandatory` section — a
+    /// documented heuristic like `name_max`: the 2011 railroad diagrams
+    /// bracket every parameter, so MQ's "this parameter is required" prose
+    /// never reaches the model's `optional` flag. Backs diagnostic 14
+    /// MISSING_MANDATORY.
+    pub fn mandatory_rules(&self, object: &str) -> &[MandatoryRule] {
+        self.mandatory
+            .get(&norm_syn(object))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// documentation text for a parameter name, preferring contexts that
@@ -684,5 +741,36 @@ mod tests {
         assert_eq!(m.name_max_len("channel"), Some(1024)); // normalized
         assert_eq!(m.name_max_len("GROUP"), None); // deliberately absent
         assert_eq!(m.name_max_len(""), None);
+    }
+
+    #[test]
+    fn overlay_mandatory_table_loads() {
+        let m = model();
+        let qalias = m.mandatory_rules("qalias"); // normalized lookup
+        assert_eq!(qalias.len(), 1, "{qalias:?}");
+        assert!(qalias[0].any.contains(&"TARGET".to_string()));
+        assert!(qalias[0].any.contains(&"LIKE".to_string()));
+        assert!(qalias[0].when.is_none());
+        // object types with no curated requirement return nothing
+        assert!(m.mandatory_rules("QLOCAL").is_empty());
+        assert!(m.mandatory_rules("").is_empty());
+        // CHANNEL: CHLTYPE plus one value-gated XMITQ rule
+        let chan = m.mandatory_rules("CHANNEL");
+        assert_eq!(chan.len(), 2, "{chan:?}");
+        assert_eq!(chan[0].any, vec!["CHLTYPE".to_string()]);
+        let w = chan[1]
+            .when
+            .as_ref()
+            .expect("XMITQ rule must be CHLTYPE-gated");
+        assert_eq!(w.param, "CHLTYPE");
+        assert!(w.values.contains(&"SDR".to_string()));
+        assert!(w.unless_values.is_empty());
+        // SUB's DEST rule is exclusion-gated (DESTCLAS(MANAGED) exempts it)
+        let sub = m.mandatory_rules("SUB");
+        assert_eq!(sub.len(), 2, "{sub:?}");
+        let w = sub[1].when.as_ref().expect("DEST rule gated on DESTCLAS");
+        assert_eq!(w.param, "DESTCLAS");
+        assert!(w.values.is_empty());
+        assert!(w.unless_values.contains(&"MANAGED".to_string()));
     }
 }

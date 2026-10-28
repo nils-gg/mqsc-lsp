@@ -77,9 +77,9 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
     let Some(obj) = map.as_object() else {
         return Vec::new();
     };
-    // The 13 CODE_* constants in analysis (1..=13); diag_name maps unknown
+    // The 14 CODE_* constants in analysis (1..=14); diag_name maps unknown
     // numbers to "OTHER".
-    let names: Vec<&str> = (1..=13).map(diag_name).collect();
+    let names: Vec<&str> = (1..=14).map(diag_name).collect();
     let mut out = Vec::new();
     for (k, v) in obj {
         let known = match k.parse::<i32>() {
@@ -88,7 +88,7 @@ pub fn settings_warnings(map: &Value) -> Vec<String> {
         };
         if !known {
             out.push(format!(
-                "unknown diagnostic code '{k}' (not a number 1-13 or a diag name)"
+                "unknown diagnostic code '{k}' (not a number 1-14 or a diag name)"
             ));
         }
         match v.as_str() {

@@ -69,6 +69,7 @@ DEFINE QLOCAL(Q1) DESCR('It works')
 DEFINE QALIAS(A2) TARGET(Q1) REPLACE
 DEFINE QALIAS(A3) TARGET(NO.SUCH.Q) REPLACE
 ALTER QLOCAL('DEAD.QUEUE') MAXDEPTH(99)
+DEFINE QALIAS(A4) DESCR('missing target')
 """
 uri = "file:///tmp/sample.mqsc"
 
@@ -109,6 +110,16 @@ print("== diagnostics ==")
 for d in diags:
     print(f"  L{d['range']['start']['line']}:{d['range']['start']['character']}-{d['range']['end']['character']}"
           f" sev{d['severity']} [{d.get('code')}] {d['message']}")
+
+print("\n== mandatory properties (code 14) ==")
+d14 = [d for d in diags if d.get("code") == 14]
+for d in d14:
+    print(f"  L{d['range']['start']['line']} {d['message'][:100]}")
+check("code 14 flags DEFINE QALIAS without TARGET (line 9)",
+      any(d["range"]["start"]["line"] == 9 and "TARGET" in d["message"] for d in d14),
+      str([(d["range"]["start"]["line"], d["message"][:60]) for d in d14]))
+check("code 14 exempts SYSTEM.* (SDR channel SYSTEM.DEF.SDR has no XMITQ)",
+      len(d14) == 1, f"{len(d14)} code-14 diagnostics")
 
 print("\n== hover DEFINE ==")
 m = request(2, "textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 2}})
@@ -263,7 +274,7 @@ syms = (m or {}).get("result") or []
 got = sorted(s["name"] for s in syms)
 print("   all symbols:", got)
 check("workspace/symbol lists all DEFINEd objects (X counts via DEF/QL synonyms)",
-      got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "X"]), str(got))
+      got == sorted(["DEAD.QUEUE", "SYSTEM.DEF.SDR", "Q1", "A2", "A3", "A4", "X"]), str(got))
 
 print("\n== codeAction is_preferred is per diagnostic (T-20) ==")
 d_a = {"range": {"start": {"line": 5, "character": 18}, "end": {"line": 5, "character": 23}},

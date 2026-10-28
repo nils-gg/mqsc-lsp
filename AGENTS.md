@@ -39,9 +39,15 @@ the full picture; this file only lists what is easy to get wrong.
   guards it; overlay `add_params` REPLACE base params — remove overlay
   entries whenever the extractor itself gets fixed). Its `name_max`
   section (object type → max positional-name chars: 48, channels 1024) is
-  read by `Model::name_max_len` to drive code 13 `NAME_TOO_LONG` — like
-  `object_ref_param`, a curated heuristic, since the reference states name
-  limits only in prose the extractor cannot capture.
+  read by `Model::name_max_len` to drive code 13 `NAME_TOO_LONG`, and its
+  `mandatory` section (per DEFINE object type: rules demanding one of
+  `any`, optionally value-gated by `when.param` ∈ `values` / ∉
+  `unless_values`) drives code 14 `MISSING_MANDATORY` — like
+  `object_ref_param`, curated heuristics, since the reference states name
+  limits and "this parameter is required" prose only in text the extractor
+  cannot capture. Code 14 never fires on SYSTEM.* names (hint-12
+  convention) and the table is tuned so the dmpmqcfg corpus stays clean
+  apart from genuinely dangling definitions.
 - `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
   stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
   tower wrapper catches handler panics into `-32603` responses — handlers
@@ -55,7 +61,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 71 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 81 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session

@@ -126,6 +126,12 @@
           "enum": ["default", "error", "warning", "information", "hint", "off"],
           "default": "default",
           "description": "Severity for code 13: DEFINE/ALTER/DELETE object name exceeds its maximum length (queues 48 chars, channels 1024; only for object types with a known limit)."
+        },
+        "mqsc.diagnostics.MISSING_MANDATORY": {
+          "type": "string",
+          "enum": ["default", "error", "warning", "information", "hint", "off"],
+          "default": "default",
+          "description": "Severity for code 14: DEFINE missing a mandatory property (QALIAS TARGET, QREMOTE RNAME/RQMNAME, CHANNEL CHLTYPE and XMITQ for SDR/SVR, TOPIC TOPICSTR, SUB topic/DEST, BUFFPOOL BUFFERS)."
         }
       }
     }

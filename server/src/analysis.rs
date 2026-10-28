@@ -1,7 +1,7 @@
 //! Tree-sitter parsing and all MQSC language analysis: diagnostics, hover,
 //! completion, document symbols, folding, highlights, semantic tokens.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use lsp_types::{
     self as lsp, CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity,
@@ -194,6 +194,7 @@ const CODE_MISSING_NAME: i32 = 10;
 const CODE_WILDCARD: i32 = 11;
 const CODE_UNDEFINED_OBJECT: i32 = 12;
 const CODE_NAME_TOO_LONG: i32 = 13;
+const CODE_MISSING_MANDATORY: i32 = 14;
 
 /// Friendly settings key for a diagnostic code (see README Configuration).
 pub fn diag_name(code: i32) -> &'static str {
@@ -211,6 +212,7 @@ pub fn diag_name(code: i32) -> &'static str {
         CODE_WILDCARD => "WILDCARD",
         CODE_UNDEFINED_OBJECT => "UNDEFINED_OBJECT",
         CODE_NAME_TOO_LONG => "NAME_TOO_LONG",
+        CODE_MISSING_MANDATORY => "MISSING_MANDATORY",
         _ => "OTHER",
     }
 }
@@ -1019,6 +1021,23 @@ fn check_command(
     let mut used: HashSet<String> = HashSet::new();
     let mut pending: Option<(String, Node<'_>)> = None;
 
+    // Code 14 bookkeeping: curated mandatory-property rules for this DEFINE
+    // (empty for every other verb and for objects without curated rules).
+    // A rule's `when` clause reads the value actually supplied for one
+    // further parameter (e.g. CHLTYPE); those values are recorded at the
+    // two value sites inside the loop below.
+    let mand: &[_] = if e.verb == "DEFINE" {
+        m.mandatory_rules(e.object)
+    } else {
+        &[]
+    };
+    let when_params: HashSet<&str> = mand
+        .iter()
+        .filter_map(|r| r.when.as_ref())
+        .map(|w| w.param.as_str())
+        .collect();
+    let mut when_vals: HashMap<String, String> = HashMap::new();
+
     for (k, item) in items[idx..].iter().enumerate() {
         match item {
             Item::Word(n) => {
@@ -1110,6 +1129,14 @@ fn check_command(
                 let values = value_nodes(*n);
                 let owner = pending.take();
                 if let Some((up, _wn)) = owner {
+                    if when_params.contains(up.as_str()) {
+                        if let Some(v) = values.first() {
+                            when_vals.insert(
+                                up.clone(),
+                                unquote_name(node_text(*v, src).trim()).to_ascii_uppercase(),
+                            );
+                        }
+                    }
                     if let Some(&pi) = e.by_name.get(&up) {
                         let p = &e.params[pi];
                         check_values(p, &up, &values, src, lines, d);
@@ -1187,6 +1214,14 @@ fn check_command(
                     };
                     check_values(p, &up, &vs, src, lines, d);
                     check_obj_ref(&up, e.object, &vs, src, lines, defs, d);
+                    if when_params.contains(up.as_str()) {
+                        if let Some(v) = vs.first() {
+                            when_vals.insert(
+                                up.clone(),
+                                unquote_name(node_text(*v, src).trim()).to_ascii_uppercase(),
+                            );
+                        }
+                    }
                 }
             }
             Item::Verb(_) => {}
@@ -1243,6 +1278,67 @@ fn check_command(
                     p.name,
                     p.name,
                     value_example(p)
+                ),
+            );
+        }
+    }
+    // Missing mandatory properties (code 14): the reference calls certain
+    // parameters required ("This parameter is required") while its railroad
+    // diagrams bracket them all, so the model's `optional` flag cannot carry
+    // that fact — a curated per-object table in the overlay's `mandatory`
+    // section does (a documented heuristic like name_max). DEFINE only:
+    // ALTER/DELETE act on objects that already carry these properties.
+    // Presence of the word is what counts: a bare `TARGET` without its group
+    // already reports the code-5 "without its value" error, and a blank
+    // sentinel such as the shipped templates' XMITQ(' ') is a supplied value.
+    // SYSTEM.* definitions are never flagged — IBM creates those objects and
+    // their blank properties were never typed by the user (hint-12 rule).
+    let system_obj = name_node
+        .map(|n| unquote_name(node_text(n, src).trim()).starts_with("SYSTEM"))
+        .unwrap_or(false);
+    if !system_obj {
+        for rule in mand {
+            if let Some(w) = &rule.when {
+                match when_vals.get(w.param.as_str()) {
+                    Some(v) => {
+                        if !w.values.is_empty() && !w.values.iter().any(|x| x == v) {
+                            continue;
+                        }
+                        if w.unless_values.iter().any(|x| x == v) {
+                            continue;
+                        }
+                    }
+                    // A value-gated rule needs its gate parameter; when that
+                    // parameter is missing, its own unsatisfied rule says so.
+                    None if !w.values.is_empty() => continue,
+                    None => {}
+                }
+            }
+            if rule.any.iter().any(|p| used.contains(p.as_str())) {
+                continue;
+            }
+            let need = if rule.any.len() == 1 {
+                format!("the mandatory parameter {}", rule.any[0])
+            } else {
+                format!("one of the mandatory parameters {}", rule.any.join(", "))
+            };
+            let why = if rule.why.is_empty() {
+                "the reference marks it required for this object type"
+            } else {
+                rule.why.as_str()
+            };
+            let example = if rule.example.is_empty() {
+                format!("{} {}(NAME) {}(VALUE)", e.verb, e.object, rule.any[0])
+            } else {
+                rule.example.clone()
+            };
+            d.push(
+                lines.range(cmd.start_byte(), verb_node.end_byte()),
+                DiagnosticSeverity::WARNING,
+                CODE_MISSING_MANDATORY,
+                format!(
+                    "{} {} is missing {need} — {why} Expected something like {example}.",
+                    e.verb, e.object
                 ),
             );
         }
@@ -2639,6 +2735,21 @@ mod tests {
         codes(text).contains(&code)
     }
 
+    /// Message of the first diagnostic with `code`, for message-contract tests.
+    fn msg(text: &str, code: i32) -> String {
+        analyze(
+            text,
+            &parse(text),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        )
+        .into_iter()
+        .find(|d| d.code == Some(lsp::NumberOrString::Number(code)))
+        .unwrap_or_else(|| panic!("no diagnostic {code} in {text:?}"))
+        .message
+    }
+
     // ------------------------------------------------------------ text index
 
     #[test]
@@ -2929,6 +3040,176 @@ mod tests {
         assert!(!has(
             &format!("DISPLAY QLOCAL({}) MAXDEPTH\n", "D".repeat(200)),
             CODE_NAME_TOO_LONG
+        ));
+    }
+
+    #[test]
+    fn code14_qalias_needs_target() {
+        assert!(has(
+            "DEFINE QALIAS(A1) DEFPSIST(YES)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(has("DEFINE QALIAS(A1)\n", CODE_MISSING_MANDATORY));
+        // a real target — or a template to copy one from — is fine
+        assert!(!has(
+            "DEFINE QALIAS(A1) TARGET(BASE.Q)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE QALIAS(A1) LIKE(OTHER.A) REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // a group-less word counts as supplied (code 5 already flags it)
+        assert!(!has("DEFINE QALIAS(A1) TARGET\n", CODE_MISSING_MANDATORY));
+        // ALTER acts on an alias that already carries its target
+        assert!(!has(
+            "ALTER QALIAS(A1) DESCR('x')\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // SYSTEM.* objects are IBM-created with blank defaults: never flagged
+        assert!(!has(
+            "DEFINE QALIAS('SYSTEM.DEFAULT.ALIAS.QUEUE') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // verb/object synonyms resolve to the same rule
+        assert!(has("DEF QA(A1) DEFPSIST(YES)\n", CODE_MISSING_MANDATORY));
+        // the message keeps the Elm contract: token, why, concrete example
+        let m = msg("DEFINE QALIAS(A1) DEFPSIST(YES)\n", CODE_MISSING_MANDATORY);
+        assert!(m.contains("TARGET"), "{m}");
+        assert!(m.contains("DEFINE QALIAS(ALIAS.ONE) TARGET(BASE.Q)"), "{m}");
+    }
+
+    #[test]
+    fn code14_qremote_needs_rname_or_rqname() {
+        // a real transmission queue but no remote mapping — the flagged case
+        assert!(has(
+            "DEFINE QREMOTE(R1) XMITQ(XQ)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(has("DEFINE QREMOTE(R1)\n", CODE_MISSING_MANDATORY));
+        assert!(!has(
+            "DEFINE QREMOTE(R1) RNAME(ORDERS) XMITQ(XQ)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE QREMOTE(R1) RQMNAME(REM.QM)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE QREMOTE(R1) LIKE(SYSTEM.DEF.QREMOTE)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // cluster alias qremote: the documented pattern with a deliberately
+        // blank RQMNAME (corpus-proven, so exempt via CLUSTER/CLUSNL)
+        assert!(!has(
+            "DEFINE QREMOTE('ANY.CLUSTER') CLUSNL('VCCK') DEFBIND(NOTFIXED) XMITQ(' ') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // generic qremote form: blank XMITQ(' ') marks a deliberately blank mapping
+        assert!(!has(
+            "DEFINE QREMOTE('VCC.CLUSTER') DESCR('QMGR Alias for all clusters') XMITQ(' ') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // SYSTEM.* names are never flagged
+        assert!(!has(
+            "DEFINE QREMOTE('SYSTEM.DEFAULT.REMOTE.QUEUE') XMITQ(' ') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+    }
+
+    #[test]
+    fn code14_channel_chltype_then_xmitq() {
+        // CHLTYPE itself is the first gate
+        assert!(has(
+            "DEFINE CHANNEL(A.TO.B) XMITQ(Q)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // SDR and SVR each need XMITQ (CONNAME is deliberately unchecked:
+        // the corpus proves the command server accepts definitions without it)
+        assert!(has(
+            "DEFINE CHANNEL(A.TO.B) CHLTYPE(SDR) CONNAME('h(1414)')\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(has(
+            "DEFINE CHANNEL(F.C) CHLTYPE(SVR) CONNAME('h(1414)')\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE CHANNEL(A.TO.B) CHLTYPE(SDR) XMITQ(B.TO.A) CONNAME('h(1414)')\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // the shipped templates' blank XMITQ(' ') counts as supplied
+        assert!(!has(
+            "DEFINE CHANNEL('SYSTEM.DEF.SENDER') CHLTYPE(SDR) TRPTYPE(TCP) XMITQ(' ') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // other channel types never need XMITQ
+        assert!(!has(
+            "DEFINE CHANNEL(A.CL) CHLTYPE(CLUSSDR) TRPTYPE(TCP) CLUSTER(CL1)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE CHANNEL(B.FROM.C) CHLTYPE(CLUSRCVR) TRPTYPE(TCP) CLUSTER(CL1)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE CHANNEL(F.C) CHLTYPE(SVRCONN) TRPTYPE(TCP)\n",
+            CODE_MISSING_MANDATORY
+        ));
+    }
+
+    #[test]
+    fn code14_topic_needs_topicstr() {
+        assert!(has(
+            "DEFINE TOPIC(T1) PUB(ENABLED)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE TOPIC(T1) TOPICSTR('weather/europe')\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE TOPIC(T1) LIKE(SYSTEM.DEF.TOPIC)\n",
+            CODE_MISSING_MANDATORY
+        ));
+    }
+
+    #[test]
+    fn code14_sub_needs_topic_and_destination() {
+        // both the topic rule and the DEST rule are unmet
+        assert!(has("DEFINE SUB(S1) DURSUB(YES)\n", CODE_MISSING_MANDATORY));
+        // a topic from a string, an object, or both
+        assert!(!has(
+            "DEFINE SUB(S1) TOPICSTR('weather/#') DEST(LOCAL.Q)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(!has(
+            "DEFINE SUB(S1) TOPICOBJ(T1) DEST(LOCAL.Q)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // DESTCLAS(MANAGED) has MQ create the destination; PROVIDED still
+        // demands an explicit DEST
+        assert!(!has(
+            "DEFINE SUB(S1) TOPICSTR('weather/#') DESTCLAS(MANAGED)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        assert!(has(
+            "DEFINE SUB(S1) TOPICSTR('weather/#') DESTCLAS(PROVIDED)\n",
+            CODE_MISSING_MANDATORY
+        ));
+        // the shipped SYSTEM.DEFAULT.SUB template carries no DEST
+        assert!(!has(
+            "DEFINE SUB('SYSTEM.DEFAULT.SUB') TOPICSTR('') REPLACE\n",
+            CODE_MISSING_MANDATORY
+        ));
+    }
+
+    #[test]
+    fn code14_buffpool_needs_buffers() {
+        assert!(has("DEFINE BUFFPOOL(25)\n", CODE_MISSING_MANDATORY));
+        assert!(!has(
+            "DEFINE BUFFPOOL(25) BUFFERS(5000)\n",
+            CODE_MISSING_MANDATORY
         ));
     }
 
@@ -3370,19 +3651,6 @@ mod tests {
     fn messages_quote_the_token_and_show_the_fix() {
         // Elm-style message contract: name the offending token, say what was
         // expected, and show the concrete fix (example form or suggestion).
-        let msg = |text: &str, code: i32| -> String {
-            analyze(
-                text,
-                &parse(text),
-                Model::load(),
-                &Url::parse("file:///t.mqsc").unwrap(),
-                &Definitions::default(),
-            )
-            .into_iter()
-            .find(|d| d.code == Some(lsp::NumberOrString::Number(code)))
-            .unwrap_or_else(|| panic!("no diagnostic {code} in {text:?}"))
-            .message
-        };
         // quoted enum keyword: exact diagnosis + quote-free rewrite shown
         let d = msg("DEFINE QLOCAL(Q1) QSGDISP('QMGR')\n", CODE_BAD_VALUE);
         assert!(

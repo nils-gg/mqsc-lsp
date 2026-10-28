@@ -8,6 +8,23 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Mandatory-property checking (diagnostic code 14 `MISSING_MANDATORY`,
+  warning): a `DEFINE` whose object type has a required parameter the
+  reference marks mandatory, but the railroad diagrams bracket, is now
+  flagged — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE`
+  (plus `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on
+  TOPIC, the topic source and `DEST` on SUB, `BUFFERS` on BUFFPOOL. The
+  rules live in a curated `mandatory` section of `model/mqsc-overlay.json`
+  with value-gated `when`/`unless_values` clauses; `LIKE` counts as
+  satisfying everywhere a template copies the attribute, `SYSTEM.*`
+  definitions are never flagged (the hint-12 convention), and the
+  documented intentional-blank forms (cluster alias qremotes, generic
+  qremotes with `XMITQ(' ')`) are exempt. Tuned against the 324-file
+  z/OS dmpmqcfg corpus: the only hits left are 21 live dangling
+  `DEFINE QALIAS` objects with no `TARGET` at all; the reference's
+  CONNAME "requirement" was falsified there (1280 accepted definitions
+  without it) and is deliberately not enforced. Re-severitisable like
+  every other code (`"MISSING_MANDATORY"` / `"14"`)
 - Recorded feature demo: `docs/demo.cast` (published at
   https://asciinema.org/a/Yy8RsmzpxK5fRazY), a ~40 s tour through real
   Neovim driven against the real server — inline diagnostics, a quickfix
