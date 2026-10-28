@@ -7,6 +7,17 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Fixed
+- `semanticTokens/range` responses are document-relative like full
+  responses (the deltas the client accumulates start at the document
+  origin, not at the requested range start), and the filter returns every
+  token that OVERLAPS the range instead of only fully-contained ones —
+  a token crossing the range border is the client's to clip. Before, a
+  range starting anywhere other than exactly on the first token shifted
+  or dropped tokens, so VS Code highlighted the wrong spans after a
+  ranged refresh. `tokens/range` and `tokens/full` now report each token
+  at the same absolute position (unit-tested both ways)
+
 ### Added
 - Mandatory-property checking (diagnostic code 14 `MISSING_MANDATORY`,
   warning): a `DEFINE` whose object type has a required parameter the
