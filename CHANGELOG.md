@@ -8,6 +8,19 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Fixed
+- Hint 12's existence test is namespace-qualified with the same
+  `ObjectScope` rule navigation resolves on: a `TARGET` looking for a
+  queue is no longer satisfied by a same-named CHANNEL, and a `LIKE` on a
+  CHANNEL is no longer satisfied by a same-named QLOCAL. The z/OS
+  `TARGTYPE` value gate is honored both ways — a `TARGTYPE(TOPIC)` alias
+  points its `TARGET` at the TOPIC namespace (topic-publishing dumps stay
+  clean), while an alias without the gate pointing at a topic-only name is
+  now flagged as the dangling queue reference it is (17 genuine
+  mis-classified targets surfaced on the dmpmqcfg corpus; zero hints
+  disappeared). Completion's offered-name pool and the quickfix
+  suggestions follow the same scope. A name `DEFINE`d under several object
+  types is now registered under every type it was defined as (the flat
+  name set used to hide all but the first)
 - Object-name resolution is now (name, namespace)-aware everywhere: a
   QLOCAL and a same-named CHANNEL are two objects, and completion,
   definition, references, hover and rename all resolve through one
