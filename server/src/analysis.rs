@@ -3414,4 +3414,29 @@ mod tests {
             d.data
         );
     }
+
+    #[test]
+    fn backout_params_are_known_after_the_overlay() {
+        // CURATED overlay: distributed BACKOUT (MQ 9.1+) for QLOCAL/QREMOTE,
+        // and BOQNAME on ALTER takes a queue name like on DEFINE — none of
+        // these may read as an unknown parameter (4) or a bad value (5).
+        let text = "DEFINE QLOCAL(L) BACKOUT(BQ)\nALTER QLOCAL(L) BACKOUT(BQ) BOQNAME(BQ)\n\
+                    DEFINE QREMOTE(R) RNAME(X) RQMNAME(QM) BACKOUT(BQ)\n\
+                    ALTER QREMOTE(R) BACKOUT(BQ)\nALTER QMODEL(M) BOQNAME(BQ)\n";
+        let diags = analyze(
+            text,
+            &parse(text),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        );
+        let bad: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.code == Some(lsp::NumberOrString::Number(CODE_UNKNOWN_PARAM))
+                    || d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE))
+            })
+            .collect();
+        assert!(bad.is_empty(), "BACKOUT/BOQNAME must be accepted: {bad:?}");
+    }
 }
