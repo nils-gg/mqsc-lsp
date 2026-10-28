@@ -2641,18 +2641,28 @@ pub fn semantic_tokens(text: &str, tree: &Tree) -> Vec<SemanticToken> {
     encode_tokens(raw_tokens(text, tree), 0, 0)
 }
 
-/// Tokens starting inside `range`, delta-encoded against the range start
-/// (per the LSP `semanticTokens/range` convention).
+/// Tokens overlapping `range`, delta-encoded against the DOCUMENT origin.
+/// The LSP encodes a range result exactly like a full one: clients
+/// accumulate deltas from the document start, so the first token must
+/// carry its absolute line/character (encoding from `range.start` shifts
+/// every token as soon as the first token sits past the range start —
+/// which is the normal case, since ranges rarely begin on token edges).
+/// A token merely crossing the range border belongs to the range: the
+/// client clips it.
 pub fn semantic_tokens_range(text: &str, tree: &Tree, range: lsp::Range) -> Vec<SemanticToken> {
     let (sl, sc) = (range.start.line as usize, range.start.character as usize);
     let (el, ec) = (range.end.line as usize, range.end.character as usize);
     let raw: Vec<_> = raw_tokens(text, tree)
         .into_iter()
         .filter(|(l, c, len, ..)| {
-            (*l > sl || (*l == sl && *c >= sc)) && (*l < el || (*l == el && *c + *len <= ec))
+            // token [start, end) vs range [start, end): overlap iff
+            // token_start < range_end && token_end > range_start
+            let starts_before_end = *l < el || (*l == el && *c < ec);
+            let ends_after_start = *l > sl || (*l == sl && *c + *len > sc);
+            starts_before_end && ends_after_start
         })
         .collect();
-    encode_tokens(raw, range.start.line, range.start.character)
+    encode_tokens(raw, 0, 0)
 }
 
 fn encode_tokens(
@@ -2832,6 +2842,116 @@ mod tests {
                 t.length,
                 line_lens[line]
             );
+        }
+    }
+
+    /// Decode a delta-encoded token stream back to absolute document
+    /// positions `(line, col, len, type, mods)` for position assertions.
+    fn decode_tokens(tokens: &[SemanticToken]) -> Vec<(usize, usize, usize, u32, u32)> {
+        let mut line = 0usize;
+        let mut col = 0usize;
+        tokens
+            .iter()
+            .map(|t| {
+                line += t.delta_line as usize;
+                col = if t.delta_line == 0 {
+                    col + t.delta_start as usize
+                } else {
+                    t.delta_start as usize
+                };
+                (
+                    line,
+                    col,
+                    t.length as usize,
+                    t.token_type,
+                    t.token_modifiers_bitset,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn semantic_tokens_range_encodes_document_absolute_positions() {
+        // The plan's acceptance case: range starts at line 100, the first
+        // token inside it sits at line 103. A range response is delta
+        // chains from the DOCUMENT start (clients accumulate it the same
+        // way as a full response), so the decoded line must be 103 — an
+        // encoding based at range.start would report every token ~3 lines
+        // too early.
+        let mut text = "\n".repeat(100);
+        text.push_str("DEFINE QLOCAL(PAD1)\n\n\nDEFINE QLOCAL(PAD2)\n"); // PAD1 L100, PAD2 L103
+        let tree = parse(&text);
+        let range = lsp::Range::new(lsp::Position::new(100, 22), lsp::Position::new(103, 26));
+        let decoded = decode_tokens(&semantic_tokens_range(&text, &tree, range));
+        // PAD1 (cols 14..18) ends before the range start at col 22: the
+        // first token must be PAD2's command on line 103, absolutely placed
+        assert_eq!(decoded[0].0, 103, "first token line: {decoded:?}");
+        assert_eq!((decoded[0].1, decoded[0].2), (0, 6)); // DEFINE at 103:0
+    }
+
+    #[test]
+    fn semantic_tokens_range_includes_border_crossing_tokens() {
+        let text = "DEFINE QLOCAL(SHOP.FRONT)\n";
+        let tree = parse(text);
+        // The range begins inside SHOP.FRONT (14..24): the token overlaps
+        // and the client clips it.
+        let start_mid = decode_tokens(&semantic_tokens_range(
+            text,
+            &tree,
+            lsp::Range::new(lsp::Position::new(0, 18), lsp::Position::new(0, 25)),
+        ));
+        assert!(
+            start_mid.iter().any(|t| *t == (0, 14, 10, 4, 0)),
+            "name token missing: {start_mid:?}"
+        );
+        // The range ends inside the same token: still included.
+        let end_mid = decode_tokens(&semantic_tokens_range(
+            text,
+            &tree,
+            lsp::Range::new(lsp::Position::new(0, 0), lsp::Position::new(0, 20)),
+        ));
+        assert!(
+            end_mid.iter().any(|t| t.1 == 14 && t.2 == 10),
+            "name token missing: {end_mid:?}"
+        );
+        // A range strictly between tokens (inside the parens gap after the
+        // name) keeps the name out: overlap, not proximity.
+        let outside = decode_tokens(&semantic_tokens_range(
+            text,
+            &tree,
+            lsp::Range::new(lsp::Position::new(0, 0), lsp::Position::new(0, 7)),
+        ));
+        assert!(
+            !outside.iter().any(|t| t.1 == 14),
+            "token outside the range leaked in: {outside:?}"
+        );
+    }
+
+    #[test]
+    fn semantic_tokens_full_and_range_agree_per_token() {
+        // Same document, several ranges: every token a range response
+        // reports must carry exactly the full response's absolute position
+        // and type for the same token — VS Code highlights a token
+        // identically whichever request surfaced it.
+        let text = "DEFINE QLOCAL(Q1) DESCR('It works')\nDEFINE QALIAS(A2) TARGET(Q1) REPLACE\nALTER QLOCAL('Q1') MAXDEPTH(99)\n";
+        let tree = parse(text);
+        let full = decode_tokens(&semantic_tokens(text, &tree));
+        for range in [
+            lsp::Range::new(lsp::Position::new(0, 0), lsp::Position::new(2, 30)),
+            lsp::Range::new(lsp::Position::new(1, 5), lsp::Position::new(1, 30)),
+            lsp::Range::new(lsp::Position::new(0, 12), lsp::Position::new(2, 10)),
+        ] {
+            let (sl, sc) = (range.start.line as usize, range.start.character as usize);
+            let (el, ec) = (range.end.line as usize, range.end.character as usize);
+            let want: Vec<_> = full
+                .iter()
+                .filter(|(l, c, len, ..)| {
+                    (*l < el || (*l == el && *c < ec)) && (*l > sl || (*l == sl && *c + *len > sc))
+                })
+                .copied()
+                .collect();
+            let got = decode_tokens(&semantic_tokens_range(text, &tree, range));
+            assert_eq!(got, want, "range {range:?} diverges from full response");
         }
     }
 
