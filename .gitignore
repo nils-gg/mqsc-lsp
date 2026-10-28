@@ -1,5 +1,6 @@
 # Rust build artifacts
 server/target/
+dmpmqcfg/
 
 # IBM copyrighted reference material — NOT redistributed in this repository
 # (see ATTRIBUTION.md). Keep a local copy of the markdown at this path so
