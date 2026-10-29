@@ -145,7 +145,7 @@ page when it finds nothing instead of failing silently.
 | Capability | Behaviour |
 | --- | --- |
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
-| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
+| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; a value inside a parameter group → that parameter's card plus the curated meaning of the hovered value where documented (`1208` → "UTF-8 (Unicode)", `SDR` → sender channel, `BLOCKUSER` → …, per-object scoped in `value_docs`); object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
 | Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document / indexed workspace file** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
 | definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every indexed document — open or closed — keeping quoted/bare style (closed files are watched, so the mass edit rests on current content — see "Object knowledge") |
@@ -369,9 +369,10 @@ non-zero when a check fails.
   time: post-2011 commands, the queue-name `BOQNAME` retyping, per-type
   `name_max` limits, per-type `mandatory`
   property rules (diagnostic 14), the per-parameter `availability`
-  table, and the command-level `command_availability` table behind
+  table, the command-level `command_availability` table behind
   diagnostic 15 (version/platform, both consulted only when a
-  target is configured).
+  target is configured), and the `value_docs` table of curated
+  value meanings shown on hover (CCSID 1208 → UTF-8).
 - **The overlay is oracle-verified**: `tools/mq_oracle_check.py` diffs the
   model against a live IBM MQ 10.0.1 installation (`runmqsc` never executes
   a failing parse, so probing is safe) — every verb×object pair's parameter

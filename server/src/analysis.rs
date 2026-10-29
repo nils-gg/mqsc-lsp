@@ -2204,10 +2204,24 @@ pub fn hover(
         return Some(mk(md));
     }
 
-    // parameter word or value inside its group
-    let pname = if node.kind() == "word" {
+    // parameter word or value inside its group. A token inside a group
+    // hovers the group's OWN parameter — the old code mistook value words
+    // for parameter words — and remembers the value's spelling so the
+    // card can carry the curated meaning of exactly that value.
+    let arg = ancestor_of(node, "argument");
+    let value_word: Option<String> = match arg {
+        Some(_) if node.kind() != "argument" => {
+            let v = node_text(node, src)
+                .trim()
+                .trim_matches('\'')
+                .to_ascii_uppercase();
+            (!v.is_empty()).then_some(v)
+        }
+        _ => None,
+    };
+    let pname = if node.kind() == "word" && arg.is_none() {
         node_text(node, src).to_ascii_uppercase()
-    } else if let Some(arg) = ancestor_of(node, "argument") {
+    } else if let Some(arg) = arg {
         let owner = preceding_word(cmd, arg, src);
         owner.map(|(w, _)| w).unwrap_or_default()
     } else {
@@ -2249,6 +2263,13 @@ pub fn hover(
         }
         for f in &p.footnotes {
             md.push_str(&format!("\n\n> {f}"));
+        }
+        // curated meaning of the HOVERED VALUE itself (overlay value_docs):
+        // hovering CCSID(1208) explains "UTF-8 (Unicode)" right on the card
+        if let Some(v) = &value_word {
+            if let Some(meaning) = m.value_doc(&pname, e.object, v) {
+                md.push_str(&format!("\n\n**`{v}`** — {meaning}"));
+            }
         }
         return Some(mk(md));
     }
@@ -4639,6 +4660,95 @@ mod tests {
         let tree = parse(text);
         let md = md_of(hover(text, &tree, m, Position::new(0, 2), &Default::default()).expect("v"));
         assert!(!md.contains("Availability (curated)"), "{md}");
+    }
+
+    #[test]
+    fn value_hover_annotation_follows_object_scoping() {
+        // hovering a VALUE inside a parameter group annotates the owning
+        // parameter's card — and the same spelling on different objects
+        // reads different rules (ACTION on CHANNEL vs SET CHLAUTH, and the
+        // positional group of DEFINE CHLTYPE has no owner word at all)
+        let m = Model::load();
+        let md_of = |text: &str, line: u32, ch: u32| {
+            let tree = parse(text);
+            match hover(text, &tree, m, Position::new(line, ch), &Default::default())
+                .expect("hover")
+                .contents
+            {
+                HoverContents::Markup(mk) => mk.value,
+                _ => panic!("expected markup"),
+            }
+        };
+        // ACTION is a parameter of SET CHLAUTH but not of DEFINE CHLTYPE
+        let md = md_of("SET CHLAUTH(*) TYPE(BLOCKUSER) ACTION(REPLACE)\n", 0, 39);
+        assert!(
+            md.contains("**`REPLACE`**") && md.contains("CHLAUTH"),
+            "{md}"
+        );
+        // a value the table does not cover keeps the card untouched
+        let md = md_of("SET CHLAUTH(*) TYPE(BLOCKUSER)\n", 0, 21);
+        assert!(md.contains("blocked user IDs"), "{md}");
+        let md = md_of("DEFINE QLOCAL(Q) MAXDEPTH(99)\n", 0, 26);
+        assert!(
+            md.contains("`MAXDEPTH`") && !md.contains("**`99`**"),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn hovering_a_value_annotates_the_param_card_with_its_meaning() {
+        let m = Model::load();
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        // numeric value of a numeric parameter: CCSID(1208) says UTF-8
+        let text = "ALTER QMGR CCSID(1208)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 17), &Default::default()).expect("v"));
+        assert!(
+            md.contains("`CCSID`") && md.contains("**`1208`** — UTF-8 (Unicode)"),
+            "{md}"
+        );
+        // a value WORD hovers the OWNING parameter's card (not its own
+        // spelling) and carries the value's meaning
+        let text = "ALTER CHANNEL(C) CHLTYPE(SDR)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 26), &Default::default()).expect("v"));
+        assert!(
+            md.contains("`CHLTYPE`") && md.contains("**`SDR`** — sender channel"),
+            "{md}"
+        );
+        // object scoping survives the round trip: BLOCKUSER explains itself
+        // on CHLAUTH (as a TYPE value), a spelling the QUEUE TYPE rule lacks
+        let text = "SET CHLAUTH(*) TYPE(BLOCKUSER)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 21), &Default::default()).expect("v"));
+        assert!(
+            md.contains("`TYPE`") && md.contains("blocked user IDs"),
+            "{md}"
+        );
+        // an undocumented value still gets the plain parameter card
+        let text = "ALTER QLOCAL(A) MAXDEPTH(99)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 25), &Default::default()).expect("v"));
+        assert!(
+            md.contains("`MAXDEPTH`") && !md.contains("**`99`**"),
+            "{md}"
+        );
+        // hovering the PARAMETER word itself: no value annotation
+        let text = "ALTER QMGR CCSID(1208)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 13), &Default::default()).expect("v"));
+        assert!(
+            md.contains("1208 = UTF-8") && !md.contains("**`1208`**"),
+            "{md}"
+        );
     }
 
     #[test]
