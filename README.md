@@ -174,7 +174,7 @@ page when it finds nothing instead of failing silently.
 | 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script, any other open document or an indexed workspace file; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 | 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
-| 15 | Warning | parameter not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated per-parameter availability (`availability` in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `BOQNAME` is z/OS-only, distributed `BACKOUT` needs 9.1). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
+| 15 | Warning | parameter not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated per-parameter availability (`availability` in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `QSGDISP` is z/OS-only, verified against a live 10.0.1 parser). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
 
 Messages follow an Elm-compiler-style contract: every one quotes the
 offending token, says what belongs there instead, and names the concrete fix
@@ -248,7 +248,7 @@ definition/references/rename/hover navigate between them. That hint is a
 deliberate heuristic: `SYSTEM.*` names are never flagged, a set of scripts
 without any `DEFINE` is never flagged, and only the curated
 object-reference parameters (queue aliases' `TARGET`, channels' `XMITQ`,
-`LIKE`, dynamic-queue `MODEL`, backout queues `BACKOUT`/`BOQNAME`,
+`LIKE`, dynamic-queue `MODEL`, backout queue `BOQNAME`,
 `DEADQ`, `DEFXMITQ`, initiation queue `INITQ`, the `MOVE` queue
 parameters …) are checked, because the 2011 model types them all as plain
 strings. Context guards ride along: `START CHINIT`'s `INITQ` names a queue
@@ -257,7 +257,7 @@ at the TOPIC namespace instead of the queue one (without that value gate
 hint 12 flags every topic-publishing alias), and documented special values
 (`BOQNAME(NO)`, `DEADQ(NONE)`) are never flagged. Renaming a queue rewrites
 every one of
-these reference sites, so `ALTER QLOCAL(ORDERS) BACKOUT(OLD)` follows
+these reference sites, so `ALTER QLOCAL(ORDERS) BOQNAME(OLD)` follows
 `DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
 
 **Closed workspace files are indexed too.** At startup the server walks the
@@ -366,8 +366,8 @@ non-zero when a check fails.
   `RUN`/`REPLACE` `REPLMSG`/`REPLSTR` parameter families are not in the model.
   What real usage proved necessary lives in `model/mqsc-overlay.json`, a
   clearly-labelled curated add-on merged over the extracted model at load
-  time: post-2011 commands, the distributed `BACKOUT` spelling of the
-  backout-queue parameter, per-type `name_max` limits, per-type `mandatory`
+  time: post-2011 commands, the queue-name `BOQNAME` retyping, per-type
+  `name_max` limits, per-type `mandatory`
   property rules (diagnostic 14), and the per-parameter `availability`
   table behind diagnostic 15 (version/platform, consulted only when a
   target is configured).
