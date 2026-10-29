@@ -8,6 +8,20 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Watched-file reindexing of the workspace index: after the startup scan the
+  server asks the client (via `client/registerCapability`) to report changes
+  to `**/*.mqsc`, and each `workspace/didChangeWatchedFiles` event reindexes
+  exactly the file it names — a new file's `DEFINE` silences hint 12 in every
+  open document without a reopen, a changed file's names are replaced, a
+  deleted file's names stop resolving. Events for excluded directories and
+  non-`*.mqsc` paths are filtered out, `maxFiles` still refuses growth only,
+  and an event for an open document never overwrites the editor's buffer
+  (saving a file fires one, but `didChange` already delivered that content).
+  File watching has no static server-side configuration in LSP, so a client
+  without dynamic registration for `workspace/didChangeWatchedFiles` simply
+  keeps closed files as scanned until the server restarts (logged, not fatal)
+  (`tools/workspace_index_smoke.py` now answers the registration request and
+  drives created/changed/deleted/save-of-open-buffer events)
 - Workspace indexing of closed `*.mqsc` files: after `initialize` the
   server walks the workspace roots (once, on a background thread) and
   remembers every `DEFINE` and name site of each file it finds — without
@@ -24,11 +38,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   default); files over 4 MiB are skipped and the whole scan outcome is
   reported in the log. An open document always overrides its on-disk entry,
   and closing one falls back to the file on disk rather than the unsaved
-  buffer. Rename deliberately still edits open documents only until the
-  files are watched, so `references` can show a site rename will not touch
-  (`tools/workspace_index_smoke.py` covers both sessions, on and off)
+  buffer (`tools/workspace_index_smoke.py` covers both sessions, on and off)
 
 ### Changed
+- Rename now rewrites every site of a symbol across the whole workspace,
+  closed files included. It used to stop at open documents because a scanned
+  entry was only as fresh as the last scan; with the watcher above keeping
+  closed entries current, a mass edit may rest on them, and `references` can
+  no longer show a site rename will not touch
 - Internal (no behavior change): all cross-document knowledge moved from
   `server.rs` into a new `workspace::WorkspaceIndex` module — the open
   document map, the poison-tolerant lock accessors, and every merge/join

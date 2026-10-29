@@ -92,10 +92,11 @@ function activate(context) {
 			// startup and whenever it changes (workspace/didChangeConfiguration
 			// via vscode-languageclient). The server reads `{diagnostics:…}`
 			// from that payload; `"default"` values are not severities, so
-			// they fall through to the natural ones. The server does read the
-			// workspace from disk now (the PR 7 workspace scan), but it still
-			// implements no didChangeWatchedFiles, so a fileEvents watcher
-			// here would be inert — that arrives with PR 8.
+			// they fall through to the natural ones.
+			// No `synchronize.fileEvents` on purpose: the server registers its
+			// own **/*.mqsc watcher via client/registerCapability (PR 8), and
+			// vscode-languageclient answers that with a real FileSystemWatcher.
+			// A static fileEvents list here would only duplicate those events.
 			synchronize: { configurationSection: 'mqsc' },
 			initializationOptions: initOptions,
 		}

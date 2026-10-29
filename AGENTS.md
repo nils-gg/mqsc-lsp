@@ -43,32 +43,46 @@ the full picture; this file only lists what is easy to get wrong.
 - `workspace.rs` owns the workspace index: one `Entry { source, defs, sites }`
   per document, where `source` is `Open { text, tree: Mutex }` (editor
   document; `Tree` is Send-but-not-Sync, hence the per-tree `Mutex`) or
-  `Closed` (a scanned workspace file — only `defs` + name sites are kept,
-  never text/tree). `defs`+`sites` are computed once per content, so the
+  `Closed` (a workspace file — only `defs` + name sites are kept, never
+  text/tree). `defs`+`sites` are computed once per content, so the
   T-17 cross-file merge and PR 7's scan cost the same to consumers. ALL
   cross-document merge/join loops live there — diagnostics' `external_defs`,
   hover's define map, definition/references/rename `sites`/`rename_sites`
   (joined on `SymbolKey` = name+namespace), and `definitions()` for
-  workspace/symbol. PR 8 (watched reindex) extends that module, not
-  `server.rs`; `disk_entry(path)` is the per-file entry builder it needs,
-  `collect_scan(roots, cfg)` is the pure walk+parse the server runs via
-  `tokio::task::spawn_blocking` in `initialized` (roots come from
-  `workspace_folders`/`root_uri`, cached in `ws_roots` because the settings
-  that gate the scan only exist at initialize). Two rules to preserve:
-  **open overrides disk** (`merge_scanned` is insert-if-absent, and
-  `close()` re-reads the file so an unsaved buffer cannot haunt the index),
-  and **`rename_sites` is Open-only until PR 8** (a mass edit may not rest
-  on content that is only as fresh as the last scan; references may show a
-  closed site rename will not touch). Because the merge changes what
-  already-open documents resolve, `initialized()` republishes all open
-  documents when it merges. `server.rs` is protocol-only on top of it;
-  handlers receive `(&str, &Tree)` via `with_doc` (which returns `None` for
-  closed entries — full-service needs the buffer); never re-parse in a
+  workspace/symbol. PR 8 (watched reindex) extended that module:
+  `disk_entry(path)` is the per-file entry builder,
+  `collect_scan(roots, cfg)` the pure walk+parse for startup, and
+  `reindex_from_events(events, cfg, roots)` + `apply_disk_updates(updates,
+  cfg)` the per-event path (filters mirror the scan: `*.mqsc` only,
+  excluded dirs relative to the event's root, DELETED without reading,
+  anything not CREATED/DELETED re-read; the watch types are `pub(crate)`
+  because `Entry` is). The server runs both scans via
+  `tokio::task::spawn_blocking` (roots cached in `ws_roots`, settings
+  snapshotted once into `ws_scan` — the restart-only contract covers watch
+  too). Watching is **dynamic registration only** (lsp-types 0.94 has no
+  server-side static capability and LSP says none exists): `initialize`
+  reads the client's `didChangeWatchedFiles.dynamicRegistration` into
+  `dyn_watch`, and `initialized` asks for `**/*.mqsc` AFTER the scan — a
+  refused/absent watcher costs freshness, never the index. Three rules to
+  preserve: **open overrides disk** (`merge_scanned` is insert-if-absent,
+  `close()` re-reads the file so an unsaved buffer cannot haunt the index,
+  and `apply_disk_updates` never touches Open entries — a save fires a
+  watched event for the very buffer); **cap refuses growth only** (a
+  `max_files` overflow keeps reindexing already-indexed files); and
+  **`rename_sites` covers every entry** now that closed files are watched
+  (it lost its open_only filter — do not reintroduce one, references and
+  rename must keep returning the identical join). Because a merge or a
+  watch apply changes what already-open documents resolve, both
+  `initialized()` and `did_change_watched_files` republish all open
+  documents when anything changed. `server.rs` is protocol-only on top of
+  it; handlers receive `(&str, &Tree)` via `with_doc` (which returns `None`
+  for closed entries — full-service needs the buffer); never re-parse in a
   handler and never hold a lock guard across an `.await` (futures must stay
-  Send). Poison-tolerant `rd/wr/mtx` accessors live with the map they guard.
-  Invalidation policy: did_open/did_close refresh **all** documents
-  (cross-file defines changed for everyone), did_change refreshes only
-  itself — per-keystroke sibling refresh would be quadratic.
+  Send; helper fns go in the inherent `impl MqscServer`, not the trait
+  impl). Poison-tolerant `rd/wr/mtx` accessors live with the map they
+  guard. Invalidation policy: did_open/did_close and a watch apply refresh
+  **all** documents (cross-file defines changed for everyone), did_change
+  refreshes only itself — per-keystroke sibling refresh would be quadratic.
 - `model/mqsc-overlay.json` is likewise `include_str!`-embedded and merged
   over the base model at load time (`Model::load`); the base JSON must stay
   byte-identical to `extract_model.py` output (`tools/check_model.py`
@@ -117,11 +131,11 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 115 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 120 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
-python3 tools/workspace_index_smoke.py              # repo root; assertive workspace-scan session
+python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session
 python3 tools/check_model.py                        # model byte-reproducibility guard
 ```
 
@@ -133,17 +147,29 @@ python3 tools/check_model.py                        # model byte-reproducibility
   binary (`server/target/debug/mqsc-lsp`); pass a binary path as `$1` to
   test release. It runs **whatever binary is on disk** — rebuild first, or a
   stale `target/` silently tests old code.
-- `workspace_index_smoke.py` is the PR 7 companion: it builds a throwaway
-  workspace dir (closed `defs.mqsc`, a `sub/` file, a `target/` file to
-  prove exclusion), runs the server with `workspaceFolders` pointing at it,
-  and asserts hint-12 silence, symbol/hover/definition/references/completion
-  across the closed files, the open-buffer override and the didClose
-  disk fallback — then a second session with `workspaceIndex.enabled=false`
-  proves the gate. Hint 12 is asserted through `TARGET(...)` only: a
+- `workspace_index_smoke.py` is the workspace-index companion (PR 7 + PR 8):
+  it builds a throwaway workspace dir (closed `defs.mqsc`, a `sub/` file, a
+  `target/` file to prove exclusion), runs the server with
+  `workspaceFolders` pointing at it, and asserts hint-12 silence,
+  symbol/hover/definition/references/completion across the closed files,
+  the open-buffer override and the didClose disk fallback, the watcher
+  registration (`**/*.mqsc` glob) and simulated create/change/delete
+  `didChangeWatchedFiles` events reindexing single files (hint 12 goes and
+  comes without any reopen), that a save event for an OPEN buffer causes
+  no republish, and that rename now edits the closed file too. A second
+  session with `workspaceIndex.enabled=false` proves the gate — including
+  that no watcher is registered then, even though both sessions advertise
+  `didChangeWatchedFiles.dynamicRegistration`. The client MUST answer
+  server→client requests: the framer auto-responds to any message with
+  both `id` and `method` (the server awaits `client/registerCapability`
+  inside `initialized`). Hint 12 is asserted through `TARGET(...)` only: a
   positional `ALTER QLOCAL(UNKNOWN)` name is **not** a reference and never
   triggers 12. Both sessions wait for the `workspace scan:` log line before
   reading diagnostics and take the **last** publish, because the merge
-  republishes.
+  republishes. `lsp_smoke_test.py` needs no such answering and stays
+  unchanged precisely because it initializes with `capabilities: {}` — no
+  dynamic registration, so no `registerCapability` request ever arrives
+  (the "client without dynamic registration" path).
 - The **tree-sitter CLI 0.27.1 is installed** (`~/.local/bin/tree-sitter`;
   node/npm exist under `/usr/bin`), so `tree-sitter test` works. But never
   run a bare `tree-sitter generate` here: without `--abi 14` it rewrites the

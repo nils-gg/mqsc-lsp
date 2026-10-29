@@ -1,39 +1,43 @@
 //! The workspace index: one home for everything the server knows about
 //! object names across documents (Phase 3 — PR 6 centralized it, PR 7
-//! taught it the filesystem).
+//! taught it the filesystem, PR 8 keeps it current).
 //!
 //! Two entry kinds live side by side:
 //! - **Open** documents (didOpen/didChange/didClose lifecycle): full text
 //!   plus the cached parse tree; the editor guarantees the text matches.
-//! - **Closed** workspace files found by the startup scan of the
-//!   workspace roots (`collect_scan`): only the lightweight result —
+//! - **Closed** workspace files: the lightweight result only —
 //!   `Definitions` + name sites — never text, never a tree (patch plan
-//!   Phase 3: "do not retain every full parse tree indefinitely").
+//!   Phase 3: "do not retain every full parse tree indefinitely"). They
+//!   arrive from the startup scan (`collect_scan`) and stay current through
+//!   watched-file events (`reindex_from_events` + `apply_disk_updates`).
 //!
-//! The override rule is absolute: an open document always wins over its
-//! on-disk twin, never the other way round; closing a document falls back
-//! to the DISK text (an unsaved buffer must not haunt the index).
+//! Two rules keep the disk and the editor from fighting:
+//! - an open document always wins over its on-disk twin, never the other
+//!   way round — not the startup scan, and not a watched-file event either
+//!   (saving a file makes the client fire one, and the buffer may still be
+//!   ahead of it); closing a document falls back to the DISK text, because
+//!   an unsaved buffer must not haunt the index.
+//! - disk content is applied per file, never wholesale: a reindex of one
+//!   changed file cannot resurrect a deleted one or clobber a newer read.
 //!
 //! Consumers join exclusively on `(name, namespace)` `SymbolKey`s — the
 //! invariant the correctness milestone locked down, so diagnostics,
-//! navigation, hover, completion and workspace/symbol cannot disagree
-//! about what a name means, whether the answer came from a buffer or a
-//! closed file. The one deliberate asymmetry: **rename still edits only
-//! open documents** (`rename_sites`). A closed entry's content is only as
-//! fresh as the last scan — until PR 8's `didChangeWatchedFiles`
-//! reindexing keeps it current, the index is trusted for read features
-//! but not for mass edits.
-//!
-//! PR 8 (watched reindexing) is the remaining extension point: create/
-//! change/delete events re-run `disk_entry` for one path, and rename
-//! then graduates to all entries.
+//! navigation, hover, completion, workspace/symbol and rename cannot
+//! disagree about what a name means, whether the answer came from a buffer
+//! or a closed file. Rename covers both kinds now that closed entries are
+//! watched rather than scanned-once: with the watcher registered, a closed
+//! entry is as fresh as the file on disk, which is exactly what a mass edit
+//! is allowed to rest on. Where the client cannot register watchers the
+//! server asks it to (LSP has no static server-side file watching), closed
+//! entries only age until a restart — a client-side concern documented in
+//! the README, not a reason to hold rename back.
 
 use std::collections::hash_map::Entry as MapEntry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
-use lsp_types::{Location, Range, Url};
+use lsp_types::{FileChangeType, FileEvent, Location, Range, Url};
 
 use crate::analysis::{self, Definitions, NameSite, SymbolKey};
 use crate::model::Model;
@@ -191,6 +195,57 @@ impl WorkspaceIndex {
         added
     }
 
+    /// Fold watched-file reindexing into the index (PR 8) and report what
+    /// changed. OPEN entries are never touched: the editor's buffer is the
+    /// newer answer, and saving a file makes the client fire a watched event
+    /// for it even though didChange/didSave already delivered that content.
+    /// A `max_files` cap that left a file out at startup keeps refusing it
+    /// here, so the cap means the same thing in both paths.
+    pub(crate) fn apply_disk_updates(
+        &self,
+        updates: Vec<DiskUpdate>,
+        cfg: &WorkspaceScan,
+    ) -> DiskApply {
+        let mut docs = wr(&self.docs);
+        let mut closed = docs
+            .values()
+            .filter(|e| !matches!(e.source, Source::Open { .. }))
+            .count();
+        let mut rep = DiskApply::default();
+        for u in updates {
+            match docs.entry(u.uri.clone()) {
+                MapEntry::Occupied(mut slot) => {
+                    if matches!(slot.get().source, Source::Open { .. }) {
+                        continue;
+                    }
+                    match u.entry {
+                        Some(entry) => {
+                            slot.insert(entry);
+                            rep.changed += 1;
+                        }
+                        None => {
+                            slot.remove();
+                            rep.changed += 1;
+                        }
+                    }
+                }
+                MapEntry::Vacant(slot) => {
+                    // a file created and deleted between events, or one the
+                    // scan never covered: nothing to add
+                    let Some(entry) = u.entry else { continue };
+                    if closed >= cfg.max_files {
+                        rep.capped += 1;
+                        continue;
+                    }
+                    slot.insert(entry);
+                    closed += 1;
+                    rep.changed += 1;
+                }
+            }
+        }
+        rep
+    }
+
     /// Open documents only — the ones diagnostics are published for.
     pub fn len(&self) -> usize {
         rd(&self.docs)
@@ -288,7 +343,7 @@ impl WorkspaceIndex {
     /// `definitions_only: Some(true)` keeps only DEFINE sites,
     /// `Some(false)` only uses.
     pub fn sites(&self, key: &SymbolKey, definitions_only: Option<bool>) -> Vec<Location> {
-        self.sites_at(key, definitions_only, false)
+        self.sites_at(key, definitions_only)
             .into_iter()
             .map(|s| s.loc)
             .collect()
@@ -296,28 +351,19 @@ impl WorkspaceIndex {
 
     /// All sites of the symbol with quoting and DEFINE type — what rename
     /// needs to re-quote each site and to run its same-name-different-type
-    /// safety gate. OPEN ENTRIES ONLY: a closed entry's content is only as
-    /// fresh as the last scan, and a mass edit must not rest on a stale
-    /// guess. PR 8's watched reindexing is what graduates rename to the
-    /// full index; until then references may SHOW a closed site that
-    /// rename will not touch, and the refusal is honest at that boundary.
+    /// safety gate. Every entry, open or closed: since PR 8 closed entries
+    /// are kept current by watched-file events, so a mass edit may rest on
+    /// them (and the client's own watcher then reindexes the files rename
+    /// just wrote, so the index follows the edit it caused).
     pub fn rename_sites(&self, key: &SymbolKey) -> Vec<SiteAt> {
-        self.sites_at(key, None, true)
+        self.sites_at(key, None)
     }
 
-    fn sites_at(
-        &self,
-        key: &SymbolKey,
-        definitions_only: Option<bool>,
-        open_only: bool,
-    ) -> Vec<SiteAt> {
+    fn sites_at(&self, key: &SymbolKey, definitions_only: Option<bool>) -> Vec<SiteAt> {
         let mut out = Vec::new();
         let ns = key.scope.namespace();
         let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
-            if open_only && !matches!(doc.source, Source::Open { .. }) {
-                continue;
-            }
             for s in doc
                 .sites
                 .iter()
@@ -439,6 +485,92 @@ fn walk(dir: &Path, cfg: &WorkspaceScan, out: &mut Vec<PathBuf>) {
             }
         }
     }
+}
+
+/// One watched-file event reduced to what the index should hold for it: the
+/// freshly parsed entry, or `None` for "no usable content" — deleted,
+/// unreadable, oversize, or a file that stopped parsing into anything.
+pub(crate) struct DiskUpdate {
+    pub uri: Url,
+    pub entry: Option<Entry>,
+}
+
+/// What [`WorkspaceIndex::apply_disk_updates`] actually did, for the log
+/// line and the republish decision.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct DiskApply {
+    /// entries inserted, replaced or removed
+    pub changed: usize,
+    /// new files refused because `max_files` already covers the index
+    pub capped: usize,
+}
+
+/// The filesystem half of watched-file reindexing: read what is behind each
+/// event with PR 7's `disk_entry` — one file per event, never a rescan
+/// (patch plan PR 8: "reindex only that file"). Pure fs + parse, so the
+/// caller runs it on a blocking thread.
+///
+/// The filters here mirror the startup scan on purpose; without them a
+/// watcher would index exactly the files the scan left out:
+/// - non-`file` URIs and non-`*.mqsc` paths are dropped (the watcher glob is
+///   `**/*.mqsc`, but a client may batch unrelated events in);
+/// - paths below an excluded directory name are dropped, relative to the
+///   workspace root that produced the event (a `build` directory ABOVE the
+///   root belongs to somebody else);
+/// - `DELETED` needs no read at all. Anything that is not CREATED/DELETED —
+///   `CHANGED`, or LSP 3.17's `TypeChanged` — is re-read, because "something
+///   happened" is safely answered with "here is what is on disk now".
+pub(crate) fn reindex_from_events(
+    changes: &[FileEvent],
+    cfg: &WorkspaceScan,
+    roots: &[PathBuf],
+) -> Vec<DiskUpdate> {
+    let mut out = Vec::with_capacity(changes.len());
+    for ch in changes {
+        let Ok(path) = ch.uri.to_file_path() else {
+            continue;
+        };
+        if !is_mqsc_path(&path) || is_excluded(&path, cfg, roots) {
+            continue;
+        }
+        let entry = if ch.typ == FileChangeType::DELETED {
+            None
+        } else {
+            disk_entry(&path)
+        };
+        out.push(DiskUpdate {
+            uri: ch.uri.clone(),
+            entry,
+        });
+    }
+    out
+}
+
+fn is_mqsc_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mqsc"))
+}
+
+fn is_excluded(path: &Path, cfg: &WorkspaceScan, roots: &[PathBuf]) -> bool {
+    if cfg.exclude.is_empty() {
+        return false;
+    }
+    // only the directories BELOW a workspace root are candidates, exactly as
+    // in walk(); an unmatched path falls back to its own components
+    let rel = roots
+        .iter()
+        .find_map(|r| path.strip_prefix(r).ok())
+        .unwrap_or(path);
+    let Some(dirs) = rel.parent() else {
+        return false;
+    };
+    dirs.components().any(|c| match c {
+        std::path::Component::Normal(name) => cfg
+            .exclude
+            .iter()
+            .any(|x| name == std::ffi::OsStr::new(x.as_str())),
+        _ => false,
+    })
 }
 
 #[cfg(test)]
@@ -656,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_still_refuses_the_closed_side_until_pr8() {
+    fn rename_covers_the_closed_side_now_that_files_are_watched() {
         let dir = temp_ws("rename");
         std::fs::write(dir.join("other.mqsc"), "DEFINE QALIAS(AL) TARGET(AA)\n").unwrap();
         let index = WorkspaceIndex::default();
@@ -665,12 +797,225 @@ mod tests {
         );
         open_text(&index, "/tmp/rename-a.mqsc", "DEFINE QLOCAL(AA)\n");
 
-        // references sees both sides ...
+        // PR 8: watched entries are as fresh as the disk, so the mass edit
+        // covers both sides — the same sites references reports, no more and
+        // no less (they read the identical join).
         assert_eq!(index.sites(&queue_key("AA"), None).len(), 2);
-        // ... rename edits only the open one: a mass edit may not rest on
-        // a scanned-then-possibly-changed file the watcher (PR 8) cannot
-        // vouch for yet
-        assert_eq!(index.rename_sites(&queue_key("AA")).len(), 1);
+        let sites = index.rename_sites(&queue_key("AA"));
+        assert_eq!(sites.len(), 2, "DEFINE side and use side both rewritten");
+        assert!(sites.iter().any(|s| s.defines.is_some()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --------------------------------------------------- PR 8 watched files
+
+    /// One event as the client would send it.
+    fn event(path: &Path, kind: FileChangeType) -> FileEvent {
+        FileEvent {
+            uri: Url::from_file_path(path).unwrap(),
+            typ: kind,
+        }
+    }
+
+    /// Reindex + apply, exactly the two steps the server runs per notification.
+    fn apply(
+        index: &WorkspaceIndex,
+        dir: &PathBuf,
+        cfg: &WorkspaceScan,
+        events: Vec<FileEvent>,
+    ) -> DiskApply {
+        let updates = reindex_from_events(&events, cfg, std::slice::from_ref(dir));
+        index.apply_disk_updates(updates, cfg)
+    }
+
+    #[test]
+    fn watch_created_changed_and_deleted_keep_the_index_current() {
+        let dir = temp_ws("watch");
+        let cfg = WorkspaceScan::default();
+        let index = WorkspaceIndex::default();
+        let other = open_text(&index, "/tmp/watch-other.mqsc", "DEFINE QLOCAL(O)\n");
+
+        // created after startup: the new DEFINE resolves for the open doc
+        let fresh = dir.join("fresh.mqsc");
+        std::fs::write(&fresh, "DEFINE QLOCAL(LATE)\n").unwrap();
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![event(&fresh, FileChangeType::CREATED)],
+        );
+        assert_eq!((rep.changed, rep.capped), (1, 0));
+        assert!(index.external_defs(&other).names.contains("LATE"));
+
+        // changed: the old name leaves, the new one arrives — the whole point
+        // is that no rescan of the workspace is involved
+        std::fs::write(&fresh, "DEFINE QLOCAL(LATER)\n").unwrap();
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![event(&fresh, FileChangeType::CHANGED)],
+        );
+        assert_eq!(rep.changed, 1);
+        let ext = index.external_defs(&other);
+        assert!(ext.names.contains("LATER") && !ext.names.contains("LATE"));
+
+        // deleted: the entry goes, so a reference to its name is dangling again
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![event(&fresh, FileChangeType::DELETED)],
+        );
+        assert_eq!(rep.changed, 1);
+        assert!(!index.external_defs(&other).names.contains("LATER"));
+        assert_eq!(index.total(), 1, "only the open document is left");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_events_never_overwrite_an_open_buffer() {
+        let dir = temp_ws("watch-open");
+        let cfg = WorkspaceScan::default();
+        let disk = dir.join("d.mqsc");
+        std::fs::write(&disk, "DEFINE QLOCAL(DISK)\n").unwrap();
+        let uri = Url::from_file_path(&disk).unwrap();
+        let index = WorkspaceIndex::default();
+        let other = open_text(&index, "/tmp/watch-other2.mqsc", "DEFINE QLOCAL(O)\n");
+        open_text(&index, disk.to_str().unwrap(), "DEFINE QLOCAL(BUF)\n");
+
+        // saving an open file makes the client fire a watched event for it;
+        // the buffer (which may hold unsaved edits) must stay the truth
+        std::fs::write(&disk, "DEFINE QLOCAL(SAVED)\n").unwrap();
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![event(&disk, FileChangeType::CHANGED)],
+        );
+        assert_eq!(
+            rep.changed, 0,
+            "the open entry is not the watcher's to write"
+        );
+        let ext = index.external_defs(&other);
+        assert!(ext.names.contains("BUF") && !ext.names.contains("SAVED"));
+
+        // even a delete event cannot evict a document the editor still holds
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![event(&disk, FileChangeType::DELETED)],
+        );
+        assert_eq!(rep.changed, 0);
+        let held = index
+            .with_doc(&uri, |text, _tree| text.to_string())
+            .unwrap();
+        assert!(held.contains("BUF"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_events_respect_excludes_extensions_and_deletions_of_unknown_files() {
+        let dir = temp_ws("watch-filters");
+        let cfg = WorkspaceScan::default();
+        let index = WorkspaceIndex::default();
+        let other = open_text(&index, "/tmp/watch-other3.mqsc", "DEFINE QLOCAL(O)\n");
+
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        let in_target = dir.join("target").join("gen.mqsc");
+        std::fs::write(&in_target, "DEFINE QLOCAL(GEN)\n").unwrap();
+        let notes = dir.join("notes.txt");
+        std::fs::write(&notes, "DEFINE QLOCAL(TXT)\n").unwrap();
+        let ghost = dir.join("ghost.mqsc"); // never existed, "deleted"
+
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![
+                event(&in_target, FileChangeType::CREATED),
+                event(&notes, FileChangeType::CREATED),
+                event(&ghost, FileChangeType::DELETED),
+            ],
+        );
+        assert_eq!(
+            (rep.changed, rep.capped),
+            (0, 0),
+            "all three events filtered"
+        );
+        assert_eq!(index.total(), 1);
+        let ext = index.external_defs(&other);
+        assert!(!ext.names.contains("GEN") && !ext.names.contains("TXT"));
+
+        // an explicit empty exclude list indexes what the default one skips
+        let no_exclude = WorkspaceScan {
+            exclude: vec![],
+            ..Default::default()
+        };
+        let rep = apply(
+            &index,
+            &dir,
+            &no_exclude,
+            vec![event(&in_target, FileChangeType::CREATED)],
+        );
+        assert_eq!(rep.changed, 1, "exclude: [] means exclude nothing");
+        assert!(index.external_defs(&other).names.contains("GEN"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_created_files_still_obey_the_max_files_cap() {
+        let dir = temp_ws("watch-cap");
+        let cfg = WorkspaceScan {
+            max_files: 1,
+            ..Default::default()
+        };
+        let index = WorkspaceIndex::default();
+        std::fs::write(dir.join("one.mqsc"), "DEFINE QLOCAL(ONE)\n").unwrap();
+        std::fs::write(dir.join("two.mqsc"), "DEFINE QLOCAL(TWO)\n").unwrap();
+        std::fs::write(dir.join("three.mqsc"), "DEFINE QLOCAL(THREE)\n").unwrap();
+
+        // first event fits the cap, second does not, and a change to an
+        // ALREADY indexed file is never refused (it is not growth)
+        let rep = apply(
+            &index,
+            &dir,
+            &cfg,
+            vec![
+                event(&dir.join("one.mqsc"), FileChangeType::CREATED),
+                event(&dir.join("two.mqsc"), FileChangeType::CREATED),
+                event(&dir.join("one.mqsc"), FileChangeType::CHANGED),
+            ],
+        );
+        assert_eq!((rep.changed, rep.capped), (2, 1));
+        assert_eq!(index.total(), 1, "one entry, capped out the second");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_type_changed_event_is_reread_like_any_other() {
+        // FileChangeType is an open i32 in lsp-types 0.94 (LSP 3.17 added
+        // type 4 = TypeChanged); anything not CREATED/DELETED must re-read.
+        let dir = temp_ws("watch-type4");
+        let cfg = WorkspaceScan::default();
+        let index = WorkspaceIndex::default();
+        let other = open_text(&index, "/tmp/watch-other4.mqsc", "DEFINE QLOCAL(O)\n");
+        let f = dir.join("t.mqsc");
+        std::fs::write(&f, "DEFINE QLOCAL(T4)\n").unwrap();
+        // built from the wire form: FileChangeType's i32 is private, and 4
+        // is what a 3.17 client sends for "the file type changed"
+        let ev: FileEvent = serde_json::from_value(serde_json::json!({
+            "uri": Url::from_file_path(&f).unwrap().to_string(),
+            "type": 4,
+        }))
+        .unwrap();
+        let rep = index.apply_disk_updates(
+            reindex_from_events(std::slice::from_ref(&ev), &cfg, std::slice::from_ref(&dir)),
+            &cfg,
+        );
+        assert_eq!(rep.changed, 1);
+        assert!(index.external_defs(&other).names.contains("T4"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
