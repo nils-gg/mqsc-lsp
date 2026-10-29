@@ -154,6 +154,12 @@
             "kind": "string",
             "optional": true,
             "description": "Authority to remove from the profile (distributed spelling) (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "SERVCOMP",
+            "kind": "string",
+            "optional": true,
+            "description": "Service component the authorization record applies to (MQ 9.1+ authorization services; oracle-verified)"
           }
         ],
         "attrs": [],
@@ -397,6 +403,18 @@
               "UNLIMITED"
             ],
             "optional": true
+          },
+          {
+            "name": "ENFORCE",
+            "kind": "flag",
+            "optional": true,
+            "description": "Enforce (or tolerate) signature/encryption policy for messages secured by this policy (MQ 10.0.1 railroad bare-flag form; oracle-verified)"
+          },
+          {
+            "name": "TOLERATE",
+            "kind": "flag",
+            "optional": true,
+            "description": "Enforce (or tolerate) signature/encryption policy for messages secured by this policy (MQ 10.0.1 railroad bare-flag form; oracle-verified)"
           }
         ]
       }
