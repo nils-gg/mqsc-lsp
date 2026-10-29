@@ -108,7 +108,18 @@ the full picture; this file only lists what is easy to get wrong.
   **canonical** object names (its `norm_syn` only uppercases — synonym
   resolution is the caller's job, pass `Command::object`). Hover/completion
   show the facts unconditionally via `doc_for` ("Availability
-  (curated)").
+  (curated)"). A fourth curated section, `command_availability`
+  (`'VERB OBJECT'` key → `platform`/`since`/`until`, see
+  `model::CmdAvailRule`), drives the SAME code 15 on the command head:
+  `check_command_avail` runs in `check_command` right after the command
+  resolves, decides through `Target::gate` (fed a synthesized `AvailRule`),
+  underlines the whole `VERB OBJECT` span, and the hover command card shows
+  the facts too. Its data is the oracle differential's own verdict — the
+  pairs distributed 10.0.1's command lists lack are z/OS-only (the two
+  MAXSMSGS extractor artifacts get no rule) — plus the CHLAUTH-family
+  `since: 9.0` floor; a guard test insists every rule targets a pair
+  `Model::resolve` answers (DISPLAY BUFFPOOL was drafted as a rule for a
+  command the model does not even carry).
 - `settings::WorkspaceScan` (`mqsc.workspaceIndex.enabled` / `maxFiles` /
   `exclude`, same nested-or-flat lookup and per-key fallback as `Target`)
   gates the PR 7 startup scan: default on, 2000 files, `.git`/`target`/

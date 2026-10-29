@@ -3949,5 +3949,267 @@
       "platform": "zos",
       "note": "Queue-sharing-group disposition; the IBM reference states 'This parameter applies to z/OS only' and the live MQ 10.0.1 distributed parser rejects it on every command that carries it in the model."
     }
+  ],
+  "command_availability": [
+    {
+      "command": "ALTER CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "BACKUP CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "DEFINE CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "DELETE CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "DISPLAY CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "RECOVER CFSTRUCT",
+      "platform": "zos",
+      "note": "coupling-structure object family: CF structures are a z/OS-only construct"
+    },
+    {
+      "command": "ALTER BUFFPOOL",
+      "platform": "zos",
+      "note": "buffer-pool object family (z/OS VSAM buffer pools)"
+    },
+    {
+      "command": "DEFINE BUFFPOOL",
+      "platform": "zos",
+      "note": "buffer-pool object family (z/OS VSAM buffer pools)"
+    },
+    {
+      "command": "DELETE BUFFPOOL",
+      "platform": "zos",
+      "note": "buffer-pool object family (z/OS VSAM buffer pools)"
+    },
+    {
+      "command": "ALTER PSID",
+      "platform": "zos",
+      "note": "PSB name (PSID) object family (z/OS IMS bridge)"
+    },
+    {
+      "command": "DEFINE PSID",
+      "platform": "zos",
+      "note": "PSB name (PSID) object family (z/OS IMS bridge)"
+    },
+    {
+      "command": "DELETE PSID",
+      "platform": "zos",
+      "note": "PSB name (PSID) object family (z/OS IMS bridge)"
+    },
+    {
+      "command": "ALTER STGCLASS",
+      "platform": "zos",
+      "note": "storage-class object family (z/OS)"
+    },
+    {
+      "command": "DEFINE STGCLASS",
+      "platform": "zos",
+      "note": "storage-class object family (z/OS)"
+    },
+    {
+      "command": "DELETE STGCLASS",
+      "platform": "zos",
+      "note": "storage-class object family (z/OS)"
+    },
+    {
+      "command": "DISPLAY STGCLASS",
+      "platform": "zos",
+      "note": "storage-class object family (z/OS)"
+    },
+    {
+      "command": "ARCHIVE LOG",
+      "platform": "zos",
+      "note": "logging objects/commands (z/OS BSDS/archive log world)"
+    },
+    {
+      "command": "DEFINE LOG",
+      "platform": "zos",
+      "note": "logging objects/commands (z/OS BSDS/archive log world)"
+    },
+    {
+      "command": "DISPLAY LOG",
+      "platform": "zos",
+      "note": "logging objects/commands (z/OS BSDS/archive log world)"
+    },
+    {
+      "command": "ALTER TRACE",
+      "platform": "zos",
+      "note": "internal trace tables (z/OS CHINIT tracing)"
+    },
+    {
+      "command": "DISPLAY TRACE",
+      "platform": "zos",
+      "note": "internal trace tables (z/OS CHINIT tracing)"
+    },
+    {
+      "command": "START TRACE",
+      "platform": "zos",
+      "note": "internal trace tables (z/OS CHINIT tracing)"
+    },
+    {
+      "command": "STOP TRACE",
+      "platform": "zos",
+      "note": "internal trace tables (z/OS CHINIT tracing)"
+    },
+    {
+      "command": "DISPLAY CHINIT",
+      "platform": "zos",
+      "note": "the z/OS CHINIT address space"
+    },
+    {
+      "command": "STOP CHINIT",
+      "platform": "zos",
+      "note": "the z/OS CHINIT address space"
+    },
+    {
+      "command": "DISPLAY CMDSERV",
+      "platform": "zos",
+      "note": "the z/OS command server address space"
+    },
+    {
+      "command": "START CMDSERV",
+      "platform": "zos",
+      "note": "the z/OS command server address space"
+    },
+    {
+      "command": "STOP CMDSERV",
+      "platform": "zos",
+      "note": "the z/OS command server address space"
+    },
+    {
+      "command": "ALTER SECURITY",
+      "platform": "zos",
+      "note": "the z/OS security class object"
+    },
+    {
+      "command": "DISPLAY SECURITY",
+      "platform": "zos",
+      "note": "the z/OS security class object"
+    },
+    {
+      "command": "RVERIFY SECURITY",
+      "platform": "zos",
+      "note": "RVERIFY applies to the z/OS security class object"
+    },
+    {
+      "command": "DISPLAY GROUP",
+      "platform": "zos",
+      "note": "publish/subscribe broker groups (z/OS)"
+    },
+    {
+      "command": "DISPLAY SYSTEM",
+      "platform": "zos",
+      "note": "the z/OS SYSTEM object"
+    },
+    {
+      "command": "SET SYSTEM",
+      "platform": "zos",
+      "note": "the z/OS SYSTEM object"
+    },
+    {
+      "command": "DISPLAY THREAD",
+      "platform": "zos",
+      "note": "z/OS MVS thread display"
+    },
+    {
+      "command": "SET GLOBAL",
+      "platform": "zos",
+      "note": "the z/OS GLOBAL object"
+    },
+    {
+      "command": "SET ARCHIVE",
+      "platform": "zos",
+      "note": "archive control (z/OS)"
+    },
+    {
+      "command": "DISPLAY ARCHIVE",
+      "platform": "zos",
+      "note": "archive control (z/OS)"
+    },
+    {
+      "command": "DISPLAY CFSTATUS",
+      "platform": "zos",
+      "note": "coupling-structure status (z/OS)"
+    },
+    {
+      "command": "RECOVER BSDS",
+      "platform": "zos",
+      "note": "BSDS recovery (z/OS)"
+    },
+    {
+      "command": "MOVE QLOCAL",
+      "platform": "zos",
+      "note": "MOVE QLOCAL is z/OS; distributed MOVE takes QUEUE only"
+    },
+    {
+      "command": "DEFINE QUEUE",
+      "platform": "zos",
+      "note": "generic DEFINE QUEUE is z/OS; distributed requires the concrete queue type (QLOCAL/QALIAS/QMODEL/QREMOTE/CLNTCONN)"
+    },
+    {
+      "command": "RESET QSTATS",
+      "platform": "zos",
+      "note": "z/OS queue-statistics reset"
+    },
+    {
+      "command": "RESET TPIPE",
+      "platform": "zos",
+      "note": "trigger-pipe reset is z/OS"
+    },
+    {
+      "command": "RESOLVE INDOUBT",
+      "platform": "zos",
+      "note": "two-phase-commit resolve is z/OS (distributed uses RESOLVE CHANNEL)"
+    },
+    {
+      "command": "START QMGR",
+      "platform": "zos",
+      "note": "starting the queue manager from within itself is a z/OS command"
+    },
+    {
+      "command": "STOP QMGR",
+      "platform": "zos",
+      "note": "stopping the queue manager from within itself is a z/OS command"
+    },
+    {
+      "command": "DISPLAY USAGE",
+      "platform": "zos",
+      "note": "usage statistics reporting is a z/OS command"
+    },
+    {
+      "command": "ADD CHLAUTH",
+      "platform": "zos",
+      "note": "ADD/MODIFY CHLAUTH are the z/OS spellings (distributed uses SET CHLAUTH)"
+    },
+    {
+      "command": "MODIFY CHLAUTH",
+      "platform": "zos",
+      "note": "ADD/MODIFY CHLAUTH are the z/OS spellings (distributed uses SET CHLAUTH)"
+    },
+    {
+      "command": "SET CHLAUTH",
+      "since": "9.0",
+      "note": "channel availability control was introduced with MQ 9.0"
+    },
+    {
+      "command": "DISPLAY CHLAUTH",
+      "since": "9.0",
+      "note": "channel availability control was introduced with MQ 9.0"
+    }
   ]
 }

@@ -12,7 +12,7 @@ use lsp_types::{
 use serde_json::json;
 use tree_sitter::{Language, Node, Tree};
 
-use crate::model::{self, Model, Param, ValueKind};
+use crate::model::{self, AvailRule, Command, Model, Param, ValueKind};
 use crate::settings::{AvailViolation, Target};
 
 extern "C" {
@@ -832,6 +832,75 @@ fn check_target_avail(
     );
 }
 
+/// Code 15 NOT_IN_TARGET on the command itself: the whole `VERB OBJECT`
+/// is unavailable for the configured target, per the overlay's curated
+/// `command_availability` rules — the live-oracle differential is what
+/// knows distributed has no CFSTRUCT family and that CHLAUTH starts at
+/// 9.0. Same settings gate and conservative conventions as the parameter
+/// check (fires nowhere without a target, never on unknown availability).
+fn check_command_avail(
+    m: &Model,
+    target: &Target,
+    e: &Command,
+    verb_node: Node<'_>,
+    obj_node: Option<Node<'_>>,
+    lines: &Lines,
+    d: &mut Diags,
+) {
+    if !target.configured() {
+        return;
+    }
+    let Some(rule) = m.command_availability_for(e.verb, e.object) else {
+        return;
+    };
+    // the decision logic lives in Target::gate on the parameter-shaped
+    // rule; feed it this command's version/platform fields
+    let gate = AvailRule {
+        param: format!("{} {}", e.verb, e.object),
+        obj: Vec::new(),
+        since: rule.since.clone(),
+        until: rule.until.clone(),
+        platform: rule.platform.clone(),
+        note: String::new(),
+    };
+    let Some(violation) = target.gate(&gate) else {
+        return;
+    };
+    let cmd = format!("{} {}", e.verb, e.object);
+    let version = target
+        .version
+        .map_or_else(|| "unset".to_string(), |v| v.to_string());
+    let head = match violation {
+        AvailViolation::TooOld(since) => format!(
+            "'{cmd}' is available from MQ {since} — mqsc.targetVersion is {version}. \
+             Remove the command or raise targetVersion to the queue manager's version."
+        ),
+        AvailViolation::TooNew(until) => format!(
+            "'{cmd}' is available up to MQ {until} — mqsc.targetVersion is {version}. \
+             Remove the command or lower targetVersion to the queue manager's version."
+        ),
+        AvailViolation::WrongPlatform(rp) => format!(
+            "'{cmd}' is only available on {rp} — mqsc.platform is {}.",
+            target
+                .platform
+                .map_or_else(|| "unset".to_string(), |p| p.to_string())
+        ),
+    };
+    let msg = if rule.note.is_empty() {
+        head
+    } else {
+        format!("{head} {}", rule.note)
+    };
+    // underline the whole VERB OBJECT head, not just the verb
+    let end = obj_node.map_or_else(|| verb_node.end_byte(), |n| n.end_byte());
+    d.push(
+        lines.range(verb_node.start_byte(), end),
+        DiagnosticSeverity::WARNING,
+        CODE_NOT_IN_TARGET,
+        msg,
+    );
+}
+
 /// Code 12: an object-name reference (TARGET, XMITQ, LIKE, ...) that no
 /// DEFINE in this script provides. Hint severity on purpose: runmqsc
 /// scripts routinely reference queue-manager objects that exist already.
@@ -1231,6 +1300,10 @@ fn check_command(
         }
         (Some(_), Some(i)) => m.entry(i),
     };
+
+    // Code 15 on the command itself: the configured target may not know
+    // this whole VERB OBJECT (z/OS-only families, post-version commands)
+    check_command_avail(m, target, e, verb_node, obj_word, lines, d);
 
     let multi_pos = matches!(
         e.verb,
@@ -2103,6 +2176,30 @@ pub fn hover(
                     .join(" "),
                 if e.attrs.len() > 14 { " …" } else { "" }
             ));
+        }
+        // curated availability facts (overlay), informational like the
+        // parameter card: shown independent of any configured target
+        if let Some(r) = m.command_availability_for(e.verb, e.object) {
+            let mut bits: Vec<String> = Vec::new();
+            if let Some(pl) = r
+                .platform
+                .as_deref()
+                .and_then(crate::settings::Platform::parse)
+            {
+                bits.push(format!("{pl} only"));
+            }
+            if let Some(s) = r.since.as_deref() {
+                bits.push(format!("from MQ {s}"));
+            }
+            if let Some(u) = r.until.as_deref() {
+                bits.push(format!("up to MQ {u}"));
+            }
+            if !bits.is_empty() {
+                md.push_str(&format!(
+                    "\n\n_Availability (curated): {}._",
+                    bits.join(", ")
+                ));
+            }
         }
         return Some(mk(md));
     }
@@ -4453,6 +4550,113 @@ mod tests {
         let c = codes_t("ALTER QMODEL(M) BACKOUT(Q)\n", &t);
         assert!(c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
         assert!(!c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+    }
+
+    // ------------------------------------------- T-19 command-level rules
+
+    #[test]
+    fn zos_only_command_flagged_under_distributed_target() {
+        // the command_availability families (live-oracle evidence: these
+        // pairs are absent from distributed runmqsc's own command lists)
+        let t = target("9.4", "distributed");
+        let c = codes_t("DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n", &t);
+        assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        let msg = msg_t("DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n", CODE_NOT_IN_TARGET, &t);
+        assert!(
+            msg.contains("'DEFINE CFSTRUCT'") && msg.contains("z/OS") && msg.contains("platform"),
+            "{msg}"
+        );
+        // the whole family flags, one report per command...
+        assert!(codes_t("MOVE QLOCAL(Q) FROM(BOQ)\n", &t).contains(&CODE_NOT_IN_TARGET));
+        // ...and on z/OS the very same scripts are clean
+        let z = target("9.4", "zos");
+        assert!(!codes_t(
+            "DEFINE CFSTRUCT(SCI) CF_TYPE(S)\nMOVE QLOCAL(Q) FROM(BOQ)\n",
+            &z
+        )
+        .contains(&CODE_NOT_IN_TARGET));
+    }
+
+    #[test]
+    fn command_version_floor_follows_target_version() {
+        // SET/DISPLAY CHLAUTH: distributed commands, but only from MQ 9.0
+        let old = target("8.0", "distributed");
+        assert!(
+            codes_t("SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST(x)\n", &old)
+                .contains(&CODE_NOT_IN_TARGET)
+        );
+        let msg = msg_t(
+            "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST(x)\n",
+            CODE_NOT_IN_TARGET,
+            &old,
+        );
+        assert!(
+            msg.contains("from MQ 9.0") && msg.contains("targetVersion"),
+            "{msg}"
+        );
+        // at exactly the floor (and above) the command is clean
+        let ok = target("9.0", "distributed");
+        assert!(
+            !codes_t("SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST(x)\n", &ok)
+                .contains(&CODE_NOT_IN_TARGET)
+        );
+    }
+
+    #[test]
+    fn command_rules_never_fire_without_a_target() {
+        // the settings gate covers commands exactly like parameters
+        assert!(!has(
+            "DEFINE CFSTRUCT(SCI)\nMOVE QLOCAL(Q) FROM(BOQ)\n",
+            CODE_NOT_IN_TARGET
+        ));
+    }
+
+    #[test]
+    fn hover_command_card_shows_curated_availability() {
+        // informational, independent of any configured target (same
+        // convention as the parameter card's 'Availability (curated)')
+        let m = Model::load();
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        let text = "DEFINE CFSTRUCT(SCI)\n";
+        let tree = parse(text);
+        let md = md_of(hover(text, &tree, m, Position::new(0, 2), &Default::default()).expect("v"));
+        assert!(
+            md.contains("Availability (curated)") && md.contains("z/OS only"),
+            "{md}"
+        );
+        let text = "SET CHLAUTH(*) TYPE(BLOCKUSER)\n";
+        let tree = parse(text);
+        let md = md_of(hover(text, &tree, m, Position::new(0, 2), &Default::default()).expect("v"));
+        assert!(
+            md.contains("Availability (curated)") && md.contains("from MQ 9.0"),
+            "{md}"
+        );
+        // a plain command keeps the card as it was
+        let text = "DEFINE QLOCAL(Q)\n";
+        let tree = parse(text);
+        let md = md_of(hover(text, &tree, m, Position::new(0, 2), &Default::default()).expect("v"));
+        assert!(!md.contains("Availability (curated)"), "{md}");
+    }
+
+    #[test]
+    fn every_command_rule_targets_a_resolvable_command() {
+        // a rule for a pair the model cannot resolve is dead weight and a
+        // silent lie about coverage (DISPLAY BUFFPOOL was drafted that way:
+        // z/OS-only in the docs, but not in the model at all)
+        let m = Model::load();
+        let rules = m.all_command_availability();
+        assert_eq!(rules.len(), 52);
+        for r in rules {
+            let (verb, obj) = r.command.split_once(' ').unwrap();
+            assert!(
+                m.resolve(verb, Some(obj)).is_some(),
+                "command_availability rule for unresolvable {}",
+                r.command
+            );
+        }
     }
 
     #[test]

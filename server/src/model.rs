@@ -105,6 +105,28 @@ pub struct AvailRule {
     pub note: String,
 }
 
+/// One curated availability rule for a whole command (overlay
+/// `command_availability` section). Same conservative convention as
+/// `AvailRule`: only commands whose platform/version history is known
+/// with confidence are listed — the live-oracle differential
+/// (`tools/mq_oracle_check.py`) is the evidence source for what the
+/// distributed parser does not accept — everything else is never
+/// flagged. Rules only apply when a target is configured (drives
+/// diagnostic 15 NOT_IN_TARGET on the `VERB OBJECT` span).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CmdAvailRule {
+    /// `"VERB OBJECT"` as the model spells it after resolution
+    pub command: String,
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
@@ -121,6 +143,9 @@ struct RawModel {
     /// curated parameter availability (overlay-only data; see AvailRule)
     #[serde(default)]
     availability: Vec<AvailRule>,
+    /// curated command availability (overlay-only data; see CmdAvailRule)
+    #[serde(default)]
+    command_availability: Vec<CmdAvailRule>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -152,6 +177,9 @@ struct Overlay {
     /// curated parameter availability rules (see AvailRule)
     #[serde(default)]
     availability: Vec<AvailRule>,
+    /// curated command availability rules (see CmdAvailRule)
+    #[serde(default)]
+    command_availability: Vec<CmdAvailRule>,
 }
 
 impl RawModel {
@@ -207,6 +235,20 @@ impl RawModel {
         self.mandatory.extend(ov.mandatory);
         // curated availability rules: overlay-only, appended (base carries none)
         self.availability.extend(ov.availability);
+        // command-level rules likewise; a key that is not 'VERB OBJECT'
+        // shape can never match, so report it instead of dying silently
+        for r in ov.command_availability {
+            match r.command.split_once(' ') {
+                Some((v, o)) if !v.trim().is_empty() && !o.trim().is_empty() => {
+                    self.command_availability.push(r)
+                }
+                _ => eprintln!(
+                    "mqsc-model overlay: command availability key {:?} is not \
+                     'VERB OBJECT', skipped",
+                    r.command
+                ),
+            }
+        }
     }
 }
 
@@ -292,6 +334,10 @@ pub struct Model {
     /// section). Drives diagnostic 15 NOT_IN_TARGET; only consulted when a
     /// target version/platform is configured.
     availability: Vec<AvailRule>,
+    /// curated command availability (from the overlay's
+    /// `command_availability` section). Drives the same diagnostic 15 on
+    /// the VERB OBJECT span; same settings gate.
+    command_availability: Vec<CmdAvailRule>,
 }
 
 fn norm_syn(s: &str) -> String {
@@ -456,6 +502,7 @@ impl Model {
                 name_max: raw.name_max,
                 mandatory: raw.mandatory,
                 availability: raw.availability,
+                command_availability: raw.command_availability,
             }
         })
     }
@@ -551,6 +598,24 @@ impl Model {
                     .iter()
                     .find(|r| r.param == param && r.obj.is_empty())
             })
+    }
+
+    /// Curated availability rule for the command `verb object` (spelled
+    /// as the model resolves them). Overlay data only; absence means
+    /// availability is unknown = never flagged.
+    pub fn command_availability_for(&self, verb: &str, object: &str) -> Option<&CmdAvailRule> {
+        let (verb, obj) = (norm_syn(verb), norm_syn(object));
+        self.command_availability.iter().find(|r| {
+            r.command
+                .split_once(' ')
+                .is_some_and(|(v, o)| norm_syn(v) == verb && norm_syn(o) == obj)
+        })
+    }
+
+    /// Every curated command availability rule (coverage tests; the
+    /// shipped table is expected to resolve in full).
+    pub fn all_command_availability(&self) -> &[CmdAvailRule] {
+        &self.command_availability
     }
 
     /// documentation text for a parameter name, preferring contexts that
@@ -829,6 +894,29 @@ mod tests {
         let act = enum_values(param("SET", "CHLAUTH", "ACTION"));
         assert!(!act.contains(&"DELETE".to_string()), "{act:?}");
         assert!(act.contains(&"REMOVEALL".to_string()), "{act:?}");
+    }
+
+    #[test]
+    fn command_availability_rules_load_and_look_up() {
+        // the curated command table (overlay `command_availability`) loads
+        // and answers case-insensitively on the canonical pair spelling
+        let m = model();
+        let r = m
+            .command_availability_for("define", "CFSTRUCT")
+            .expect("DEFINE CFSTRUCT rule");
+        assert_eq!(r.platform.as_deref(), Some("zos"));
+        assert!(m.command_availability_for("MOVE", "QLOCAL").is_some());
+        // version-floor rules carry since and NO platform (the command
+        // exists on both platforms from MQ 9.0 up)
+        let ch = m
+            .command_availability_for("SET", "CHLAUTH")
+            .expect("SET CHLAUTH rule");
+        assert_eq!(ch.since.as_deref(), Some("9.0"));
+        assert!(ch.platform.is_none());
+        // the extractor artifacts (MAXSMSGS) are artifacts on every
+        // platform — no rule, never flagged; and ordinary commands have none
+        assert!(m.command_availability_for("DEFINE", "MAXSMSGS").is_none());
+        assert!(m.command_availability_for("ALTER", "QLOCAL").is_none());
     }
 
     #[test]

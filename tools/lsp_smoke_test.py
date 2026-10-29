@@ -482,6 +482,36 @@ check("code 15: QSGDISP is z/OS-only vs distributed platform (line 14)",
       any(l == 14 and "z/OS" in msg for l, msg in d15), str(d15))
 check("code 15: BOQNAME stays clean under a distributed target (line 13)",
       not any(l == 13 for l, _ in d15), str(d15))
+
+print("\n== command availability (code 15 on VERB OBJECT, T-19 phase 5) ==")
+# the overlay's command_availability table (live-oracle evidence): the
+# CFSTRUCT family is z/OS-only, while SET CHLAUTH exists on distributed
+# AT 9.0 and must stay clean under exactly that targetVersion.
+CMD_URI = "file:///tmp/cmdavail.mqsc"
+send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+    "textDocument": {"uri": CMD_URI, "languageId": "mqsc", "version": 1,
+                     "text": "DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n"
+                             "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST('x')\n"}}})
+diags_cmd = []
+while True:
+    m = pump(3)
+    if m is None:
+        break
+    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == CMD_URI:
+        diags_cmd = m["params"]["diagnostics"]
+d15c = [(d["range"]["start"]["line"], d["message"]) for d in diags_cmd if d.get("code") == 15]
+print("   command-level code 15:", [(l, mm[:60]) for l, mm in d15c])
+check("code 15: DEFINE CFSTRUCT is z/OS-only vs distributed platform (line 0)",
+      any(l == 0 and "z/OS" in msg for l, msg in d15c), str(d15c))
+check("code 15: SET CHLAUTH is in-target at exactly 9.0 (line 1 clean)",
+      not any(l == 1 for l, _ in d15c), str(d15c))
+m = request(61, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
+                                       "position": {"line": 0, "character": 2}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover command card shows the curated availability (z/OS only)",
+      "Availability (curated)" in v and "z/OS" in v, v[-120:])
+send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
+    "textDocument": {"uri": CMD_URI}}})
 send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
       "params": {"settings": {"mqsc": {}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {

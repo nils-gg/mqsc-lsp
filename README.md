@@ -174,7 +174,7 @@ page when it finds nothing instead of failing silently.
 | 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script, any other open document or an indexed workspace file; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 | 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
-| 15 | Warning | parameter not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated per-parameter availability (`availability` in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `QSGDISP` is z/OS-only, verified against a live 10.0.1 parser). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
+| 15 | Warning | parameter or command not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated availability (`availability` for parameters, `command_availability` for whole `VERB OBJECT` commands, both in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `QSGDISP` is z/OS-only, `DEFINE CFSTRUCT` is a z/OS family, `SET CHLAUTH` starts at MQ 9.0 — all verified against a live 10.0.1 parser). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
 
 Messages follow an Elm-compiler-style contract: every one quotes the
 offending token, says what belongs there instead, and names the concrete fix
@@ -211,7 +211,7 @@ Two further keys declare what the scripts target, enabling diagnostic 15:
 `targetVersion` accepts `9` or `9.4` (a patch level like `9.4.1` is read as
 `9.4`); `platform` is `"distributed"` or `"zos"`. Either side alone is
 enough; both unset (the default) disable diagnostic 15 entirely — nothing
-in the availability table is ever consulted. Values that do not parse are
+in either availability table is ever consulted. Values that do not parse are
 ignored, like unrecognized severities. The `--check` CLI honors them via
 `--settings` too (the file may carry them flat or under `"mqsc"`).
 
@@ -368,8 +368,9 @@ non-zero when a check fails.
   clearly-labelled curated add-on merged over the extracted model at load
   time: post-2011 commands, the queue-name `BOQNAME` retyping, per-type
   `name_max` limits, per-type `mandatory`
-  property rules (diagnostic 14), and the per-parameter `availability`
-  table behind diagnostic 15 (version/platform, consulted only when a
+  property rules (diagnostic 14), the per-parameter `availability`
+  table, and the command-level `command_availability` table behind
+  diagnostic 15 (version/platform, both consulted only when a
   target is configured).
 - **The overlay is oracle-verified**: `tools/mq_oracle_check.py` diffs the
   model against a live IBM MQ 10.0.1 installation (`runmqsc` never executes
