@@ -37,6 +37,8 @@ grammars/tree-sitter-mqsc/   tree-sitter grammar + external scanner + corpus tes
 tools/extract_model.py        extracts the command model from the reference markdown
 tools/lsp_smoke_test.py       protocol-level end-to-end test client
 tools/workspace_index_smoke.py  end-to-end test for the workspace index (scan + watching)
+tools/check_versions.py       release version agreement (Cargo.toml / package.json / tag)
+tools/extension_resolve_test.js  VS Code server-lookup behavior (stubbed host, no deps)
 tools/record_demo.sh          drives/records the feature demo (docs/demo.cast)
 model/mqsc-model.json         the extracted model (128 commands, 1336 params, docs, attrs, synonyms)
 server/                       Rust LSP server (tower-lsp + tree-sitter), embeds the model
@@ -95,9 +97,17 @@ cd server
 cargo build --release              # target/release/mqsc-lsp
 ```
 
-No prebuilt binaries are published yet: `.github/workflows/release.yml`
-packages the linux x86-64 binary into a GitHub Release **when a `v*` tag is
-pushed** — until the first tag exists, build from source as shown above.
+**Prebuilt binaries:** pushing a `vX.Y.Z` tag publishes a GitHub Release
+with MSRV-pinned binaries for `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc` (zip),
+`x86_64-apple-darwin` and `aarch64-apple-darwin`, plus the packaged
+VS Code extension (`mqsc-lsp-vX.Y.Z-vscode.vsix`) and a `SHA256SUMS`
+covering everything. The tag, `server/Cargo.toml` and the extension's
+`package.json` must declare the same version — `tools/check_versions.py`
+guards that in CI and again in the release workflow. Extract a binary
+somewhere on your `PATH` (or into `~/.local/bin`) and the VS Code
+extension finds it on its own. Until the first tag exists, build from
+source as shown above.
 
 **MSRV pinning:** the toolchain pinned here is rustc 1.75 (installed per-user
 via rustup, `~/.cargo/bin`). If
@@ -125,6 +135,10 @@ server/target/release/mqsc-lsp --version
 
 Point your editor at the binary and associate `*.mqsc` with language id
 `mqsc`. See [`editors/`](editors/) for VS Code / Neovim / Helix examples.
+The VS Code extension needs no configuring when the binary is installed
+the usual way: it resolves `mqsc.server.path` (default = auto), then
+`PATH`, then the common install directories, and links you to the release
+page when it finds nothing instead of failing silently.
 
 ### Features
 
@@ -311,6 +325,8 @@ python3 tools/workspace_index_smoke.py           # assertive session against a t
                                                  # enabled=false gate — exit != 0 on FAIL
 python3 tools/check_model.py                     # model is byte-identical to extractor output
                                                  # (skips cleanly without the IBM reference)
+python3 tools/check_versions.py                  # Cargo.toml and package.json declare one version
+node tools/extension_resolve_test.js             # extension finds its server the documented way
 cd server
 echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol
 cargo run --example complete                         # completion behaviour matrix
@@ -318,10 +334,15 @@ cargo run --example fold                             # folding ranges
 cargo run --release --example ws_scan [dir]          # workspace-scan cost (walk+parse timing)
 ```
 
-`.github/workflows/ci.yml` runs exactly this set on rustc 1.75 (fmt and
-clippy `-D warnings` too), plus an end-to-end `--check` CLI gate with exact
-exit-code assertions, with the smoke session against the **release**
-binary.
+`.github/workflows/ci.yml` runs the full gate set on rustc 1.75 — fmt,
+clippy `-D warnings`, both smoke sessions against the **release** binary,
+the model/version guards, the extension resolver test and the end-to-end
+`--check` CLI gate with exact exit-code assertions — and additionally
+`cargo test --locked` on ubuntu-stable, windows-latest (msvc) and
+macos-latest, so MSRV-rot and platform regressions surface on push, on
+the same platforms the Release workflow ships binaries from. fmt and
+clippy stay MSRV-only: a newer clippy adds lints, and failing on style
+the pinned toolchain never complained about would be noise, not signal.
 
 `tools/lsp_smoke_test.py` drives the real binary over stdio and prints what
 each request returned; run it from the repository root. Beyond printing, it

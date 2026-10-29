@@ -579,12 +579,31 @@ mod tests {
     use crate::analysis::ObjectScope;
     use lsp_types::Position;
 
-    fn open_text(index: &WorkspaceIndex, path: &str, text: &str) -> Url {
-        let uri = Url::from_file_path(path).unwrap();
+    /// URI key for a document that never touches disk. A literal
+    /// `/tmp/x` path panics `Url::from_file_path` on Windows (no drive
+    /// component), and for these tests the URI is only ever an index key
+    /// — a `file:///` URL parses identically on every platform.
+    fn key_uri(name: &str) -> Url {
+        Url::parse(&format!("file:///mqsc-test/{name}")).unwrap()
+    }
+
+    fn open_uri(index: &WorkspaceIndex, uri: Url, text: &str) -> Url {
         let tree = analysis::parse(text);
         let defs = analysis::collect_definitions(&tree, text.as_bytes(), Model::load());
         index.open(uri.clone(), text.to_string(), tree, defs);
         uri
+    }
+
+    /// An in-memory document under a key URI (nothing on disk).
+    fn open_text(index: &WorkspaceIndex, name: &str, text: &str) -> Url {
+        open_uri(index, key_uri(name), text)
+    }
+
+    /// An in-memory document standing for a REAL file: the URI must be
+    /// the disk URI, so close()/watch-event paths resolve it to the path.
+    fn open_disk(index: &WorkspaceIndex, path: &Path, text: &str) -> Url {
+        let uri = Url::from_file_path(path).unwrap();
+        open_uri(index, uri, text)
     }
 
     /// Two scripts: `a` defines a queue, `b` defines an alias that
@@ -592,10 +611,10 @@ mod tests {
     /// the namespace split the whole index joins on.
     fn fixture() -> (WorkspaceIndex, Url, Url) {
         let index = WorkspaceIndex::default();
-        let a = open_text(&index, "/tmp/a.mqsc", "DEFINE QLOCAL(AA)\n");
+        let a = open_text(&index, "a.mqsc", "DEFINE QLOCAL(AA)\n");
         let b = open_text(
             &index,
-            "/tmp/b.mqsc",
+            "b.mqsc",
             "DEFINE QALIAS(AL) TARGET(AA)\nDEFINE CHANNEL(AA) CHLTYPE(SDR) TRPTYPE(TCP)\n",
         );
         (index, a, b)
@@ -720,9 +739,9 @@ mod tests {
     #[test]
     fn reopening_replaces_the_entry() {
         let (index, _a, _b) = fixture();
-        open_text(&index, "/tmp/a.mqsc", "DEFINE QLOCAL(AA2)\n");
+        open_text(&index, "a.mqsc", "DEFINE QLOCAL(AA2)\n");
         assert_eq!(index.len(), 2, "replace, not duplicate");
-        let for_a = index.external_defs(&Url::from_file_path("/tmp/b.mqsc").unwrap());
+        let for_a = index.external_defs(&key_uri("b.mqsc"));
         assert!(for_a.names.contains("AA2"), "didChange is visible at once");
         assert!(!for_a.names.contains("AA"), "the old define is gone");
         assert!(for_a.from_other_files, "a contributes defines");
@@ -769,7 +788,7 @@ mod tests {
         let index = WorkspaceIndex::default();
         let out = collect_scan(std::slice::from_ref(&dir), &WorkspaceScan::default());
         assert_eq!(index.merge_scanned(out.files), 1);
-        let a = open_text(&index, "/tmp/closed-a.mqsc", "DEFINE QLOCAL(DDQ)\n");
+        let a = open_text(&index, "closed-a.mqsc", "DEFINE QLOCAL(DDQ)\n");
 
         // hint 12 / completion: the closed DEFINE silences references
         let ext = index.external_defs(&a);
@@ -795,7 +814,7 @@ mod tests {
         index.merge_scanned(
             collect_scan(std::slice::from_ref(&dir), &WorkspaceScan::default()).files,
         );
-        open_text(&index, "/tmp/rename-a.mqsc", "DEFINE QLOCAL(AA)\n");
+        open_text(&index, "rename-a.mqsc", "DEFINE QLOCAL(AA)\n");
 
         // PR 8: watched entries are as fresh as the disk, so the mass edit
         // covers both sides — the same sites references reports, no more and
@@ -833,7 +852,7 @@ mod tests {
         let dir = temp_ws("watch");
         let cfg = WorkspaceScan::default();
         let index = WorkspaceIndex::default();
-        let other = open_text(&index, "/tmp/watch-other.mqsc", "DEFINE QLOCAL(O)\n");
+        let other = open_text(&index, "watch-other.mqsc", "DEFINE QLOCAL(O)\n");
 
         // created after startup: the new DEFINE resolves for the open doc
         let fresh = dir.join("fresh.mqsc");
@@ -881,8 +900,8 @@ mod tests {
         std::fs::write(&disk, "DEFINE QLOCAL(DISK)\n").unwrap();
         let uri = Url::from_file_path(&disk).unwrap();
         let index = WorkspaceIndex::default();
-        let other = open_text(&index, "/tmp/watch-other2.mqsc", "DEFINE QLOCAL(O)\n");
-        open_text(&index, disk.to_str().unwrap(), "DEFINE QLOCAL(BUF)\n");
+        let other = open_text(&index, "watch-other2.mqsc", "DEFINE QLOCAL(O)\n");
+        open_disk(&index, &disk, "DEFINE QLOCAL(BUF)\n");
 
         // saving an open file makes the client fire a watched event for it;
         // the buffer (which may hold unsaved edits) must stay the truth
@@ -920,7 +939,7 @@ mod tests {
         let dir = temp_ws("watch-filters");
         let cfg = WorkspaceScan::default();
         let index = WorkspaceIndex::default();
-        let other = open_text(&index, "/tmp/watch-other3.mqsc", "DEFINE QLOCAL(O)\n");
+        let other = open_text(&index, "watch-other3.mqsc", "DEFINE QLOCAL(O)\n");
 
         std::fs::create_dir_all(dir.join("target")).unwrap();
         let in_target = dir.join("target").join("gen.mqsc");
@@ -1000,7 +1019,7 @@ mod tests {
         let dir = temp_ws("watch-type4");
         let cfg = WorkspaceScan::default();
         let index = WorkspaceIndex::default();
-        let other = open_text(&index, "/tmp/watch-other4.mqsc", "DEFINE QLOCAL(O)\n");
+        let other = open_text(&index, "watch-other4.mqsc", "DEFINE QLOCAL(O)\n");
         let f = dir.join("t.mqsc");
         std::fs::write(&f, "DEFINE QLOCAL(T4)\n").unwrap();
         // built from the wire form: FileChangeType's i32 is private, and 4
@@ -1026,10 +1045,10 @@ mod tests {
         std::fs::write(&disk, "DEFINE QLOCAL(DISK)\n").unwrap();
         let uri = Url::from_file_path(&disk).unwrap();
         let index = WorkspaceIndex::default();
-        let other = open_text(&index, "/tmp/override-other.mqsc", "DEFINE QLOCAL(O)\n");
+        let other = open_text(&index, "override-other.mqsc", "DEFINE QLOCAL(O)\n");
 
         // while open, the BUFFER is the truth — disk content must not leak
-        open_text(&index, disk.to_str().unwrap(), "DEFINE QLOCAL(BUF)\n");
+        open_disk(&index, &disk, "DEFINE QLOCAL(BUF)\n");
         let ext = index.external_defs(&other);
         assert!(ext.names.contains("BUF") && !ext.names.contains("DISK"));
 
@@ -1053,7 +1072,7 @@ mod tests {
         std::fs::write(&disk, "DEFINE QLOCAL(DISK)\n").unwrap();
         let uri = Url::from_file_path(&disk).unwrap();
         let index = WorkspaceIndex::default();
-        open_text(&index, disk.to_str().unwrap(), "DEFINE QLOCAL(BUF)\n");
+        open_disk(&index, &disk, "DEFINE QLOCAL(BUF)\n");
         let out = collect_scan(std::slice::from_ref(&dir), &WorkspaceScan::default());
         assert_eq!(index.merge_scanned(out.files.clone()), 0, "open entry wins");
         assert_eq!(index.merge_scanned(out.files), 0, "still one entry");
@@ -1066,9 +1085,9 @@ mod tests {
     #[test]
     fn close_of_missing_file_drops_the_entry() {
         let index = WorkspaceIndex::default();
-        let gone = "/tmp/mqsc-lsp-nonexistent-should-not-exist.mqsc";
-        open_text(&index, gone, "DEFINE QLOCAL(X)\n");
-        assert!(index.close(&Url::from_file_path(gone).unwrap()));
+        let gone = std::env::temp_dir().join("mqsc-lsp-nonexistent-should-not-exist.mqsc");
+        open_disk(&index, &gone, "DEFINE QLOCAL(X)\n");
+        assert!(index.close(&Url::from_file_path(&gone).unwrap()));
         assert_eq!(index.total(), 0, "no disk file to fall back to");
     }
 }

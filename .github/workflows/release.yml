@@ -1,46 +1,190 @@
 name: Release
 
-# Tag convention (T-22): push a tag `vX.Y.Z` to publish a GitHub Release
-# with the prebuilt linux x86-64 binary — the "standalone binary" promise
-# from the README. Version numbers must match server/Cargo.toml and
-# editors/vscode/extension/package.json (CHANGELOG.md is updated in the
-# same commit as the version bumps).
+# Tag convention: push a tag `vX.Y.Z` to publish a GitHub Release carrying
+# the server binaries for every platform the extension can use (patch.md
+# Phase 5): linux x86_64/aarch64, windows msvc x86_64, macos x86_64/aarch64,
+# plus the packaged VSIX. The version check is the first job: the tag,
+# server/Cargo.toml and editors/vscode/extension/package.json must agree,
+# so a release can never advertise artifacts it did not build (CHANGELOG.md
+# is updated in the same commit as the version bumps).
+# Every platform builds on its own hosted runner with the pinned MSRV
+# (1.75) — the `=` dependency pins make the release exactly reproducible
+# with what CI's full gates ran; no cross-linkers to bit-rot.
 
 on:
   push:
     tags:
       - "v*"
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  release:
-    name: build and publish linux x86-64 binary
+  check-version:
+    name: tag / Cargo.toml / package.json agree
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: versions agree with the tag
+        run: python3 tools/check_versions.py "$GITHUB_REF_NAME"
 
+  linux-x86_64:
+    name: binary x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    needs: check-version
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.75.0
-
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
       - name: Build release binary
         working-directory: server
-        run: cargo build --release
-
+        run: cargo build --release --locked
       - name: Smoke-test the exact artifact
         run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
-
       - name: Package
         run: |
           strip server/target/release/mqsc-lsp
-          tar -C server/target/release -czf "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-linux.tar.gz" mqsc-lsp
-          sha256sum "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-linux.tar.gz" > SHA256SUMS
+          tar -C server/target/release -czf \
+            "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" mqsc-lsp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: mqsc-lsp-*-x86_64-unknown-linux-gnu.tar.gz
 
+  linux-aarch64:
+    name: binary aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04-arm
+    needs: check-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build release binary (native on the arm runner)
+        working-directory: server
+        run: cargo build --release --locked
+      - name: Smoke-test the exact artifact
+        run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
+      - name: Package
+        run: |
+          strip server/target/release/mqsc-lsp
+          tar -C server/target/release -czf \
+            "mqsc-lsp-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz" mqsc-lsp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: mqsc-lsp-*-aarch64-unknown-linux-gnu.tar.gz
+
+  windows-x86_64:
+    name: binary x86_64-pc-windows-msvc
+    runs-on: windows-latest
+    needs: check-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build release binary
+        working-directory: server
+        run: cargo build --release --locked
+      - name: "Package (zip: the Windows convention)"
+        shell: pwsh
+        run: |
+          Compress-Archive -Path server\target\release\mqsc-lsp.exe `
+            -DestinationPath "mqsc-lsp-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: mqsc-lsp-*-x86_64-pc-windows-msvc.zip
+
+  macos:
+    name: binaries apple-darwin (x86_64 + aarch64)
+    runs-on: macos-14
+    needs: check-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      # macos-14 is an arm64 runner: aarch64 is native, x86_64 cross-builds
+      # against the same SDK (one clang, -arch handled by cargo's target).
+      - name: Build both release binaries
+        working-directory: server
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+      - name: Smoke-test the native (arm64) artifact
+        run: python3 tools/lsp_smoke_test.py \
+          server/target/aarch64-apple-darwin/release/mqsc-lsp
+      - name: Package
+        run: |
+          for arch in aarch64 x86_64; do
+            strip "server/target/${arch}-apple-darwin/release/mqsc-lsp"
+            tar -C "server/target/${arch}-apple-darwin/release" -czf \
+              "mqsc-lsp-${GITHUB_REF_NAME}-${arch}-apple-darwin.tar.gz" mqsc-lsp
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: mqsc-lsp-*-apple-darwin.tar.gz
+
+  vsix:
+    name: package the VS Code extension
+    runs-on: ubuntu-latest
+    needs: check-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install extension dependencies
+        working-directory: editors/vscode/extension
+        run: npm ci
+      - name: Extension behavior gate (server resolution)
+        run: node tools/extension_resolve_test.js
+      - name: vsce package
+        working-directory: editors/vscode/extension
+        run: npx --yes @vscode/vsce package --allow-star-activation
+      - name: Rename to carry the release tag
+        working-directory: editors/vscode/extension
+        run: mv mqsc-lsp-vscode-*.vsix "mqsc-lsp-${GITHUB_REF_NAME}-vscode.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-vsix
+          path: editors/vscode/extension/mqsc-lsp-*-vscode.vsix
+
+  release:
+    name: publish with SHA256SUMS
+    runs-on: ubuntu-latest
+    needs: [check-version, linux-x86_64, linux-aarch64, windows-x86_64, macos, vsix]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: One checksum file for everything
+        run: |
+          cd dist
+          sha256sum mqsc-lsp-* > SHA256SUMS
+          cat SHA256SUMS
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            mqsc-lsp-*-x86_64-linux.tar.gz
-            SHA256SUMS
+          files: dist/*
           generate_release_notes: true

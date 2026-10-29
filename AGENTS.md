@@ -137,6 +137,8 @@ tree-sitter generate --abi 14                       # only after editing grammar
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
 python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session
 python3 tools/check_model.py                        # model byte-reproducibility guard
+python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json (= tag) guard
+node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
 ```
 
 - `lsp_smoke_test.py` is **assertive**: it checks quickfixes, script-defined
@@ -209,8 +211,33 @@ python3 tools/check_model.py                        # model byte-reproducibility
   downgrade recipe above instead of installing a newer toolchain.
 - No cargo workspace, no npm package scaffolding for the grammar (the
   tree-sitter CLI is installed directly, see above), no formatter
-  config beyond rustfmt defaults, no extension build tooling. `server/` is a
-  single standalone crate. CI **does** exist now (`.github/workflows/ci.yml`,
-  rust 1.75 pinned: fmt/clippy `-D warnings`/test/release build/smoke/
-  model-guard/`--check` CLI gate with exact exit codes) — keep its gates
-  green; rustfmt and clippy components are installed locally too.
+  config beyond rustfmt defaults. `server/` is a single standalone crate.
+  CI **does** exist and now runs a matrix (`.github/workflows/ci.yml`):
+  the FULL gate set (fmt/clippy `-D warnings`/test/release build/both
+  smokes/model+version guards/extension resolver test/`--check` CLI gate
+  with exact exit codes) on rust 1.75, plus `cargo test --locked` on
+  ubuntu-stable, windows-latest and macos-latest — keep every gate green;
+  fmt/clippy are deliberately MSRV-only (newer clippies add lints we did
+  not choose). rustfmt and clippy components are installed locally too.
+- **PR 10 release/distribution facts** (all enforced, none inferable from
+  the code): `release.yml` builds five MSRV-pinned binaries on their own
+  runners — linux x86_64, linux aarch64 (`ubuntu-24.04-arm`), windows msvc,
+  macos aarch64 + x86_64 (cross on the arm `macos-14` runner) — packages
+  the VSIX (`npm ci` + vsce, `package-lock.json` is committed) and
+  publishes one Release with a `SHA256SUMS`; the tag is the version gate:
+  `tools/check_versions.py` fails if tag / Cargo.toml / extension
+  package.json diverge, so a version bump touches all three plus
+  CHANGELOG in one commit. The extension finds its server in
+  `client/extension.js` `resolveServer` (explicit path honored exactly or
+  failing loudly with guidance → PATH → fixed candidate list → release-
+  page guidance); that candidate list is documented in three places
+  (setting description, extension README, resolver error message) and
+  pinned by `tools/extension_resolve_test.js` — change it in all four.
+  Marketplace publishing stays deferred (publisher id is set; the VSIX on
+  the Release is the distribution channel for now).
+- **Windows portability rule for tests**: `Url::from_file_path("/tmp/x")`
+  panics on Windows (drive-less path). Index-only documents in
+  `workspace.rs` tests go through the `key_uri`/`open_text` helpers (which
+  parse `file:///…` URLs), anything standing for a real file goes through
+  `open_disk` with a `temp_ws` path. The CI windows job is the only
+  enforcer — a literal `/tmp` string reappearing in a test turns it red.

@@ -4,7 +4,13 @@
   "description": "IBM MQ MQSC script support — diagnostics, completion, navigation and quickfixes via the mqsc-lsp server (tree-sitter based). Requires the mqsc-lsp binary.",
   "version": "0.1.0",
   "license": "MIT",
-  "publisher": "REPLACE-WITH-YOUR-PUBLISHER",
+  "publisher": "nils-gg",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nils-gg/mqsc-lsp.git"
+  },
+  "bugs": "https://github.com/nils-gg/mqsc-lsp/issues",
+  "homepage": "https://github.com/nils-gg/mqsc-lsp#readme",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -42,7 +48,7 @@
         "mqsc.server.path": {
           "type": "string",
           "default": "mqsc-lsp",
-          "markdownDescription": "Path to the `mqsc-lsp` binary (build it with `cargo build --release` in the server directory of the mqsc-lsp repository, or install a release download on your PATH)."
+          "markdownDescription": "Command or absolute path of the `mqsc-lsp` binary. Left at the default `mqsc-lsp`, the extension finds the binary on `PATH` first, then in the common release install directories (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `%LOCALAPPDATA%\\Programs\\mqsc-lsp`); if nothing is found it links to the GitHub Releases page instead of failing silently. Set it to a build (`cargo build --release` in the `server` directory) or an extracted release download to override the search."
         },
         "mqsc.server.logFile": {
           "type": "string",

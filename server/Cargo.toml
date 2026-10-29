@@ -2,6 +2,9 @@
 name = "mqsc-lsp"
 version = "0.1.0"
 edition = "2021"
+# MSRV, deliberately rustc 1.75 (the `=` pins below only resolve there; the
+# CI release matrix builds exactly this toolchain on every platform).
+rust-version = "1.75"
 description = "Language server for IBM MQ MQSC scripts, powered by a tree-sitter grammar"
 license = "MIT"
 
