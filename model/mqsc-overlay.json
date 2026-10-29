@@ -370,6 +370,104 @@
             "name": "REPLACE",
             "kind": "flag",
             "optional": true
+          },
+          {
+            "name": "BRIDGE",
+            "kind": "enum",
+            "values": [
+              "DISABLED",
+              "ENABLED"
+            ],
+            "optional": true,
+            "description": "MQI bridge control for this COMMINFO (railroad: DISABLED | ENABLED; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "CCSID",
+            "kind": "enum",
+            "values": [
+              "ASPUB",
+              "integer"
+            ],
+            "optional": true,
+            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "COMMEV",
+            "kind": "enum",
+            "values": [
+              "DISABLED",
+              "ENABLED",
+              "EXCEPTION"
+            ],
+            "optional": true,
+            "description": "Publish command events for commands run under this COMMINFO (railroad: DISABLED | ENABLED | EXCEPTION; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "ENCODING",
+            "kind": "enum",
+            "values": [
+              "ASPUB",
+              "NORMAL",
+              "REVERSED",
+              "S390",
+              "TNS",
+              "integer"
+            ],
+            "optional": true,
+            "description": "Encoding used by the MQI bridge (railroad: ASPUB | NORMAL | REVERSED | S390 | TNS | integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "LIKE",
+            "kind": "string",
+            "optional": true,
+            "description": "Existing object whose attributes are copied (railroad: comminfo_name; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MCHBINT",
+            "kind": "integer",
+            "optional": true,
+            "description": "Interval for MQI bridge management heartbeat (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MCPROP",
+            "kind": "enum",
+            "values": [
+              "REPLY",
+              "USER",
+              "COMPAT",
+              "NONE",
+              "ALL"
+            ],
+            "optional": true,
+            "description": "Control of publish/subscribe property conversion (railroad: REPLY | USER | COMPAT | NONE | ALL; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MONINT",
+            "kind": "integer",
+            "optional": true,
+            "description": "Interval at which monitor data is generated (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MSGHIST",
+            "kind": "integer",
+            "optional": true,
+            "description": "Number of messages retained in the publish/subscribe history (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "NOREPLACE",
+            "kind": "flag",
+            "optional": true,
+            "description": "Fail rather than replace the existing object (railroad: FLAG; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "NSUBHIST",
+            "kind": "enum",
+            "values": [
+              "NONE",
+              "ALL"
+            ],
+            "optional": true,
+            "description": "Number of non-persistent subscriptions retained in history (railroad: NONE | ALL; oracle MQ 10.0.1)"
           }
         ],
         "attrs": [
@@ -413,6 +511,92 @@
             "name": "CMDSCOPE",
             "kind": "string",
             "optional": true
+          },
+          {
+            "name": "BRIDGE",
+            "kind": "enum",
+            "values": [
+              "DISABLED",
+              "ENABLED"
+            ],
+            "optional": true,
+            "description": "MQI bridge control for this COMMINFO (railroad: DISABLED | ENABLED; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "CCSID",
+            "kind": "enum",
+            "values": [
+              "ASPUB",
+              "integer"
+            ],
+            "optional": true,
+            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "COMMEV",
+            "kind": "enum",
+            "values": [
+              "DISABLED",
+              "ENABLED",
+              "EXCEPTION"
+            ],
+            "optional": true,
+            "description": "Publish command events for commands run under this COMMINFO (railroad: DISABLED | ENABLED | EXCEPTION; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "ENCODING",
+            "kind": "enum",
+            "values": [
+              "ASPUB",
+              "NORMAL",
+              "REVERSED",
+              "S390",
+              "TNS",
+              "integer"
+            ],
+            "optional": true,
+            "description": "Encoding used by the MQI bridge (railroad: ASPUB | NORMAL | REVERSED | S390 | TNS | integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MCHBINT",
+            "kind": "integer",
+            "optional": true,
+            "description": "Interval for MQI bridge management heartbeat (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MCPROP",
+            "kind": "enum",
+            "values": [
+              "REPLY",
+              "USER",
+              "COMPAT",
+              "NONE",
+              "ALL"
+            ],
+            "optional": true,
+            "description": "Control of publish/subscribe property conversion (railroad: REPLY | USER | COMPAT | NONE | ALL; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MONINT",
+            "kind": "integer",
+            "optional": true,
+            "description": "Interval at which monitor data is generated (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "MSGHIST",
+            "kind": "integer",
+            "optional": true,
+            "description": "Number of messages retained in the publish/subscribe history (railroad: integer; oracle MQ 10.0.1)"
+          },
+          {
+            "name": "NSUBHIST",
+            "kind": "enum",
+            "values": [
+              "NONE",
+              "ALL"
+            ],
+            "optional": true,
+            "description": "Number of non-persistent subscriptions retained in history (railroad: NONE | ALL; oracle MQ 10.0.1)"
           }
         ],
         "attrs": [],
@@ -1342,6 +1526,105 @@
           "name": "CLNTAUTH",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "AUTHMODE",
+          "kind": "enum",
+          "values": [
+            "QMGR",
+            "JAAS"
+          ],
+          "optional": true,
+          "description": "JAAS authentication mode for MQTT/AMQP channels (railroad: QMGR | JAAS; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "BACKLOG",
+          "kind": "integer",
+          "optional": true,
+          "description": "Maximum backlog (in-doubt message count) the channel tolerates (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "BATCHLIM",
+          "kind": "integer",
+          "optional": true,
+          "description": "Batch size limit in bytes for channel message batching (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFRECON",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES",
+            "QMGR",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Default reconnect behaviour for client connections to this channel (railroad: NO | YES | QMGR | DISABLED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "JAASCFG",
+          "kind": "string",
+          "optional": true,
+          "description": "JAAS configuration stanza name (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "PROTOCOL",
+          "kind": "string",
+          "optional": true,
+          "description": "Protocol version accepted by this MQTT channel (railroad: MQTTV3, MQTTV311, MQTTV5, HTTP; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLKEYP",
+          "kind": "string",
+          "optional": true,
+          "description": "Password protecting the channel's private key (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLKEYR",
+          "kind": "string",
+          "optional": true,
+          "description": "Key repository (keyring or stash file) for this channel (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLQS",
+          "kind": "enum",
+          "values": [
+            "NONE",
+            "HYBMLKEM",
+            "MLKEM"
+          ],
+          "optional": true,
+          "description": "Post-quantum key transport scheme for this channel (railroad: NONE | HYBMLKEM | MLKEM; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLQSR",
+          "kind": "enum",
+          "values": [
+            "OPTIONAL",
+            "REQUIRED"
+          ],
+          "optional": true,
+          "description": "Whether post-quantum key transport is required from clients (railroad: OPTIONAL | REQUIRED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "USECLTID",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Use the client's identity for authorization (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "USEDLQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Dead-letter queue handling of undeliverable messages on this channel (railroad: YES | NO; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -1395,6 +1678,123 @@
           "name": "CLNTAUTH",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "AUTHMODE",
+          "kind": "enum",
+          "values": [
+            "QMGR",
+            "JAAS"
+          ],
+          "optional": true,
+          "description": "JAAS authentication mode for MQTT/AMQP channels (railroad: QMGR | JAAS; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "BACKLOG",
+          "kind": "integer",
+          "optional": true,
+          "description": "Maximum backlog (in-doubt message count) the channel tolerates (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "BATCHLIM",
+          "kind": "integer",
+          "optional": true,
+          "description": "Batch size limit in bytes for channel message batching (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFRECON",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES",
+            "QMGR",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Default reconnect behaviour for client connections to this channel (railroad: NO | YES | QMGR | DISABLED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "JAASCFG",
+          "kind": "string",
+          "optional": true,
+          "description": "JAAS configuration stanza name (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOREPLACE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Fail rather than replace the existing object (railroad: FLAG; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "PROTOCOL",
+          "kind": "enum",
+          "optional": true,
+          "description": "Protocol version accepted by this MQTT channel (railroad: MQTTV3, MQTTV311, MQTTV5, HTTP; oracle MQ 10.0.1)",
+          "values": [
+            "MQTTV3",
+            "MQTTV311",
+            "MQTTV5",
+            "HTTP"
+          ]
+        },
+        {
+          "name": "REPLACE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Replace the object if it already exists (railroad: FLAG; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLKEYP",
+          "kind": "string",
+          "optional": true,
+          "description": "Password protecting the channel's private key (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLKEYR",
+          "kind": "string",
+          "optional": true,
+          "description": "Key repository (keyring or stash file) for this channel (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLQS",
+          "kind": "enum",
+          "values": [
+            "NONE",
+            "HYBMLKEM",
+            "MLKEM"
+          ],
+          "optional": true,
+          "description": "Post-quantum key transport scheme for this channel (railroad: NONE | HYBMLKEM | MLKEM; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SSLQSR",
+          "kind": "enum",
+          "values": [
+            "OPTIONAL",
+            "REQUIRED"
+          ],
+          "optional": true,
+          "description": "Whether post-quantum key transport is required from clients (railroad: OPTIONAL | REQUIRED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "USECLTID",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Use the client's identity for authorization (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "USEDLQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Dead-letter queue handling of undeliverable messages on this channel (railroad: YES | NO; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -1487,6 +1887,115 @@
           "name": "FORCE",
           "kind": "flag",
           "optional": true
+        },
+        {
+          "name": "ACTVTRC",
+          "kind": "enum",
+          "values": [
+            "ON",
+            "OFF"
+          ],
+          "optional": true,
+          "description": "Enable or disable active tracing on this queue manager (railroad: ON | OFF; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHEVSC",
+          "kind": "enum",
+          "values": [
+            "FAILURES",
+            "ALLCONNS",
+            "ALLCHECKS"
+          ],
+          "optional": true,
+          "description": "Scope of authorization events produced (railroad: FAILURES | ALLCONNS | ALLCHECKS; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CERTVPOL",
+          "kind": "enum",
+          "values": [
+            "ANY",
+            "RFC5280"
+          ],
+          "optional": true,
+          "description": "X.509 certificate validation policy (railroad: ANY | RFC5280; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CUSTOM",
+          "kind": "string",
+          "optional": true,
+          "description": "Customer-defined string stored with the object (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFCLXQ",
+          "kind": "enum",
+          "values": [
+            "SCTQ",
+            "CHANNEL"
+          ],
+          "optional": true,
+          "description": "Default cluster transmission queue selection method (railroad: SCTQ | CHANNEL; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGINTVL",
+          "kind": "enum",
+          "values": [
+            "integer",
+            "OFF"
+          ],
+          "optional": true,
+          "description": "Interval for image copy processing (railroad: integer | OFF; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVO",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Whether the queue manager overrides image-coverage control (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Image-coverage control queue policy (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "INITKEY",
+          "kind": "string",
+          "optional": true,
+          "description": "Initial key for the object that stores the next key; OLD(NEW) form (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "KEYRPWD",
+          "kind": "string",
+          "optional": true,
+          "description": "Password for the key repository (railroad: string; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "PSCLUS",
+          "kind": "enum",
+          "values": [
+            "ENABLED",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Whether publish/subscribe clustering is enabled (railroad: ENABLED | DISABLED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "REVDNS",
+          "kind": "enum",
+          "values": [
+            "ENABLED",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Reverse DNS lookup of client IP addresses (railroad: ENABLED | DISABLED; oracle MQ 10.0.1)"
         }
       ]
     },
@@ -1578,6 +2087,55 @@
           "name": "OCSPURL",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "AUTHENMD",
+          "kind": "enum",
+          "values": [
+            "OS",
+            "PAM"
+          ],
+          "optional": true,
+          "description": "Authentication method for IDPWOS AUTHINFO (railroad: OS | PAM; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CHCKLOCL",
+          "kind": "enum",
+          "values": [
+            "OPTIONAL",
+            "NONE",
+            "REQDADM",
+            "REQUIRED"
+          ],
+          "optional": true,
+          "description": "When to check local (user registry) identity (railroad: OPTIONAL | NONE | REQDADM | REQUIRED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "FAILDLAY",
+          "kind": "integer",
+          "optional": true,
+          "description": "Delay before re-trying a failed LDAP connection (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NESTGRP",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES"
+          ],
+          "optional": true,
+          "description": "Whether nested groups are searched in the LDAP directory (railroad: NO | YES; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SECCOMM",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES",
+            "ANON"
+          ],
+          "optional": true,
+          "description": "TLS enforcement for LDAP communication (railroad: NO | YES | ANON; oracle MQ 10.0.1)"
         }
       ]
     },
@@ -1669,6 +2227,55 @@
           "name": "OCSPURL",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "AUTHENMD",
+          "kind": "enum",
+          "values": [
+            "OS",
+            "PAM"
+          ],
+          "optional": true,
+          "description": "Authentication method for IDPWOS AUTHINFO (railroad: OS | PAM; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CHCKLOCL",
+          "kind": "enum",
+          "values": [
+            "OPTIONAL",
+            "NONE",
+            "REQDADM",
+            "REQUIRED"
+          ],
+          "optional": true,
+          "description": "When to check local (user registry) identity (railroad: OPTIONAL | NONE | REQDADM | REQUIRED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "FAILDLAY",
+          "kind": "integer",
+          "optional": true,
+          "description": "Delay before re-trying a failed LDAP connection (railroad: integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NESTGRP",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES"
+          ],
+          "optional": true,
+          "description": "Whether nested groups are searched in the LDAP directory (railroad: NO | YES; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SECCOMM",
+          "kind": "enum",
+          "values": [
+            "NO",
+            "YES",
+            "ANON"
+          ],
+          "optional": true,
+          "description": "TLS enforcement for LDAP communication (railroad: NO | YES | ANON; oracle MQ 10.0.1)"
         }
       ]
     },
@@ -1910,6 +2517,44 @@
           "name": "REPLACE",
           "kind": "flag",
           "optional": true
+        }
+      ]
+    },
+    "ALTER LISTENER": {
+      "add_params": [
+        {
+          "name": "TRPTYPE",
+          "kind": "enum",
+          "optional": true,
+          "description": "Transport type of this listener (railroad: LU62; oracle MQ 10.0.1)",
+          "values": [
+            "TCP",
+            "SPX",
+            "NETBIOS",
+            "LU62"
+          ]
+        }
+      ]
+    },
+    "CLEAR TOPICSTR": {
+      "add_params": [
+        {
+          "name": "CLRTYPE",
+          "kind": "enum",
+          "optional": true,
+          "description": "What is cleared (retained publications) (railroad: RETAINED; oracle MQ 10.0.1)",
+          "values": [
+            "RETAINED"
+          ]
+        },
+        {
+          "name": "SCOPE",
+          "kind": "enum",
+          "optional": true,
+          "description": "Scope of the clear (railroad: LOCAL; oracle MQ 10.0.1)",
+          "values": [
+            "LOCAL"
+          ]
         }
       ]
     }
