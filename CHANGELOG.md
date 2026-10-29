@@ -8,6 +8,33 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Command-level availability (diagnostic 15 grows up): a fourth curated
+  overlay section, `command_availability`, flags whole `VERB OBJECT`
+  commands that the configured `mqsc.targetVersion`/`mqsc.platform` does
+  not have — the CFSTRUCT/BUFFPOOL/PSID/STGCLASS/TRACE/CHINIT/CMDSERV/…
+  z/OS families, `MOVE QLOCAL`, `START`/`STOP QMGR`, and the
+  `since: 9.0` floor of the CHLAUTH family. The 52 rules are the live
+  MQ 10.0.1 oracle's own verdict (`tools/mq_oracle_check.py`: the pairs
+  distributed runmqsc's command lists lack are z/OS-only), with the same
+  settings gate as the parameter rules — with no target configured
+  nothing is ever consulted (the corpus stays byte-identical). Hover's
+  command card shows the curated facts regardless of target, and a guard
+  test insists every rule targets a command the model can resolve.
+- The model is now oracle-verified against a live IBM MQ 10.0.1
+  installation (campaign B1–B7, see README): the overlay gained the 11
+  commands 10.0.1 accepts but the 2011 reference missed (`DISPLAY
+  TCLUSTER`/`APSTATUS`/`AUTHREC`/`AUTHSERV`/`ENTAUTH`, `PURGE CHANNEL`,
+  `SET`/`DELETE`/`DISPLAY POLICY`, `DELETE COMMINFO`/`AUTHREC`) plus the
+  `SERVCOMP` and `ENFORCE`/`TOLERATE` parameters, corrected
+  false-flagging enums and value kinds (`DEFPRESP`, the MSGDATA-family
+  `Enum(["* ,"])`, `CLUSNL`/`CLUSTER` as name strings, oracle values for
+  `DEFBIND`/`COMPMSG`/`SSLCAUTH`/…), and lost entries the parser
+  disproves (fabricated `SET CHLAUTH ACTION(DELETE)`, TOPIC
+  `ASPARENT`/`NOLIMIT` phantoms, `ALTER SUB` PSCLR* family, …). The
+  server's static `VERBS` list also gained `PURGE` and `MODIFY` — it
+  silently dropped commands under unknown verbs, which had killed the
+  overlay's own `MODIFY CHLAUTH`; loading now warns and a test pins the
+  contract.
 - Release engineering (Phase 5 / PR 10): the Release workflow now builds
   the server on every shipped platform with the pinned MSRV toolchain —
   `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
