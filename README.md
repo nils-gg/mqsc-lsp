@@ -371,6 +371,21 @@ non-zero when a check fails.
   property rules (diagnostic 14), and the per-parameter `availability`
   table behind diagnostic 15 (version/platform, consulted only when a
   target is configured).
+- **The overlay is oracle-verified**: `tools/mq_oracle_check.py` diffs the
+  model against a live IBM MQ 10.0.1 installation (`runmqsc` never executes
+  a failing parse, so probing is safe) — every verb×object pair's parameter
+  names, value sets and kinds from the queue manager's own AMQ8427I railroad
+  output. Where the two disagree, the parser wins: the campaign behind this
+  tool added the 11 commands 10.0.1 accepts but the 2011 reference missed
+  (`DISPLAY TCLUSTER`/`APSTATUS`/`AUTHREC`/`AUTHSERV`/`ENTAUTH`,
+  `PURGE CHANNEL`, `SET`/`DELETE`/`DISPLAY POLICY`, `DELETE COMMINFO`/
+  `AUTHREC`), corrected enum extraction artifacts and false-flagging kinds,
+  and deleted curated entries the parser disproves. Model extras the
+  distributed parser lacks are kept on purpose: they are genuine z/OS or
+  legacy spellings (the gitignored `dmpmqcfg` corpus is the second witness),
+  and one deliberate exception is `CMDSCOPE` — runmqsc on a local bind
+  structurally removes that keyword from its parser, so the oracle is blind
+  to it and its rejection is not disproof.
 - **Model gaps are warnings, never errors.** The extractor recovers some
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
