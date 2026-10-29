@@ -130,16 +130,6 @@
             "optional": true
           },
           {
-            "name": "GENERIC",
-            "kind": "enum",
-            "values": [
-              "NO",
-              "ONLY",
-              "YES"
-            ],
-            "optional": true
-          },
-          {
             "name": "GROUP",
             "kind": "string",
             "optional": true
@@ -206,11 +196,6 @@
             "optional": true
           },
           {
-            "name": "USERSRCID",
-            "kind": "string",
-            "optional": true
-          },
-          {
             "name": "ACTION",
             "kind": "enum",
             "values": [
@@ -238,11 +223,6 @@
           },
           {
             "name": "SSLPEER",
-            "kind": "string",
-            "optional": true
-          },
-          {
-            "name": "SSLCERT",
             "kind": "string",
             "optional": true
           },
@@ -748,15 +728,6 @@
               "USERMAP",
               "QMGRMAP"
             ]
-          },
-          {
-            "name": "DETAIL",
-            "kind": "enum",
-            "values": [
-              "BASIC",
-              "FULL"
-            ],
-            "optional": true
           },
           {
             "name": "MATCH",
@@ -1924,18 +1895,6 @@
           "description": "Cluster routing of published messages on this topic (railroad: DIRECT | TOPICHOST; oracle MQ 10.0.1)"
         },
         {
-          "name": "ASPARENT",
-          "kind": "flag",
-          "optional": true,
-          "description": "Inherit unset attributes from the parent topic (oracle MQ 10.0.1)"
-        },
-        {
-          "name": "NOLIMIT",
-          "kind": "flag",
-          "optional": true,
-          "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
-        },
-        {
           "name": "CAPEXPRY",
           "kind": "enum",
           "values": [
@@ -1997,18 +1956,6 @@
           "description": "Cluster routing of published messages on this topic (railroad: DIRECT | TOPICHOST; oracle MQ 10.0.1)"
         },
         {
-          "name": "ASPARENT",
-          "kind": "flag",
-          "optional": true,
-          "description": "Inherit unset attributes from the parent topic (oracle MQ 10.0.1)"
-        },
-        {
-          "name": "NOLIMIT",
-          "kind": "flag",
-          "optional": true,
-          "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
-        },
-        {
           "name": "CAPEXPRY",
           "kind": "enum",
           "values": [
@@ -2055,11 +2002,6 @@
             "AUTO",
             "integer"
           ],
-          "optional": true
-        },
-        {
-          "name": "CLNTAUTH",
-          "kind": "string",
           "optional": true
         },
         {
@@ -2254,11 +2196,6 @@
             "AUTO",
             "integer"
           ],
-          "optional": true
-        },
-        {
-          "name": "CLNTAUTH",
-          "kind": "string",
           "optional": true
         },
         {
@@ -3234,33 +3171,8 @@
     "ALTER SUB": {
       "add_params": [
         {
-          "name": "PSCLRSYS",
-          "kind": "enum",
-          "values": [
-            "ALL",
-            "NONE",
-            "PUB"
-          ],
-          "optional": true
-        },
-        {
-          "name": "PSCTLCASE",
-          "kind": "string",
-          "optional": true
-        },
-        {
-          "name": "PSMSGID",
-          "kind": "string",
-          "optional": true
-        },
-        {
           "name": "PUBSCOPE",
           "kind": "string",
-          "optional": true
-        },
-        {
-          "name": "REPLACE",
-          "kind": "flag",
           "optional": true
         },
         {
