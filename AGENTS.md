@@ -40,18 +40,32 @@ the full picture; this file only lists what is easy to get wrong.
   registers a name under **every** type that DEFINEs it (the flat `names`
   set must not gate it — a QLOCAL and a CHANNEL named alike both need
   listing, or code-12 and completion lose the second type).
-- `workspace.rs` owns the workspace index: one `OpenDoc { text, tree, defs }`
-  per open document (`Tree` is Send-but-not-Sync, hence the per-tree
-  `Mutex`; `defs` is the doc's own DEFINE index, making the T-17 cross-file
-  view a cheap merge). ALL cross-document merge/join loops live there —
-  diagnostics' `external_defs`, hover's define map, definition/references/
-  rename `sites`/`rename_sites` (joined on `SymbolKey` = name+namespace),
-  and `definitions()` for workspace/symbol; PR 7 (closed `*.mqsc` files,
-  open-doc override) and PR 8 (watched reindex) extend that module, not
-  `server.rs`. `server.rs` is protocol-only on top of it; handlers receive
-  `(&str, &Tree)` via `with_doc`; never re-parse in a handler and never
-  hold a lock guard across an `.await` (futures must stay Send).
-  Poison-tolerant `rd/wr/mtx` accessors live with the map they guard.
+- `workspace.rs` owns the workspace index: one `Entry { source, defs, sites }`
+  per document, where `source` is `Open { text, tree: Mutex }` (editor
+  document; `Tree` is Send-but-not-Sync, hence the per-tree `Mutex`) or
+  `Closed` (a scanned workspace file — only `defs` + name sites are kept,
+  never text/tree). `defs`+`sites` are computed once per content, so the
+  T-17 cross-file merge and PR 7's scan cost the same to consumers. ALL
+  cross-document merge/join loops live there — diagnostics' `external_defs`,
+  hover's define map, definition/references/rename `sites`/`rename_sites`
+  (joined on `SymbolKey` = name+namespace), and `definitions()` for
+  workspace/symbol. PR 8 (watched reindex) extends that module, not
+  `server.rs`; `disk_entry(path)` is the per-file entry builder it needs,
+  `collect_scan(roots, cfg)` is the pure walk+parse the server runs via
+  `tokio::task::spawn_blocking` in `initialized` (roots come from
+  `workspace_folders`/`root_uri`, cached in `ws_roots` because the settings
+  that gate the scan only exist at initialize). Two rules to preserve:
+  **open overrides disk** (`merge_scanned` is insert-if-absent, and
+  `close()` re-reads the file so an unsaved buffer cannot haunt the index),
+  and **`rename_sites` is Open-only until PR 8** (a mass edit may not rest
+  on content that is only as fresh as the last scan; references may show a
+  closed site rename will not touch). Because the merge changes what
+  already-open documents resolve, `initialized()` republishes all open
+  documents when it merges. `server.rs` is protocol-only on top of it;
+  handlers receive `(&str, &Tree)` via `with_doc` (which returns `None` for
+  closed entries — full-service needs the buffer); never re-parse in a
+  handler and never hold a lock guard across an `.await` (futures must stay
+  Send). Poison-tolerant `rd/wr/mtx` accessors live with the map they guard.
   Invalidation policy: did_open/did_close refresh **all** documents
   (cross-file defines changed for everyone), did_change refreshes only
   itself — per-keystroke sibling refresh would be quadratic.
@@ -81,6 +95,15 @@ the full picture; this file only lists what is easy to get wrong.
   resolution is the caller's job, pass `Command::object`). Hover/completion
   show the facts unconditionally via `doc_for` ("Availability
   (curated)").
+- `settings::WorkspaceScan` (`mqsc.workspaceIndex.enabled` / `maxFiles` /
+  `exclude`, same nested-or-flat lookup and per-key fallback as `Target`)
+  gates the PR 7 startup scan: default on, 2000 files, `.git`/`target`/
+  `node_modules`/`dist`/`build` excluded, 4 MiB per-file ceiling
+  (`SCAN_MAX_FILE_BYTES`). It is read **once**, in `initialized()` — a
+  `didChangeConfiguration` touching these keys changes nothing until
+  restart (documented in README and in the extension's setting
+  descriptions). The CLI never scans: `--check` output must stay
+  byte-identical to the baseline.
 - `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
   stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
   tower wrapper catches handler panics into `-32603` responses — handlers
@@ -94,10 +117,11 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 108 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 115 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
+python3 tools/workspace_index_smoke.py              # repo root; assertive workspace-scan session
 python3 tools/check_model.py                        # model byte-reproducibility guard
 ```
 
@@ -109,6 +133,17 @@ python3 tools/check_model.py                        # model byte-reproducibility
   binary (`server/target/debug/mqsc-lsp`); pass a binary path as `$1` to
   test release. It runs **whatever binary is on disk** — rebuild first, or a
   stale `target/` silently tests old code.
+- `workspace_index_smoke.py` is the PR 7 companion: it builds a throwaway
+  workspace dir (closed `defs.mqsc`, a `sub/` file, a `target/` file to
+  prove exclusion), runs the server with `workspaceFolders` pointing at it,
+  and asserts hint-12 silence, symbol/hover/definition/references/completion
+  across the closed files, the open-buffer override and the didClose
+  disk fallback — then a second session with `workspaceIndex.enabled=false`
+  proves the gate. Hint 12 is asserted through `TARGET(...)` only: a
+  positional `ALTER QLOCAL(UNKNOWN)` name is **not** a reference and never
+  triggers 12. Both sessions wait for the `workspace scan:` log line before
+  reading diagnostics and take the **last** publish, because the merge
+  republishes.
 - The **tree-sitter CLI 0.27.1 is installed** (`~/.local/bin/tree-sitter`;
   node/npm exist under `/usr/bin`), so `tree-sitter test` works. But never
   run a bare `tree-sitter generate` here: without `--abi 14` it rewrites the

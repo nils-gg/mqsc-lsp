@@ -4,6 +4,7 @@
 //! only the LSP protocol layer on top of it (PR 6 centralization).
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
@@ -13,19 +14,24 @@ use tower_lsp::{async_trait, Client, LanguageServer};
 
 use crate::analysis;
 use crate::model::Model;
-use crate::settings::{apply_diagnostic_settings, diagnostic_settings, Target};
-use crate::workspace::{rd, wr, WorkspaceIndex};
+use crate::settings::{apply_diagnostic_settings, diagnostic_settings, Target, WorkspaceScan};
+use crate::workspace::{self, rd, wr, WorkspaceIndex};
 
 pub struct MqscServer {
     pub client: Client,
-    /// Everything known about object names across documents (open ones
-    /// today; PR 7 adds closed workspace files behind the same API).
+    /// Everything known about object names across documents: open ones
+    /// plus, since PR 7, closed `*.mqsc` files found under the workspace
+    /// roots behind the same API.
     index: WorkspaceIndex,
     /// Client settings, see README "Configuration":
     /// `{"diagnostics": {"CODE_NAME_OR_NUMBER": "error"|"warning"|"information"|"hint"|"off"}}`
     settings: RwLock<Option<serde_json::Value>>,
     /// Whether the client resolves snippet placeholders in completions.
     snippet_support: AtomicBool,
+    /// Filesystem roots of the workspace (from `initialize`), remembered
+    /// for the PR 7 closed-file scan that runs in `initialized` (the scan
+    /// needs the client's settings, which only exist after initialize).
+    ws_roots: RwLock<Vec<PathBuf>>,
 }
 
 impl MqscServer {
@@ -35,17 +41,20 @@ impl MqscServer {
             index: WorkspaceIndex::default(),
             settings: RwLock::new(None),
             snippet_support: AtomicBool::new(false),
+            ws_roots: RwLock::new(Vec::new()),
         }
     }
 
     /// Publish diagnostics for an open document, applying severity overrides.
     /// Uses the document's cached parse tree (callers must have stored it).
-    /// Diagnostics see the DEFINEs of every OTHER open document too (T-17):
-    /// a name defined in a sibling script stops the code-12 hint.
+    /// Diagnostics see the DEFINEs of every OTHER entry in the index too —
+    /// open siblings and scanned workspace files alike (T-17 + PR 7): a
+    /// name defined anywhere else stops the code-12 hint.
     async fn refresh(&self, uri: &Url) {
         let diags = {
             let extra = self.index.external_defs(uri);
             let open_docs = self.index.len();
+            let ws_files = self.index.total();
             let cfg = rd(&self.settings);
             let target = cfg.as_ref().map(Target::from_settings).unwrap_or_default();
             let built = self.index.with_doc(uri, |text, tree| {
@@ -53,10 +62,11 @@ impl MqscServer {
                 let mut diags =
                     analysis::analyze_with_target(text, tree, Model::load(), uri, &extra, &target);
                 crate::tlog!(
-                    "analyze {uri} len={} diags={} open_docs={} in {}ms",
+                    "analyze {uri} len={} diags={} open_docs={} ws_files={} in {}ms",
                     text.len(),
                     diags.len(),
                     open_docs,
+                    ws_files,
                     t0.elapsed().as_millis()
                 );
                 if let Some(map) = cfg.as_ref().and_then(diagnostic_settings) {
@@ -93,7 +103,7 @@ impl MqscServer {
     /// changed for every other document. Not called on did_change — that
     /// would be O(open documents) per keystroke.
     async fn refresh_others(&self, skip: &Url) {
-        for u in self.index.uris_excluding(skip) {
+        for u in self.index.open_uris_excluding(skip) {
             self.refresh(&u).await;
         }
     }
@@ -190,6 +200,26 @@ impl LanguageServer for MqscServer {
             .unwrap_or(false);
         self.snippet_support.store(snippet, Ordering::Relaxed);
 
+        // PR 7: remember where the workspace lives on disk so initialized()
+        // can scan it for closed *.mqsc files. workspace_folders win; the
+        // deprecated rootUri is the fallback for old clients. Both must
+        // resolve to local paths — remote schemes (vscode-remote, ssh) are
+        // skipped, the server cannot read them.
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Some(folders) = params.workspace_folders.as_ref() {
+            for f in folders {
+                if let Ok(p) = f.uri.to_file_path() {
+                    roots.push(p);
+                }
+            }
+        }
+        if roots.is_empty() {
+            if let Some(root) = params.root_uri.as_ref().and_then(|u| u.to_file_path().ok()) {
+                roots.push(root);
+            }
+        }
+        *wr(&self.ws_roots) = roots;
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "mqsc-lsp".into(),
@@ -256,6 +286,66 @@ impl LanguageServer for MqscServer {
         self.client
             .log_message(MessageType::INFO, "MQSC language server ready")
             .await;
+
+        // PR 7: index the workspace's closed *.mqsc files. The walk +
+        // parse is blocking work (fs reads + tree-sitter parses), so it
+        // runs on tokio's blocking pool — the LocalSet must never wait on
+        // a 300-file scan. Settings are read before the await; no lock
+        // guard may cross it (futures must stay Send).
+        let roots = rd(&self.ws_roots).clone();
+        let scan = rd(&self.settings)
+            .as_ref()
+            .map(WorkspaceScan::from_settings)
+            .unwrap_or_default();
+        if !scan.enabled || roots.is_empty() {
+            crate::tlog!(
+                "workspace scan skipped (enabled={}, roots={})",
+                scan.enabled,
+                roots.len()
+            );
+            return;
+        }
+        let max_files = scan.max_files;
+        let t0 = std::time::Instant::now();
+        let outcome =
+            match tokio::task::spawn_blocking(move || workspace::collect_scan(&roots, &scan)).await
+            {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    crate::tlog!("workspace scan failed to run: {e}");
+                    return;
+                }
+            };
+        let added = self.index.merge_scanned(outcome.files);
+        crate::tlog!(
+            "workspace scan: found={} indexed={} merged={} in {}ms",
+            outcome.found,
+            outcome.indexed,
+            added,
+            t0.elapsed().as_millis()
+        );
+        // The scan changes what every ALREADY OPEN document can resolve,
+        // and files opened during startup (before the scan finished) were
+        // published without it — republish so hint 12 cannot survive on a
+        // name the workspace just defined. Same rule as did_open's
+        // refresh-all, for the same reason.
+        if added > 0 {
+            for u in self.index.open_uris() {
+                self.refresh(&u).await;
+            }
+        }
+        if outcome.found > outcome.indexed {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!(
+                        "mqsc-lsp: indexed {}/{} *.mqsc files (mqsc.workspaceIndex.maxFiles = {}); \
+                         some workspace files are not visible to cross-file features",
+                        outcome.indexed, outcome.found, max_files
+                    ),
+                )
+                .await;
+        }
     }
 
     async fn shutdown(&self) -> RpcResult<()> {
@@ -271,7 +361,7 @@ impl LanguageServer for MqscServer {
             Some(params.settings)
         };
         // severities may have changed: republish everything we know about
-        let uris = self.index.uris();
+        let uris = self.index.open_uris();
         for uri in uris {
             self.refresh(&uri).await;
         }
@@ -322,7 +412,10 @@ impl LanguageServer for MqscServer {
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
         crate::tlog!("didClose {}", p.text_document.uri);
         self.index.close(&p.text_document.uri);
-        // the remaining documents lost their external definitions (T-17)
+        // The remaining documents lost (or, PR 7: swap) their external
+        // definitions — the file usually stays in the index as a CLOSED
+        // entry read back from disk, so a sibling that referenced the
+        // on-disk DEFINE keeps seeing it.
         self.refresh_others(&p.text_document.uri).await;
     }
 

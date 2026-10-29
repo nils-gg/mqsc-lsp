@@ -28,6 +28,21 @@ function diagnosticsSettings(cfg) {
 	return out;
 }
 
+/** The `mqsc.workspaceIndex.*` settings, in the shape the server reads.
+ *  PR 7: the server scans the workspace once during `initialized`, so a
+ *  change here only takes effect after a restart (the server logs the
+ *  outcome either way). */
+function workspaceIndexSettings(cfg) {
+	const out = {};
+	for (const key of ['enabled', 'maxFiles', 'exclude']) {
+		const v = cfg.get(['workspaceIndex', key]);
+		if (v !== undefined && v !== null) {
+			out[key] = v;
+		}
+	}
+	return out;
+}
+
 function serverOptions(cfg) {
 	const command = cfg.get('server.path') || 'mqsc-lsp';
 	const env = Object.assign({}, process.env);
@@ -57,6 +72,12 @@ function activate(context) {
 			initOptions[key] = v;
 		}
 	}
+	// workspace scan of closed *.mqsc files (read once at initialize;
+	// changing any mqsc.workspaceIndex.* key needs a window reload)
+	const wsIndex = workspaceIndexSettings(cfg);
+	if (Object.keys(wsIndex).length) {
+		initOptions.workspaceIndex = wsIndex;
+	}
 
 	client = new LanguageClient(
 		'mqsc', // must match the language id in package.json
@@ -71,9 +92,10 @@ function activate(context) {
 			// startup and whenever it changes (workspace/didChangeConfiguration
 			// via vscode-languageclient). The server reads `{diagnostics:…}`
 			// from that payload; `"default"` values are not severities, so
-			// they fall through to the natural ones. No fileEvents watcher:
-			// the server never touches the filesystem and implements no
-			// didChangeWatchedFiles, so one here would be inert.
+			// they fall through to the natural ones. The server does read the
+			// workspace from disk now (the PR 7 workspace scan), but it still
+			// implements no didChangeWatchedFiles, so a fileEvents watcher
+			// here would be inert — that arrives with PR 8.
 			synchronize: { configurationSection: 'mqsc' },
 			initializationOptions: initOptions,
 		}

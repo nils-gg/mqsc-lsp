@@ -36,13 +36,15 @@ asserts the pane, so a plain run doubles as an end-to-end UI test,
 grammars/tree-sitter-mqsc/   tree-sitter grammar + external scanner + corpus tests + highlight queries
 tools/extract_model.py        extracts the command model from the reference markdown
 tools/lsp_smoke_test.py       protocol-level end-to-end test client
+tools/workspace_index_smoke.py  end-to-end test for the workspace scan of closed files
 tools/record_demo.sh          drives/records the feature demo (docs/demo.cast)
 model/mqsc-model.json         the extracted model (128 commands, 1336 params, docs, attrs, synonyms)
 server/                       Rust LSP server (tower-lsp + tree-sitter), embeds the model
   src/model.rs                model load/lookup, synonym maps, Levenshtein suggestions
   src/analysis.rs             diagnostics, hover, completion, symbols, folding, tokens
+  src/workspace.rs            workspace index: open docs + scanned closed files, name-site joins
   src/server.rs               tower-lsp LanguageServer implementation
-  examples/                   analysis probes: probe.rs, complete.rs, fold.rs
+  examples/                   analysis probes: probe.rs, complete.rs, fold.rs, ws_scan.rs
 examples/sample.mqsc          end-to-end validation script
 editors/                      editor configuration examples (vscode/ nvim/ helix/)
 ```
@@ -129,12 +131,12 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | Capability | Behaviour |
 | --- | --- |
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
-| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document), use count, "this is the definition" |
-| Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
+| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
+| Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document / indexed workspace file** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
-| definition / references / rename | object names: jump to the `DEFINE` (across open documents), list all sites, rename every site in every open document keeping quoted/bare style |
+| definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every **open** document keeping quoted/bare style (workspace files are shown by references but not edited by rename — see "Object knowledge") |
 | documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
-| workspace/symbol | every object `DEFINE`d in any open document, grouped by object type |
+| workspace/symbol | every object `DEFINE`d in an open document or an indexed workspace file, grouped by object type |
 | foldingRange | multi-line continuation chains + comment blocks |
 | documentHighlight | same-word highlights |
 | semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes); full and range requests; enum values equal to the parameter default carry the `default` modifier |
@@ -155,7 +157,7 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | 9 | Warning | a *single* required parameter missing (suppressed for multi-alternative commands like DEFINE CHANNEL) |
 | 10 | Warning | DEFINE/ALTER/DELETE without the object name |
 | 11 | Warning | `?` wildcard outside DISPLAY patterns / wildcard in a non-wildcardable value |
-| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script or any other open document; names similar to ones DEFINEd there are suggested (with quickfixes) |
+| 12 | Hint | object name referenced by a queue/object parameter (`TARGET`, `TGTQ`, `XMITQ`, `LIKE`, …) is never `DEFINE`d in this script, any other open document or an indexed workspace file; names similar to ones DEFINEd there are suggested (with quickfixes) |
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 | 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
 | 15 | Warning | parameter not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated per-parameter availability (`availability` in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `BOQNAME` is z/OS-only, distributed `BACKOUT` needs 9.1). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
@@ -199,7 +201,26 @@ in the availability table is ever consulted. Values that do not parse are
 ignored, like unrecognized severities. The `--check` CLI honors them via
 `--settings` too (the file may carry them flat or under `"mqsc"`).
 
-### Object knowledge (across open documents)
+The workspace scan of closed `*.mqsc` files (see "Object knowledge") is
+configured by three more keys:
+
+```json
+{ "mqsc": { "workspaceIndex": {
+    "enabled": true, "maxFiles": 2000,
+    "exclude": [".git", "target", "node_modules", "dist", "build"]
+} } }
+```
+
+`enabled` switches the scan off (then only open documents are known),
+`maxFiles` caps how many files are indexed (taken in sorted order; the
+server logs a window warning when files had to be left out), and `exclude`
+lists directory *names* skipped at any depth. An explicitly empty `exclude`
+means "exclude nothing"; unreadable values fall back per key. Files over
+4 MiB are skipped. These three are read once at `initialize`, so a change
+takes effect on the next server start, and the scan outcome is always in
+the log (`workspace scan: found=… indexed=… merged=…`).
+
+### Object knowledge (open documents + the workspace)
 
 The server knows what the open documents define and uses it three ways:
 completion inside object-name groups, positional name slots and reference
@@ -222,6 +243,23 @@ every one of
 these reference sites, so `ALTER QLOCAL(ORDERS) BACKOUT(OLD)` follows
 `DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
 
+**Closed workspace files are indexed too.** At startup the server walks the
+workspace roots for `*.mqsc` (skipping `.git`, `target`, `node_modules`,
+`dist`, `build` by default) and remembers each file's `DEFINE`s and name
+sites — never its text or parse tree, so the 324-file / 44 MB `dmpmqcfg`
+corpus costs ~8 s of *background* time and ~95 MB peak RSS of retained
+name-site data (`cargo run --release --example ws_scan` re-measures both;
+the index itself sits around 77 MB of that). Every read
+feature then resolves names against them exactly as against open documents
+(hint 12 stays silent, hover names the file, goto-definition jumps into it,
+workspace/symbol lists it, completion offers the name), and files opened
+later override their on-disk entry — an unsaved buffer is the truth while
+it is open, and closing falls back to the file on disk. Rename is the one
+deliberate exception: it edits open documents only, because a closed
+entry's content is only as fresh as the last scan; `references` may
+therefore show a site that rename will not touch until the file is open.
+See the `mqsc.workspaceIndex.*` settings.
+
 Names resolve inside object namespaces, and that rule is shared by every
 feature. All queue types (QLOCAL/QMODEL/QALIAS/QREMOTE/QCLUSTER and the
 QUEUE umbrella) share ONE namespace in MQ, while channels, topics and
@@ -236,14 +274,16 @@ with an explicit error instead of rewriting every matching spelling.
 Invalidation:
 opening or closing a document re-publishes every other document's
 diagnostics; typing only re-analyses the edited document (per keystroke,
-re-analysing all siblings would be quadratic). Closed documents count
-again once you reopen them; the server never touches the filesystem.
+re-analysing all siblings would be quadratic). Closing a file keeps it in
+the index by re-reading it from disk (the unsaved buffer stops counting,
+the file on disk keeps counting), and the workspace scan that ran at
+startup is repeated only by restarting the server.
 
 ## Testing
 
 ```sh
 cd server
-cargo test                                       # 108 unit tests + 3 grammar-corpus tests
+cargo test                                       # 115 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -251,12 +291,17 @@ python3 tools/lsp_smoke_test.py                  # full assertive LSP session (s
                                                  # diagnostics, hover, completion, symbols,
                                                  # folding, tokens, navigation, cross-file,
                                                  # settings, server log — exit != 0 on FAIL
+python3 tools/workspace_index_smoke.py           # assertive session against a throwaway
+                                                 # workspace: closed *.mqsc files resolve
+                                                 # names, excludes/cap/buffer-override and
+                                                 # the enabled=false gate — exit != 0 on FAIL
 python3 tools/check_model.py                     # model is byte-identical to extractor output
                                                  # (skips cleanly without the IBM reference)
 cd server
 echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol
 cargo run --example complete                         # completion behaviour matrix
 cargo run --example fold                             # folding ranges
+cargo run --release --example ws_scan [dir]          # workspace-scan cost (walk+parse timing)
 ```
 
 `.github/workflows/ci.yml` runs exactly this set on rustc 1.75 (fmt and
@@ -295,11 +340,15 @@ non-zero when a check fails.
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
   gracefully there.
-- **Knowledge spans open documents, not the filesystem**: the server is a
-  script checker, not a queue manager. Objects living in files that are not
-  open — or in the queue manager itself — are invisible (which is exactly
-  why hint 12 is only a hint). A `workspace/didChangeWatchedFiles` scan of
-  `*.mqsc` is the natural next step.
+- **Knowledge spans open documents plus a startup scan, not the queue
+  manager**: the server is a script checker. Objects that live only in the
+  queue manager — or in `*.mqsc` files outside the workspace roots, in an
+  excluded directory, or beyond `mqsc.workspaceIndex.maxFiles` — are
+  invisible (which is exactly why hint 12 is only a hint). Closed workspace
+  files are indexed at startup only: they are not watched for changes, so a
+  file edited outside the editor stays stale until restart, and rename
+  therefore never edits them. `workspace/didChangeWatchedFiles` reindexing
+  is the natural next step.
 - **False positives are measured, not eliminated**: on a 324-file
   `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
   the count sits at ≈19.9k after the model/overlay/grammar fixes (-92.5%);
