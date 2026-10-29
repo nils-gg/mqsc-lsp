@@ -30,8 +30,10 @@ POS = "ZZORACLEPOS"              # positional name filler
 EXCLUDE_VERBS = {"END", "EXIT", "QUIT"}   # session-control: never probe
 
 AMQ_ANCHOR = re.compile(r"^\s*(\d+)\s*:\s*(.*)$")
-# NAME( values )  — name must be 2+ uppercase/digits, directly followed by (
-ITEM_PARAM = re.compile(r"\b([A-Z][A-Z0-9]{1,19})\(([^()]*(?:\([^()]*\)[^()]*)*)\)")
+# NAME( values )  — name must be 2+ uppercase/digits; some railroads print
+# the name and its paren group with a space between (TYPE ( A | B )), and
+# those must parse too, else their values leak as bogus flag-pair params
+ITEM_PARAM = re.compile(r"\b([A-Z][A-Z0-9]{1,19})\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)")
 # FLAG | NOFLAG pairs: word before the bar must be all-uppercase
 ITEM_PAIR = re.compile(r"\b([A-Z][A-Z0-9]{1,19})\s*\|\s*([A-Z][A-Z0-9]{1,19})\b")
 
