@@ -125,9 +125,19 @@ jobs:
       # The same tree-sitter C files the Release job ships, compiled by
       # MSVC; the tests are the portability check (URI/path handling was
       # the one Windows-hostile spot, fixed in PR 10).
+      # The step summary is the ONE log surface that is public without
+      # auth (GH requires rights for log downloads even on public repos),
+      # so a red platform job publishes its own failure output here.
       - name: cargo test --locked
+        shell: bash
         working-directory: server
-        run: cargo test --locked
+        run: set -o pipefail; cargo test --locked 2>&1 | tee ../test-output.log
+
+      - name: Publish failure output (public step summary)
+        if: failure()
+        shell: bash
+        run: |
+          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   macos:
     name: test (macos, stable Rust)
@@ -143,5 +153,12 @@ jobs:
           workspaces: server
 
       - name: cargo test --locked
+        shell: bash
         working-directory: server
-        run: cargo test --locked
+        run: set -o pipefail; cargo test --locked 2>&1 | tee ../test-output.log
+
+      - name: Publish failure output (public step summary)
+        if: failure()
+        shell: bash
+        run: |
+          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
