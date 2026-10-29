@@ -1509,20 +1509,29 @@ fn check_command(
 
     // pending parameter word without its group
     if let Some((up, n)) = &pending {
-        let example = e
-            .by_name
-            .get(up)
-            .map(|&pi| value_example(&e.params[pi]))
-            .unwrap_or_else(|| "value".to_string());
-        d.push(
-            lines.range(n.start_byte(), n.end_byte()),
-            DiagnosticSeverity::ERROR,
-            CODE_BAD_VALUE,
-            format!(
-                "Parameter {up} was given without its value — write {up}({example}); the \
-                 value belongs between parentheses."
-            ),
-        );
+        // On DISPLAY every known parameter word doubles as a selectable
+        // attribute: `DISPLAY QMGR DESCR` lists that column and is complete
+        // MQSC (the 10.0.1 railroads print these words bare). Only the
+        // group-form uses (`WHERE(...)`) demand a value, so a bare word on
+        // DISPLAY is never a missing-value error.
+        if e.verb == "DISPLAY" {
+            // no diagnostic
+        } else {
+            let example = e
+                .by_name
+                .get(up)
+                .map(|&pi| value_example(&e.params[pi]))
+                .unwrap_or_else(|| "value".to_string());
+            d.push(
+                lines.range(n.start_byte(), n.end_byte()),
+                DiagnosticSeverity::ERROR,
+                CODE_BAD_VALUE,
+                format!(
+                    "Parameter {up} was given without its value — write {up}({example}); the \
+                     value belongs between parentheses."
+                ),
+            );
+        }
     }
 
     // missing required parameters. Only report when exactly one parameter is
@@ -3371,6 +3380,16 @@ mod tests {
     fn code06_does_not_flag_bare_display_attributes() {
         // T-8 acceptance: repeated bare positional names are legal MQSC
         assert!(!has("DISPLAY QLOCAL(A) B B\n", CODE_DUPLICATE));
+    }
+
+    #[test]
+    fn bare_param_word_on_display_is_an_attribute_selector() {
+        // Oracle: DISPLAY railroads print known parameter words bare
+        // (`DISPLAY QMGR DESCR`, `DISPLAY CHLAUTH(*) MATCH`): valid MQSC,
+        // never a missing-value error. Non-DISPLAY verbs still flag it.
+        assert!(!has("DISPLAY QMGR DESCR\n", CODE_BAD_VALUE));
+        assert!(!has("DISPLAY CHLAUTH(*) MATCH EXACT\n", CODE_BAD_VALUE));
+        assert!(has("ALTER QLOCAL(A) DESCR\n", CODE_BAD_VALUE));
     }
 
     #[test]
