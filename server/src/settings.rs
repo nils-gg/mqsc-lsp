@@ -443,13 +443,9 @@ mod tests {
     #[test]
     fn gate_needs_a_target_and_reports_the_first_conflict() {
         let unset = Target::default();
-        let r = rule(
-            "BACKOUT",
-            &["QLOCAL"],
-            Some("9.1"),
-            None,
-            Some("distributed"),
-        );
+        // purely synthetic rule data: this test pins the gate decision
+        // table, not any real parameter's availability
+        let r = rule("NEWP", &["QLOCAL"], Some("9.1"), None, Some("distributed"));
         assert_eq!(unset.gate(&r), None, "no target: rules dormant");
 
         let old = Target {

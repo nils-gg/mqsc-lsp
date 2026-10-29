@@ -600,11 +600,11 @@ fn object_ref_param(pname: &str, cmd_obj: &str) -> Option<ObjRef> {
         }),
         "TARGET" | "TGTQ" | "XMITQ" | "MODEL" | "MDURMDL" | "MNDURMDL" | "FROMQ" | "TOQLOCAL"
         | "TOQALIAS" | "TOQNAME" => Some(ObjRef::QueueFamily),
-        // Backout queue in both spellings (distributed BACKOUT, z/OS
-        // BOQNAME), plus the other queue-name-valuing QMGR/queue params.
-        // The documented special values (BOQNAME(NO/YES), DEADQ(NONE)...)
-        // are exempted in check_obj_ref, not hidden from this table.
-        "BACKOUT" | "BOQNAME" | "DEADQ" | "DEFXMITQ" => Some(ObjRef::QueueFamily),
+        // Backout queue (BOQNAME), plus the other queue-name-valuing
+        // QMGR/queue params. The documented special values
+        // (BOQNAME(NO/YES), DEADQ(NONE)...) are exempted in
+        // check_obj_ref, not hidden from this table.
+        "BOQNAME" | "DEADQ" | "DEFXMITQ" => Some(ObjRef::QueueFamily),
         // INITQ on QLOCAL/QMODEL names the initiation queue; on START
         // CHINIT it names a *queue manager* (the initiator to start).
         "INITQ" if cmd_obj.starts_with('Q') => Some(ObjRef::QueueFamily),
@@ -863,7 +863,7 @@ fn check_obj_ref(
             }
             // Documented special values of the queue-ref params are toggles,
             // not names: z/OS BOQNAME(NO|YES), DEADQ(NONE)/DEFXMITQ(NONE).
-            if (matches!(pname, "BACKOUT" | "BOQNAME") && (name == "NO" || name == "YES"))
+            if (pname == "BOQNAME" && (name == "NO" || name == "YES"))
                 || (matches!(pname, "DEADQ" | "DEFXMITQ") && name == "NONE")
             {
                 continue;
@@ -4323,13 +4323,14 @@ mod tests {
     }
 
     #[test]
-    fn backout_params_are_known_after_the_overlay() {
-        // CURATED overlay: distributed BACKOUT (MQ 9.1+) for QLOCAL/QREMOTE,
-        // and BOQNAME on ALTER takes a queue name like on DEFINE — none of
-        // these may read as an unknown parameter (4) or a bad value (5).
-        let text = "DEFINE QLOCAL(L) BACKOUT(BQ)\nALTER QLOCAL(L) BACKOUT(BQ) BOQNAME(BQ)\n\
-                    DEFINE QREMOTE(R) RNAME(X) RQMNAME(QM) BACKOUT(BQ)\n\
-                    ALTER QREMOTE(R) BACKOUT(BQ)\nALTER QMODEL(M) BOQNAME(BQ)\n";
+    fn boqname_is_known_after_the_overlay_backout_is_not() {
+        // CURATED overlay: BOQNAME takes a queue name everywhere the base
+        // model carries it — none of these may read as unknown parameter (4)
+        // or bad value (5). The live MQ 10.0.1 oracle confirms
+        // BOQNAME( string ); it also shows there is no BACKOUT parameter at
+        // all, so that spelling must read as an unknown parameter.
+        let text = "DEFINE QLOCAL(L) BOQNAME(BQ)\nALTER QLOCAL(L) BOQNAME(BQ)\n\
+                    ALTER QMODEL(M) BOQNAME(BQ)\n";
         let diags = analyze(
             text,
             &parse(text),
@@ -4344,15 +4345,18 @@ mod tests {
                     || d.code == Some(lsp::NumberOrString::Number(CODE_BAD_VALUE))
             })
             .collect();
-        assert!(bad.is_empty(), "BACKOUT/BOQNAME must be accepted: {bad:?}");
+        assert!(bad.is_empty(), "BOQNAME must be accepted: {bad:?}");
+        // The reverted spelling: unknown parameter, nowhere.
+        let c = codes("DEFINE QLOCAL(L) BACKOUT(BQ)\n");
+        assert!(c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
     }
 
     #[test]
     fn backout_params_register_rename_sites() {
         // Renaming a queue must rewrite references hiding in backout/dead/
-        // default-xmit params — in both the BACKOUT and BOQNAME spellings.
-        let text = "DEFINE QLOCAL(BOQ)\nDEFINE QLOCAL(ORDERS) BACKOUT(BOQ)\n\
-                    ALTER QLOCAL(ORDERS) BACKOUT(BOQ)\nALTER QMODEL(M) BOQNAME(BOQ)\n\
+        // default-xmit params.
+        let text = "DEFINE QLOCAL(BOQ)\nDEFINE QLOCAL(ORDERS) BOQNAME(BOQ)\n\
+                    ALTER QLOCAL(ORDERS) BOQNAME(BOQ)\nALTER QMODEL(M) BOQNAME(BOQ)\n\
                     ALTER QMGR DEADQ(BOQ) DEFXMITQ(BOQ)\n";
         let idx = index_of(text);
         let a: Vec<_> = idx.sites_of("BOQ").collect();
@@ -4365,7 +4369,7 @@ mod tests {
 
     #[test]
     fn backout_refs_are_checked_special_values_are_not() {
-        let text = "DEFINE QLOCAL(BACKOUT.Q)\nDEFINE QLOCAL(ORDERS) BACKOUT(GHOST)\n\
+        let text = "DEFINE QLOCAL(BOQ)\nDEFINE QLOCAL(ORDERS) BOQNAME(GHOST)\n\
                     ALTER QLOCAL(ORDERS) BOQNAME(NO)\nDEFINE QLOCAL(M1) INITQ(GHOST)\n\
                     START CHINIT(A) INITQ(B)\nALTER QMGR DEADQ(NONE)\n";
         let diags = analyze(
@@ -4380,7 +4384,7 @@ mod tests {
             .filter(|d| d.code == Some(lsp::NumberOrString::Number(CODE_UNDEFINED_OBJECT)))
             .map(|d| d.range.start.line)
             .collect();
-        // BACKOUT(GHOST) and the QLOCAL INITQ(GHOST) are flagged; the z/OS
+        // BOQNAME(GHOST) and the QLOCAL INITQ(GHOST) are flagged; the z/OS
         // BOQNAME(NO) and DEADQ(NONE) special values are not, and the INITQ
         // of START CHINIT names a queue MANAGER, not a queue (no hint).
         assert_eq!(hint_lines, vec![1, 3], "{diags:?}");
@@ -4390,47 +4394,42 @@ mod tests {
 
     #[test]
     fn no_target_means_no_availability_checks() {
-        // pre-Phase-4 behavior: BACKOUT on a 9.0-era script is nobody's business
-        assert!(!has("DEFINE QLOCAL(A) BACKOUT(Q)\n", CODE_NOT_IN_TARGET));
-        // and the plain helpers stay target-less even for a z/OS-only param
+        // pre-Phase-4 behavior: a z/OS-only parameter on an untargeted
+        // script is nobody's business
+        assert!(!has(
+            "DEFINE QLOCAL(A) QSGDISP(GROUP)\n",
+            CODE_NOT_IN_TARGET
+        ));
+        // and the plain helpers stay target-less for any other param too
         assert!(!has("DEFINE QLOCAL(A) BOQNAME(QM1)\n", CODE_NOT_IN_TARGET));
     }
 
     #[test]
-    fn too_old_param_flags_with_the_introduced_version() {
-        let t = target("9.0", "distributed");
-        let c = codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t);
-        assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
-        let m = msg_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", CODE_NOT_IN_TARGET, &t);
-        assert!(m.contains("9.1") && m.contains("targetVersion"), "{m}");
-    }
-
-    #[test]
-    fn new_enough_target_leaves_it_alone() {
-        let t = target("9.4", "distributed");
-        assert!(!codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t).contains(&CODE_NOT_IN_TARGET));
-        // exactly the `since` version is available, not too old
-        let t = target("9.1", "distributed");
-        assert!(!codes_t("DEFINE QLOCAL(A) BACKOUT(Q)\n", &t).contains(&CODE_NOT_IN_TARGET));
-    }
-
-    #[test]
     fn wrong_platform_flags_and_names_the_other_platform() {
+        // QSGDISP is the oracle-verified z/OS-only rule: the reference says
+        // 'applies to z/OS only' and the 10.0.1 distributed parser rejects
+        // it on all 40 model pairs that carry it.
         let t = target("9.4", "distributed");
-        let m = msg_t("DEFINE QLOCAL(A) BOQNAME(QM1)\n", CODE_NOT_IN_TARGET, &t);
-        assert!(m.contains("z/OS"), "{m}");
+        let c = codes_t("DEFINE QLOCAL(A) QSGDISP(GROUP)\n", &t);
+        assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        let m = msg_t("DEFINE QLOCAL(A) QSGDISP(GROUP)\n", CODE_NOT_IN_TARGET, &t);
+        assert!(m.contains("z/OS") && m.contains("platform"), "{m}");
         // and on z/OS the same script is clean for that param
         let z = target("9.4", "zos");
-        assert!(!codes_t("DEFINE QLOCAL(A) BOQNAME(QM1)\n", &z).contains(&CODE_NOT_IN_TARGET));
-        // CLUSNL on distributed likewise
-        assert!(codes_t("ALTER QLOCAL(A) CLUSNL(X)\n", &t).contains(&CODE_NOT_IN_TARGET));
+        assert!(!codes_t("DEFINE QLOCAL(A) QSGDISP(GROUP)\n", &z).contains(&CODE_NOT_IN_TARGET));
     }
 
     #[test]
     fn obj_restricted_rule_only_fires_for_those_objects() {
-        // BACKOUT is curated for QLOCAL/QREMOTE only: on a QMODEL it is an
-        // unknown parameter (code 4), and with a target it stays code 4 —
-        // the obj-restricted rule must not make it code 15.
+        // No shipped rule is obj-restricted right now (the former BACKOUT
+        // obj rule was disproved by the oracle and removed), so the
+        // lookup-level contract is what can be asserted: a general rule
+        // resolves for any object that carries the parameter, and a
+        // parameter with no rule resolves to None — on QMODEL the reverted
+        // BACKOUT is simply an unknown parameter (code 4), never 15.
+        let m = Model::load();
+        assert!(m.availability_for("QSGDISP", "QLOCAL").is_some());
+        assert!(m.availability_for("BACKOUT", "QLOCAL").is_none());
         let t = target("9.0", "distributed");
         let c = codes_t("ALTER QMODEL(M) BACKOUT(Q)\n", &t);
         assert!(c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
@@ -4439,42 +4438,34 @@ mod tests {
 
     #[test]
     fn curated_param_in_model_follows_the_target() {
-        // TOQLOCAL is a base-model MOVE parameter but z/OS-only per the
-        // curated rule: a z/OS target accepts it, a distributed target
-        // flags 15 (the Word branch covers model-known params too), and
-        // with no target nothing fires.
-        let z = target("9.4", "zos");
-        let c = codes_t("MOVE QLOCAL(A) TOQLOCAL(B)\n", &z);
-        assert!(!c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
-        assert!(!c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
+        // QSGDISP is a base-model parameter on DEFINE QALIAS, so a
+        // distributed target must flag 15 without code 4 (the Word branch
+        // covers model-known params too), and with no target nothing fires.
         let d = target("9.4", "distributed");
-        let c = codes_t("MOVE QLOCAL(A) TOQLOCAL(B)\n", &d);
+        let c = codes_t("DEFINE QALIAS(A) TARGET(B) QSGDISP(GROUP)\n", &d);
         assert!(c.contains(&CODE_NOT_IN_TARGET), "{c:?}");
         assert!(!c.contains(&CODE_UNKNOWN_PARAM), "{c:?}");
-        assert!(!codes("MOVE QLOCAL(A) TOQLOCAL(B)\n").contains(&CODE_NOT_IN_TARGET));
+        assert!(!codes("DEFINE QALIAS(A) TARGET(B) QSGDISP(GROUP)\n").contains(&CODE_NOT_IN_TARGET));
     }
 
     #[test]
     fn availability_lookup_prefers_obj_rule_and_normalizes_synonyms() {
         let m = Model::load();
-        // general rule (no obj) found for any command carrying it
-        assert!(m.availability_for("CLUSNL", "QALIAS").is_some());
-        // obj-restricted rule matches only its objects
-        assert!(m.availability_for("BACKOUT", "QREMOTE").is_some());
-        assert!(m.availability_for("BACKOUT", "QMODEL").is_none());
+        // general rule (no obj) found for any command carrying it, and
         // parameter case does not matter; object must be canonical, like
         // name_max_len/mandatory_rules — callers pass Command::object
-        assert!(m.availability_for("backout", "qlocal").is_some());
+        assert!(m.availability_for("QSGDISP", "QALIAS").is_some());
+        assert!(m.availability_for("qsgdisp", "qalias").is_some());
     }
 
     #[test]
     fn hover_documents_curated_availability() {
         let m = Model::load();
         let e = m.entry(m.commands["ALTER"]["QLOCAL"]);
-        let p = e.params.iter().find(|p| p.name == "BACKOUT").unwrap();
+        let p = e.params.iter().find(|p| p.name == "QSGDISP").unwrap();
         let doc = doc_for(m, p, "QLOCAL");
         assert!(doc.contains("Availability (curated)"), "{doc}");
-        assert!(doc.contains("9.1"), "{doc}");
+        assert!(doc.contains("z/OS"), "{doc}");
         // a param without a rule carries no annotation
         let p = e.params.iter().find(|p| p.name == "DESCR").unwrap();
         assert!(!doc_for(m, p, "QLOCAL").contains("Availability"));

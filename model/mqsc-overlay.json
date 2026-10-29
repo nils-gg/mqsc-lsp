@@ -24,14 +24,16 @@
     "Values cross-checked against the 324-file z/OS dmpmqcfg corpus (no",
     "real object exceeds its entry; QLOCAL/QALIAS/PROCESS names of exactly",
     "48 characters exist there, confirming the queue-name limit).",
-    "Backout-queue parameters: distributed MQ 9.1+ spells the parameter",
-    "BACKOUT (QLOCAL/QREMOTE — no evidence it exists on QMODEL, so none",
-    "added there); the 2011 reference only knows the z/OS spelling BOQNAME,",
-    "whose ALTER QLOCAL/QMODEL entries extracted as the special-value enum",
+    "Backout-queue parameter: the 2011 reference knows BOQNAME, whose",
+    "ALTER QLOCAL/QMODEL entries extracted as the special-value enum",
     "[NO,YES] and are replaced with string here because the same reference",
-    "entry describes a queue name. Both spellings are object references in",
-    "the curated table in analysis.rs; the z/OS special values NO/YES and",
-    "the NONE sentinel are exempted from hint 12 there, not modelled here.",
+    "entry describes a queue name; the live MQ 10.0.1 oracle confirms",
+    "BOQNAME( string ) on distributed queue commands. It is an object",
+    "reference in the curated table in analysis.rs; the z/OS special values",
+    "NO/YES and the NONE sentinel are exempted from hint 12 there, not",
+    "modelled here. (A BACKOUT spelling was once added here for",
+    "'distributed MQ 9.1+'; the 10.0.1 oracle shows no such parameter on",
+    "any command — that addition was wrong and has been reverted.)",
     "'mandatory': curated required parameters per DEFINE object type, driving",
     "diagnostic 14 MISSING_MANDATORY. The IBM reference calls some parameters",
     "required ('This parameter is required') while its railroad diagrams",
@@ -59,7 +61,13 @@
     "apply when mqsc.targetVersion / mqsc.platform is configured; with no",
     "target set, nothing in this table changes any diagnostic. Like",
     "name_max/mandatory: only parameters whose availability is documented",
-    "with confidence are listed - everything else is never flagged."
+    "with confidence are listed - everything else is never flagged.",
+    "Every rule here is verified against the live MQ 10.0.1 distributed",
+    "oracle (tools/mq_oracle_check.py) as well as the reference; the first",
+    "four entries (BACKOUT since-9.1, BOQNAME/CLUSNL z/OS-only, TOQLOCAL",
+    "z/OS-only) were built from documentation memory, the oracle disproved",
+    "all of them (no BACKOUT parameter exists on any command; BOQNAME and",
+    "CLUSNL are distributed-valid), so they were removed."
   ],
   "commands": {
     "SET": {
@@ -642,12 +650,6 @@
     "DEFINE QLOCAL": {
       "add_params": [
         {
-          "name": "BACKOUT",
-          "kind": "string",
-          "optional": true,
-          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
-        },
-        {
           "name": "CUSTOM",
           "kind": "string",
           "optional": true
@@ -699,12 +701,6 @@
     },
     "ALTER QLOCAL": {
       "add_params": [
-        {
-          "name": "BACKOUT",
-          "kind": "string",
-          "optional": true,
-          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
-        },
         {
           "name": "BOQNAME",
           "kind": "string",
@@ -880,12 +876,6 @@
     "DEFINE QREMOTE": {
       "add_params": [
         {
-          "name": "BACKOUT",
-          "kind": "string",
-          "optional": true,
-          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
-        },
-        {
           "name": "CUSTOM",
           "kind": "string",
           "optional": true
@@ -899,12 +889,6 @@
     },
     "ALTER QREMOTE": {
       "add_params": [
-        {
-          "name": "BACKOUT",
-          "kind": "string",
-          "optional": true,
-          "description": "Name of the backout queue a message is put to when a get is backed out (MQ 9.1+ distributed spelling of the z/OS BOQNAME; curated addition)."
-        },
         {
           "name": "CUSTOM",
           "kind": "string",
@@ -1687,29 +1671,9 @@
   },
   "availability": [
     {
-      "param": "BACKOUT",
-      "obj": [
-        "QLOCAL",
-        "QREMOTE"
-      ],
-      "platform": "distributed",
-      "since": "9.1",
-      "note": "Distributed MQ spells the backout queue BACKOUT from 9.1; z/OS uses BOQNAME."
-    },
-    {
-      "param": "BOQNAME",
+      "param": "QSGDISP",
       "platform": "zos",
-      "note": "The z/OS spelling of the backout queue (distributed MQ uses BACKOUT)."
-    },
-    {
-      "param": "CLUSNL",
-      "platform": "zos",
-      "note": "Cluster name list on a queue object is the z/OS mechanism; distributed MQ uses CLUSTER()."
-    },
-    {
-      "param": "TOQLOCAL",
-      "platform": "zos",
-      "note": "z/OS MOVE destination queue parameter (distributed MOVE uses different spellings)."
+      "note": "Queue-sharing-group disposition; the IBM reference states 'This parameter applies to z/OS only' and the live MQ 10.0.1 distributed parser rejects it on every command that carries it in the model."
     }
   ]
 }
