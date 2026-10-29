@@ -214,8 +214,10 @@
             "name": "ACTION",
             "kind": "enum",
             "values": [
-              "DELETE",
-              "REPLACE"
+              "REPLACE",
+              "ADD",
+              "REMOVE",
+              "REMOVEALL"
             ],
             "optional": true
           },
@@ -277,11 +279,13 @@
             "name": "CHCKCLNT",
             "kind": "enum",
             "values": [
-              "ASDEF",
-              "OFF",
-              "OPTIONAL",
+              "ASQMGR",
               "REQDADM",
-              "REQUIRED"
+              "REQUIRED",
+              "OPTIONAL",
+              "NONE",
+              "ASDEF",
+              "OFF"
             ],
             "optional": true
           },
@@ -733,8 +737,17 @@
         "params": [
           {
             "name": "TYPE",
-            "kind": "string",
-            "optional": true
+            "kind": "enum",
+            "optional": true,
+            "values": [
+              "ALL",
+              "BLOCKUSER",
+              "BLOCKADDR",
+              "SSLPEERMAP",
+              "ADDRESSMAP",
+              "USERMAP",
+              "QMGRMAP"
+            ]
           },
           {
             "name": "DETAIL",
@@ -1326,6 +1339,9 @@
           "NONE",
           "OFF",
           "ON"
+        ],
+        "DEFBIND": [
+          "GROUP"
         ]
       }
     },
@@ -1443,6 +1459,22 @@
           "kind": "flag",
           "optional": true,
           "description": "Does not harden the backout indication on get-with-backout (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFPRESP",
+          "kind": "enum",
+          "values": [
+            "SYNC",
+            "ASYNC"
+          ],
+          "optional": true,
+          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
+        },
+        {
+          "name": "CLUSTER",
+          "kind": "string",
+          "optional": true,
+          "description": "The name of the cluster to which this topic belongs. ' ' publish/subscribe cluster-connected queue managers. string The topic belongs to this cluster. Leave this parameter blank on the system topics SYSTEM.BASE.TOPIC and SYSTEM.DEFAULT.TOPIC, except in special circumstances to do with migration, documented elsewhere."
         }
       ],
       "extend_enum": {
@@ -1461,6 +1493,9 @@
           "NONE",
           "OFF",
           "ON"
+        ],
+        "DEFBIND": [
+          "GROUP"
         ]
       }
     },
@@ -1655,6 +1690,18 @@
           "kind": "string",
           "optional": true,
           "description": "Stream queue carrying cluster publications for this queue (railroad: q_name; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFPRESP",
+          "kind": "enum",
+          "values": [
+            "SYNC",
+            "ASYNC",
+            "ENABLED",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
         }
       ],
       "extend_enum": {
@@ -1706,6 +1753,9 @@
           "FORCE",
           "NONE",
           "V6COMPAT"
+        ],
+        "DEFBIND": [
+          "GROUP"
         ]
       }
     },
@@ -1730,6 +1780,12 @@
           ],
           "optional": true,
           "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CLUSNL",
+          "kind": "string",
+          "optional": true,
+          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs."
         }
       ],
       "extend_enum": {
@@ -1739,6 +1795,9 @@
           "FORCE",
           "NONE",
           "V6COMPAT"
+        ],
+        "DEFBIND": [
+          "GROUP"
         ]
       }
     },
@@ -1764,7 +1823,12 @@
           "optional": true,
           "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         }
-      ]
+      ],
+      "extend_enum": {
+        "DEFBIND": [
+          "GROUP"
+        ]
+      }
     },
     "ALTER QREMOTE": {
       "add_params": [
@@ -1787,8 +1851,29 @@
           ],
           "optional": true,
           "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DEFPRESP",
+          "kind": "enum",
+          "values": [
+            "SYNC",
+            "ASYNC"
+          ],
+          "optional": true,
+          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
+        },
+        {
+          "name": "CLUSNL",
+          "kind": "string",
+          "optional": true,
+          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs."
         }
-      ]
+      ],
+      "extend_enum": {
+        "DEFBIND": [
+          "GROUP"
+        ]
+      }
     },
     "DEFINE TOPIC": {
       "add_params": [
@@ -1804,12 +1889,23 @@
         },
         {
           "name": "MCAST",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "ENABLED",
+            "DISABLED",
+            "ONLY"
+          ],
           "optional": true
         },
         {
           "name": "USEDLQ",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "NO",
+            "YES"
+          ],
           "optional": true
         },
         {
@@ -1866,12 +1962,23 @@
         },
         {
           "name": "MCAST",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "ENABLED",
+            "DISABLED",
+            "ONLY"
+          ],
           "optional": true
         },
         {
           "name": "USEDLQ",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "NO",
+            "YES"
+          ],
           "optional": true
         },
         {
@@ -1943,7 +2050,11 @@
         },
         {
           "name": "AMQPKA",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "AUTO",
+            "integer"
+          ],
           "optional": true
         },
         {
@@ -2049,6 +2160,42 @@
           ],
           "optional": true,
           "description": "Dead-letter queue handling of undeliverable messages on this channel (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MSGDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel message exit user data."
+        },
+        {
+          "name": "MSGEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel message exit names."
+        },
+        {
+          "name": "RCVDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel receive exit user data."
+        },
+        {
+          "name": "RCVEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel receive exit names."
+        },
+        {
+          "name": "SENDDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ "
+        },
+        {
+          "name": "SENDEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel send exit names."
         }
       ],
       "extend_enum": {
@@ -2063,6 +2210,13 @@
           "SDR",
           "SVR",
           "SVRCONN"
+        ],
+        "COMPMSG": [
+          "LZ4FAST",
+          "LZ4HIGH"
+        ],
+        "SSLCAUTH": [
+          "NEVER"
         ]
       }
     },
@@ -2095,7 +2249,11 @@
         },
         {
           "name": "AMQPKA",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "AUTO",
+            "integer"
+          ],
           "optional": true
         },
         {
@@ -2219,6 +2377,52 @@
           ],
           "optional": true,
           "description": "Dead-letter queue handling of undeliverable messages on this channel (railroad: YES | NO; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MSGDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel message exit user data."
+        },
+        {
+          "name": "MSGEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel message exit names."
+        },
+        {
+          "name": "RCVDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel receive exit user data."
+        },
+        {
+          "name": "RCVEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel receive exit names."
+        },
+        {
+          "name": "SENDDATA",
+          "kind": "string",
+          "optional": true,
+          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ "
+        },
+        {
+          "name": "SENDEXIT",
+          "kind": "string",
+          "optional": true,
+          "description": "Channel send exit names."
+        },
+        {
+          "name": "AFFINITY",
+          "kind": "enum",
+          "values": [
+            "PREFERRED",
+            "NONE"
+          ],
+          "optional": true,
+          "description": "The channel affinity attribute is used so client applications that connect multiple times using the same queue manager name can choose whether to use the same client channel definition for each connection. This attribute is intended to be used when multiple applicable channel definitions are available."
         }
       ],
       "extend_enum": {
@@ -2233,6 +2437,13 @@
           "SDR",
           "SVR",
           "SVRCONN"
+        ],
+        "COMPMSG": [
+          "LZ4FAST",
+          "LZ4HIGH"
+        ],
+        "SSLCAUTH": [
+          "NEVER"
         ]
       }
     },
@@ -2286,6 +2497,8 @@
           "kind": "enum",
           "values": [
             "NONE",
+            "128_BIT",
+            "192_BIT",
             "NO",
             "ONLY",
             "YES"
@@ -2294,17 +2507,29 @@
         },
         {
           "name": "IMGSCHED",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "AUTO",
+            "MANUAL"
+          ],
           "optional": true
         },
         {
           "name": "IMGLOGLN",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "integer",
+            "OFF"
+          ],
           "optional": true
         },
         {
           "name": "ACTVCONO",
-          "kind": "string",
+          "kind": "enum",
+          "values": [
+            "ENABLED",
+            "DISABLED"
+          ],
           "optional": true
         },
         {
@@ -2420,6 +2645,16 @@
           ],
           "optional": true,
           "description": "Reverse DNS lookup of client IP addresses (railroad: ENABLED | DISABLED; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "ACCTCONO",
+          "kind": "enum",
+          "values": [
+            "ENABLED",
+            "DISABLED"
+          ],
+          "optional": true,
+          "description": "Specifies whether applications can override the settings of the ACCTQ and ACCTMQI queue manager parameters:"
         }
       ]
     },
@@ -2561,7 +2796,17 @@
           "optional": true,
           "description": "TLS enforcement for LDAP communication (railroad: NO | YES | ANON; oracle MQ 10.0.1)"
         }
-      ]
+      ],
+      "extend_enum": {
+        "AUTHORMD": [
+          "OS",
+          "SEARCHGRP",
+          "SRCHGRPSN"
+        ],
+        "CHCKCLNT": [
+          "NONE"
+        ]
+      }
     },
     "ALTER AUTHINFO": {
       "add_params": [
@@ -2713,7 +2958,17 @@
           "optional": true,
           "description": "Type of the AUTHINFO object being altered (oracle MQ 10.0.1)"
         }
-      ]
+      ],
+      "extend_enum": {
+        "AUTHORMD": [
+          "OS",
+          "SEARCHGRP",
+          "SRCHGRPSN"
+        ],
+        "CHCKCLNT": [
+          "NONE"
+        ]
+      }
     },
     "DEFINE LISTENER": {
       "add_params": [
@@ -2919,6 +3174,60 @@
           "kind": "flag",
           "optional": true,
           "description": "Fail rather than replace an existing subscription of the same name (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "DESTCLAS",
+          "kind": "enum",
+          "values": [
+            "MANAGED",
+            "PROVIDED"
+          ],
+          "optional": true,
+          "description": "System managed destination."
+        },
+        {
+          "name": "PSPROP",
+          "kind": "enum",
+          "values": [
+            "NONE",
+            "COMPAT",
+            "RFH2",
+            "MSGPROP"
+          ],
+          "optional": true,
+          "description": "The manner in which publish subscribe related message properties are added to messages sent to this subscription."
+        },
+        {
+          "name": "VARUSER",
+          "kind": "enum",
+          "values": [
+            "ANY",
+            "FIXED"
+          ],
+          "optional": true,
+          "description": "Specifies whether a user other than the subscription creator can connect to and take over ownership of the subscription."
+        },
+        {
+          "name": "WSCHEMA",
+          "kind": "enum",
+          "values": [
+            "CHAR",
+            "TOPIC"
+          ],
+          "optional": true,
+          "description": "The schema to be used when interpreting any wildcard characters in the topic string."
+        },
+        {
+          "name": "PUBPRTY",
+          "kind": "enum",
+          "values": [
+            "ASPUB",
+            "ASQDEF",
+            "SYSTEM",
+            "integer"
+          ],
+          "optional": true,
+          "description": "The priority of the message sent to this subscription."
         }
       ]
     },
@@ -2953,6 +3262,18 @@
           "name": "REPLACE",
           "kind": "flag",
           "optional": true
+        },
+        {
+          "name": "PUBPRTY",
+          "kind": "enum",
+          "values": [
+            "ASPUB",
+            "ASQDEF",
+            "SYSTEM",
+            "integer"
+          ],
+          "optional": true,
+          "description": "The priority of the message sent to this subscription."
         }
       ]
     },
@@ -3383,6 +3704,17 @@
           "kind": "string",
           "optional": true,
           "description": "Filter expression selecting the objects to display (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "TYPE",
+          "kind": "enum",
+          "values": [
+            "QUEUE",
+            "HANDLE",
+            "QMGR"
+          ],
+          "optional": true,
+          "description": "Specifies the type of status information required to be displayed. Values are:"
         }
       ]
     },
@@ -3449,6 +3781,120 @@
           "kind": "string",
           "optional": true,
           "description": "Archive log location or archived-log selection (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY AUTHINFO": {
+      "extend_enum": {
+        "AUTHTYPE": [
+          "IDPWLDAP",
+          "IDPWOS"
+        ]
+      }
+    },
+    "DISPLAY CHANNEL": {
+      "extend_enum": {
+        "TYPE": [
+          "AMQP",
+          "MQTT"
+        ]
+      }
+    },
+    "DISPLAY CONN": {
+      "extend_enum": {
+        "TYPE": [
+          "*"
+        ]
+      }
+    },
+    "REFRESH QMGR": {
+      "extend_enum": {
+        "OBJECT": [
+          "AUTHREC",
+          "CHLAUTH",
+          "COMMINFO",
+          "LISTENER",
+          "POLICY",
+          "SERVICE"
+        ]
+      }
+    },
+    "DISPLAY SBSTATUS": {
+      "add_params": [
+        {
+          "name": "DURABLE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "NO",
+            "YES"
+          ],
+          "optional": true,
+          "description": "Specify this attribute to restrict the type of subscriptions which are displayed."
+        }
+      ]
+    },
+    "DISPLAY QSTATUS": {
+      "add_params": [
+        {
+          "name": "TYPE",
+          "kind": "enum",
+          "values": [
+            "QUEUE",
+            "HANDLE"
+          ],
+          "optional": true,
+          "description": "Specifies the type of status information required:"
+        },
+        {
+          "name": "OPENTYPE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "INPUT",
+            "OUTPUT"
+          ],
+          "optional": true,
+          "description": "Restricts the queues selected to those that have handles with the specified type of access:"
+        }
+      ]
+    },
+    "ALTER SERVICE": {
+      "add_params": [
+        {
+          "name": "CONTROL",
+          "kind": "enum",
+          "values": [
+            "MANUAL",
+            "QMGR",
+            "STARTONLY"
+          ],
+          "optional": true,
+          "description": "How the service is to be started and stopped:"
+        },
+        {
+          "name": "SERVTYPE",
+          "kind": "enum",
+          "values": [
+            "SERVER",
+            "COMMAND"
+          ],
+          "optional": true,
+          "description": "Specifies the mode in which the service is to run:"
+        }
+      ]
+    },
+    "RESOLVE CHANNEL": {
+      "add_params": [
+        {
+          "name": "ACTION",
+          "kind": "enum",
+          "values": [
+            "COMMIT",
+            "BACKOUT"
+          ],
+          "optional": true,
+          "description": "Specifies whether to commit or back out the in-doubt messages (this is required):"
         }
       ]
     }

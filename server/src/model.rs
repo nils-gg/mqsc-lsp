@@ -798,6 +798,40 @@ mod tests {
     }
 
     #[test]
+    fn oracle_enum_and_kind_fixes_are_merged() {
+        // extraction artifacts corrected and oracle-proven values present
+        let defpres = enum_values(param("ALTER", "QLOCAL", "DEFPRESP"));
+        assert!(defpres.contains(&"SYNC".to_string()), "{defpres:?}");
+        assert!(!defpres.iter().any(|v| v.starts_with('!')), "{defpres:?}");
+        let dur = enum_values(param("DISPLAY", "SBSTATUS", "DURABLE"));
+        assert!(dur.contains(&"ALL".to_string()), "{dur:?}");
+        // 2011 special-value enums that are really cluster-name strings
+        assert!(param("ALTER", "QALIAS", "CLUSNL").kind == ValueKind::Str);
+        assert!(param("ALTER", "QLOCAL", "CLUSTER").kind == ValueKind::Str);
+        // the '* ,' enum the extractor built for user-exit data is gone
+        assert!(param("DEFINE", "CHANNEL", "MSGDATA").kind == ValueKind::Str);
+        // oracle values added, z/OS extras kept
+        assert!(enum_values(param("DEFINE", "QLOCAL", "DEFBIND")).contains(&"GROUP".to_string()));
+        let pubprty = param("DEFINE", "SUB", "PUBPRTY");
+        assert!(pubprty.alt_integer, "PUBPRTY lost its integer form");
+        let pp = enum_values(pubprty);
+        assert!(
+            pp.contains(&"SYSTEM".to_string()) && pp.contains(&"ASPUB".to_string()),
+            "{pp:?}"
+        );
+        // tightenings the 10.0.1 parser proves
+        let aff = enum_values(param("ALTER", "CHANNEL", "AFFINITY"));
+        assert!(
+            aff.contains(&"NONE".to_string()) && aff.contains(&"PREFERRED".to_string()),
+            "{aff:?}"
+        );
+        // SET CHLAUTH ACTION: the fabricated DELETE is gone, oracle values in
+        let act = enum_values(param("SET", "CHLAUTH", "ACTION"));
+        assert!(!act.contains(&"DELETE".to_string()), "{act:?}");
+        assert!(act.contains(&"REMOVEALL".to_string()), "{act:?}");
+    }
+
+    #[test]
     fn rebuilt_define_sub_has_modern_parameters() {
         assert!(param("DEFINE", "SUB", "TOPICSTR").kind == ValueKind::Str);
         let e = enum_values(param("DEFINE", "SUB", "EXPIRY"));
