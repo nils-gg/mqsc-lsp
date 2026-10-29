@@ -8,6 +8,32 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Release engineering (Phase 5 / PR 10): the Release workflow now builds
+  the server on every shipped platform with the pinned MSRV toolchain —
+  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc` (zip), `x86_64-apple-darwin` and
+  `aarch64-apple-darwin` — smoke-tests each native artifact it can run,
+  packages the VS Code extension (`npm ci` + vsce, committed
+  `package-lock.json`) and publishes everything as one GitHub Release
+  with a single `SHA256SUMS`; the first job is a version gate
+  (`tools/check_versions.py`) failing the release unless the tag,
+  `server/Cargo.toml` and the extension `package.json` agree, and CI runs
+  the same agreement check on every push. `rust-version = "1.75"` is now
+  declared in `Cargo.toml`
+- The VS Code extension finds its server instead of dying silently:
+  `mqsc.server.path` (default `mqsc-lsp` = auto) honors an explicit
+  command/path exactly — a wrong one fails loudly with a reason — auto
+  mode searches `PATH`, then the common install directories
+  (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`,
+  `%LOCALAPPDATA%\Programs\mqsc-lsp`), and a miss shows a warning that
+  links to the releases page or the setting instead of launching a
+  phantom command; changing the path mid-session now rebuilds the client
+  (the old code restarted the old baked-in command). No bundling, no
+  downloading — deliberate (VSIX size); `publisher` and `repository` are
+  real, so the packaged VSIX is marketplace-ready later
+  (`tools/extension_resolve_test.js` pins all five lookup scenarios
+  against a stubbed VS Code host, no dependencies)
+
 - Watched-file reindexing of the workspace index: after the startup scan the
   server asks the client (via `client/registerCapability`) to report changes
   to `**/*.mqsc`, and each `workspace/didChangeWatchedFiles` event reindexes
@@ -41,6 +67,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   buffer (`tools/workspace_index_smoke.py` covers both sessions, on and off)
 
 ### Changed
+- CI is a matrix now: the full gate set (fmt, clippy `-D warnings`, both
+  smoke sessions, model/version guards, extension resolver test, exact
+  `--check` exit codes) stays on the pinned 1.75, and `cargo test
+  --locked` additionally runs on ubuntu-stable, windows-latest (msvc)
+  and macos-latest — MSRV-rot and platform regressions surface on push.
+  Test URIs no longer hardcode `/tmp/...` paths (`Url::from_file_path`
+  panics on drive-less paths under Windows); index-only documents use
+  platform-neutral `file:///` keys and disk-backed ones real temp paths
 - Rename now rewrites every site of a symbol across the whole workspace,
   closed files included. It used to stop at open documents because a scanned
   entry was only as fresh as the last scan; with the watcher above keeping

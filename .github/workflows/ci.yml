@@ -1,8 +1,16 @@
 name: CI
 
 # The repo pins rustc 1.75 (MSRV, see AGENTS.md): dependency versions in
-# server/Cargo.toml carry `=` pins that only resolve on that toolchain, so
-# CI must not drift to a newer stable.
+# server/Cargo.toml carry `=` pins that only resolve there, so the FULL
+# gate set (fmt, clippy, model guard, CLI exit codes, both smoke sessions)
+# runs on exactly that toolchain. fmt/clippy are deliberately MSRV-only:
+# a newer clippy adds lints and -D warnings would fail on style we did
+# not choose. The stable/windows/macos jobs answer the other question —
+# does the locked dependency set still compile and pass tests on a modern
+# toolchain and on the platforms the Release workflow ships binaries for.
+# They build with --locked, so they test precisely the versions the lock
+# pins; a red job there means a real MSRV-rot or platform regression.
+# The Python smoke harnesses are Linux-only by design (os.set_blocking).
 
 on:
   push:
@@ -13,12 +21,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: build, lint, test, smoke (ubuntu, rust 1.75)
+  msrv:
+    name: full gates (ubuntu, rust 1.75 = MSRV)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: release versions agree (Cargo.toml vs extension package.json)
+        run: python3 tools/check_versions.py
+
+      - name: extension server-resolution behavior (stubbed vscode host)
+        run: node tools/extension_resolve_test.js
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -48,6 +62,9 @@ jobs:
       - name: LSP smoke session against the release binary
         run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
 
+      - name: workspace index smoke (scan, watcher registration, fs events)
+        run: python3 tools/workspace_index_smoke.py server/target/release/mqsc-lsp
+
       - name: model regeneration guard (skips without the IBM reference)
         run: python3 tools/check_model.py
 
@@ -67,3 +84,64 @@ jobs:
           if [ $rc -ne 0 ]; then
             echo "expected exit 0 with UNKNOWN_PARAM=off, got $rc"; exit 1
           fi
+
+  stable:
+    name: test + smoke (ubuntu, stable Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: cargo test --locked (catches MSRV/pin rot early)
+        working-directory: server
+        run: cargo test --locked
+
+      - name: cargo build --release --locked
+        working-directory: server
+        run: cargo build --release --locked
+
+      - name: LSP smoke session against the stable-built binary
+        run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
+
+  windows:
+    name: test (windows msvc, stable Rust)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      # The same tree-sitter C files the Release job ships, compiled by
+      # MSVC; the tests are the portability check (URI/path handling was
+      # the one Windows-hostile spot, fixed in PR 10).
+      - name: cargo test --locked
+        working-directory: server
+        run: cargo test --locked
+
+  macos:
+    name: test (macos, stable Rust)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: cargo test --locked
+        working-directory: server
+        run: cargo test --locked
