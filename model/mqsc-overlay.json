@@ -158,6 +158,12 @@
             "name": "QSGDISP",
             "kind": "string",
             "optional": true
+          },
+          {
+            "name": "AUTHRMV",
+            "kind": "string",
+            "optional": true,
+            "description": "Authority to remove from the profile (distributed spelling) (oracle MQ 10.0.1)"
           }
         ],
         "attrs": [],
@@ -278,6 +284,18 @@
               "REQUIRED"
             ],
             "optional": true
+          },
+          {
+            "name": "ADDRLIST",
+            "kind": "string",
+            "optional": true,
+            "description": "IP address or host name the CHLAUTH record matches (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "CUSTOM",
+            "kind": "string",
+            "optional": true,
+            "description": "Customer-defined string stored with the object (oracle MQ 10.0.1)"
           }
         ],
         "attrs": [],
@@ -619,6 +637,18 @@
             "name": "QSGDISP",
             "kind": "string",
             "optional": true
+          },
+          {
+            "name": "TYPE",
+            "kind": "string",
+            "optional": true,
+            "description": "Restrict the display/refresh to this type (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "WHERE",
+            "kind": "string",
+            "optional": true,
+            "description": "Filter expression selecting the objects to display (oracle MQ 10.0.1)"
           }
         ],
         "attrs": [
@@ -649,6 +679,53 @@
               "FULL"
             ],
             "optional": true
+          },
+          {
+            "name": "MATCH",
+            "kind": "enum",
+            "values": [
+              "ALL",
+              "EXACT",
+              "GENERIC"
+            ],
+            "optional": true,
+            "description": "How the profile argument is matched (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "WHERE",
+            "kind": "string",
+            "optional": true,
+            "description": "Filter expression selecting the objects to display (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "ADDRESS",
+            "kind": "string",
+            "optional": true,
+            "description": "CHLAUTH record address attribute (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "CLNTUSER",
+            "kind": "string",
+            "optional": true,
+            "description": "CHLAUTH record client user attribute (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "QMNAME",
+            "kind": "string",
+            "optional": true,
+            "description": "CHLAUTH record queue-manager attribute (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "SSLCERTI",
+            "kind": "string",
+            "optional": true,
+            "description": "CHLAUTH record SSL certificate issuer attribute (oracle MQ 10.0.1)"
+          },
+          {
+            "name": "SSLPEER",
+            "kind": "string",
+            "optional": true,
+            "description": "CHLAUTH record SSL peer attribute (oracle MQ 10.0.1)"
           }
         ],
         "attrs": [
@@ -1436,6 +1513,17 @@
           "kind": "flag",
           "optional": true,
           "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval (ASPARENT inherits from parent topic) (oracle MQ 10.0.1)"
         }
       ]
     },
@@ -1487,6 +1575,17 @@
           "kind": "flag",
           "optional": true,
           "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "ASPARENT",
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval (ASPARENT inherits from parent topic) (oracle MQ 10.0.1)"
         }
       ]
     },
@@ -2276,6 +2375,18 @@
           ],
           "optional": true,
           "description": "TLS enforcement for LDAP communication (railroad: NO | YES | ANON; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHTYPE",
+          "kind": "enum",
+          "values": [
+            "CRLLDAP",
+            "OCSP",
+            "IDPWOS",
+            "IDPWLDAP"
+          ],
+          "optional": true,
+          "description": "Type of the AUTHINFO object being altered (oracle MQ 10.0.1)"
         }
       ]
     },
@@ -2555,6 +2666,464 @@
           "values": [
             "LOCAL"
           ]
+        }
+      ]
+    },
+    "DELETE AUTHINFO": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE CHANNEL": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CHLTABLE",
+          "kind": "enum",
+          "values": [
+            "QMGRTBL",
+            "CLNTTBL"
+          ],
+          "optional": true,
+          "description": "Channel table the auto-defined entry is removed from (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE LISTENER": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE NAMELIST": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE PROCESS": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE QALIAS": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHREC",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Delete or keep the object's authority records (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE QLOCAL": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHREC",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Delete or keep the object's authority records (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE QMODEL": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHREC",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Delete or keep the object's authority records (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE QREMOTE": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHREC",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Delete or keep the object's authority records (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE SERVICE": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE SUB": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DELETE TOPIC": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "AUTHREC",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Delete or keep the object's authority records (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "START CHANNEL": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "START LISTENER": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "START SERVICE": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "STOP CHANNEL": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "STOP LISTENER": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "STOP SERVICE": {
+      "add_params": [
+        {
+          "name": "IGNSTATE",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO"
+          ],
+          "optional": true,
+          "description": "Also delete the object's state in a queue-sharing group (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY CHSTATUS": {
+      "add_params": [
+        {
+          "name": "CHLTYPE",
+          "kind": "enum",
+          "values": [
+            "AMQP",
+            "MQTT"
+          ],
+          "optional": true,
+          "description": "Restrict the display to these channel types (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CLIENTID",
+          "kind": "string",
+          "optional": true,
+          "description": "Restrict the display to this client identifier (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY LISTENER": {
+      "add_params": [
+        {
+          "name": "TRPTYPE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "NETBIOS",
+            "LU62",
+            "SPX",
+            "TCP"
+          ],
+          "optional": true,
+          "description": "Restrict the display to this transport type (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY PUBSUB": {
+      "add_params": [
+        {
+          "name": "TYPE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "LOCAL",
+            "PARENT",
+            "CHILD"
+          ],
+          "optional": true,
+          "description": "Restrict the display/refresh to this type (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "WHERE",
+          "kind": "string",
+          "optional": true,
+          "description": "Filter expression selecting the objects to display (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY QMSTATUS": {
+      "add_params": [
+        {
+          "name": "NHATYPE",
+          "kind": "enum",
+          "values": [
+            "ALL",
+            "GROUP",
+            "INSTANCE"
+          ],
+          "optional": true,
+          "description": "Native HA status type to display (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "WHERE",
+          "kind": "string",
+          "optional": true,
+          "description": "Filter expression selecting the objects to display (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "DISPLAY SUB": {
+      "add_params": [
+        {
+          "name": "DISTYPE",
+          "kind": "enum",
+          "values": [
+            "RESOLVED",
+            "DEFINED"
+          ],
+          "optional": true,
+          "description": "Whether resolved or defined subscriptions are displayed (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "REFRESH SECURITY": {
+      "add_params": [
+        {
+          "name": "TYPE",
+          "kind": "enum",
+          "values": [
+            "AUTHSERV",
+            "CONNAUTH",
+            "SSL"
+          ],
+          "optional": true,
+          "description": "Restrict the display/refresh to this type (oracle MQ 10.0.1)"
+        }
+      ]
+    },
+    "RESET QMGR": {
+      "add_params": [
+        {
+          "name": "ARCHIVED",
+          "kind": "string",
+          "optional": true,
+          "description": "Archive log location or archived-log selection (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "REDUCE",
+          "kind": "enum",
+          "values": [
+            "AUTO",
+            "MAX",
+            "ONE"
+          ],
+          "optional": true,
+          "description": "How far to reduce the specified object (oracle MQ 10.0.1)"
+        }
+      ],
+      "extend_enum": {
+        "TYPE": [
+          "ARCHLOG",
+          "REDUCELOG"
+        ]
+      }
+    },
+    "SET LOG": {
+      "add_params": [
+        {
+          "name": "ARCHIVED",
+          "kind": "string",
+          "optional": true,
+          "description": "Archive log location or archived-log selection (oracle MQ 10.0.1)"
         }
       ]
     }
