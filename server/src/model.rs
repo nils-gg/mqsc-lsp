@@ -897,6 +897,31 @@ mod tests {
     }
 
     #[test]
+    fn ccsid_hover_text_and_upsert_keep_the_parameter_shape() {
+        // the CCSID hover enrichment upserts ALTER QMGR CCSID; an upsert
+        // that forgot kind or footnotes would silently downgrade it
+        let p = param("ALTER", "QMGR", "CCSID");
+        assert_eq!(p.kind, ValueKind::Integer, "CCSID lost its integer kind");
+        assert!(
+            p.footnotes.iter().any(|f| f.contains("AIX")),
+            "CCSID lost its reference footnotes: {:?}",
+            p.footnotes
+        );
+        assert!(
+            p.description.contains("1208 = UTF-8"),
+            "CCSID lost the code list"
+        );
+        // the 2011 reference text survives underneath it
+        assert!(p.description.contains("Coded character set identifier"));
+        assert!(param("DEFINE", "COMMINFO", "CCSID")
+            .description
+            .contains("1208 = UTF-8"));
+        assert!(param("ALTER", "COMMINFO", "CCSID")
+            .description
+            .contains("1208 = UTF-8"));
+    }
+
+    #[test]
     fn command_availability_rules_load_and_look_up() {
         // the curated command table (overlay `command_availability`) loads
         // and answers case-insensitively on the canonical pair spelling

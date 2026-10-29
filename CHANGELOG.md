@@ -94,6 +94,12 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   buffer (`tools/workspace_index_smoke.py` covers both sessions, on and off)
 
 ### Changed
+- The CCSID hover text now names the most-used codes: `ALTER QMGR`
+  CCSID (appended to the reference description) and the curated
+  `DEFINE`/`ALTER COMMINFO` CCSID explain 1208 = UTF-8, 819 =
+  ISO 8859-1/Latin-1, 437 = US English, 1252 = Windows Latin-1, 850 =
+  Multilingual Latin-1, 37 = EBCDIC US (z/OS host), 943 = Japanese and
+  1386 = Simplified Chinese (GBK).
 - CI is a matrix now: the full gate set (fmt, clippy `-D warnings`, both
   smoke sessions, model/version guards, extension resolver test, exact
   `--check` exit codes) stays on the pinned 1.75, and `cargo test

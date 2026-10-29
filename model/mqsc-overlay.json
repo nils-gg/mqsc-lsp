@@ -474,7 +474,7 @@
               "integer"
             ],
             "optional": true,
-            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1)"
+            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1). Common CCSID values: 1208 = UTF-8 (Unicode); 819 = ISO 8859-1 (Latin-1; typical Linux/UNIX queue-manager default); 437 = US English (historical Windows default); 1252 = Windows Latin-1 (Western European); 850 = Multilingual Latin-1; 37 = EBCDIC US (typical z/OS host codepage); 943 = Japanese; 1386 = Simplified Chinese (GBK)."
           },
           {
             "name": "COMMEV",
@@ -615,7 +615,7 @@
               "integer"
             ],
             "optional": true,
-            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1)"
+            "description": "CCSID used by the MQI bridge (railroad: ASPUB | integer; oracle MQ 10.0.1). Common CCSID values: 1208 = UTF-8 (Unicode); 819 = ISO 8859-1 (Latin-1; typical Linux/UNIX queue-manager default); 437 = US English (historical Windows default); 1252 = Windows Latin-1 (Western European); 850 = Multilingual Latin-1; 37 = EBCDIC US (typical z/OS host codepage); 943 = Japanese; 1386 = Simplified Chinese (GBK)."
           },
           {
             "name": "COMMEV",
@@ -2610,6 +2610,15 @@
           ],
           "optional": true,
           "description": "Specifies whether applications can override the settings of the ACCTQ and ACCTMQI queue manager parameters:"
+        },
+        {
+          "name": "CCSID",
+          "kind": "integer",
+          "optional": true,
+          "footnotes": [
+            "Valid only on AIX, HP-UX, Linux, i5/OS, Solaris, and Windows."
+          ],
+          "description": "Coded character set identifier. This applies to all character string fields defined by the application programming interface (API), including the names of objects, and the creation date and time of each queue. It does not apply to application data carried as the text of messages. Common CCSID values: 1208 = UTF-8 (Unicode); 819 = ISO 8859-1 (Latin-1; typical Linux/UNIX queue-manager default); 437 = US English (historical Windows default); 1252 = Windows Latin-1 (Western European); 850 = Multilingual Latin-1; 37 = EBCDIC US (typical z/OS host codepage); 943 = Japanese; 1386 = Simplified Chinese (GBK)."
         }
       ]
     },
