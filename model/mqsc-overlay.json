@@ -2642,7 +2642,8 @@
             "OFF",
             "OPTIONAL",
             "REQDADM",
-            "REQUIRED"
+            "REQUIRED",
+            "NONE"
           ],
           "optional": true
         },
@@ -2702,7 +2703,10 @@
           "values": [
             "ALLOWANY",
             "ORDERLDAP",
-            "SEARCHUSR"
+            "SEARCHUSR",
+            "OS",
+            "SEARCHGRP",
+            "SRCHGRPSN"
           ],
           "optional": true
         },
@@ -2792,7 +2796,8 @@
             "OFF",
             "OPTIONAL",
             "REQDADM",
-            "REQUIRED"
+            "REQUIRED",
+            "NONE"
           ],
           "optional": true
         },
@@ -2852,7 +2857,10 @@
           "values": [
             "ALLOWANY",
             "ORDERLDAP",
-            "SEARCHUSR"
+            "SEARCHUSR",
+            "OS",
+            "SEARCHGRP",
+            "SRCHGRPSN"
           ],
           "optional": true
         },
@@ -2972,8 +2980,13 @@
         },
         {
           "name": "DESTCLAS",
-          "kind": "string",
-          "optional": true
+          "kind": "enum",
+          "values": [
+            "MANAGED",
+            "PROVIDED"
+          ],
+          "optional": true,
+          "description": "System managed destination."
         },
         {
           "name": "DESTCORL",
@@ -3034,8 +3047,15 @@
         },
         {
           "name": "PSPROP",
-          "kind": "string",
-          "optional": true
+          "kind": "enum",
+          "values": [
+            "NONE",
+            "COMPAT",
+            "RFH2",
+            "MSGPROP"
+          ],
+          "optional": true,
+          "description": "The manner in which publish subscribe related message properties are added to messages sent to this subscription."
         },
         {
           "name": "PUBACCT",
@@ -3049,8 +3069,15 @@
         },
         {
           "name": "PUBPRTY",
-          "kind": "integer",
-          "optional": true
+          "kind": "enum",
+          "values": [
+            "ASPUB",
+            "ASQDEF",
+            "SYSTEM",
+            "integer"
+          ],
+          "optional": true,
+          "description": "The priority of the message sent to this subscription."
         },
         {
           "name": "PUBSCOPE",
@@ -3117,13 +3144,35 @@
         },
         {
           "name": "VARUSER",
-          "kind": "string",
-          "optional": true
+          "kind": "enum",
+          "values": [
+            "ANY",
+            "FIXED"
+          ],
+          "optional": true,
+          "description": "Specifies whether a user other than the subscription creator can connect to and take over ownership of the subscription."
         },
         {
           "name": "WSCHEMA",
+          "kind": "enum",
+          "values": [
+            "CHAR",
+            "TOPIC"
+          ],
+          "optional": true,
+          "description": "The schema to be used when interpreting any wildcard characters in the topic string."
+        },
+        {
+          "name": "LIKE",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "Existing subscription whose attributes are copied (railroad: subscription_name; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOREPLACE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Fail rather than replace an existing subscription of the same name (oracle MQ 10.0.1)"
         }
       ],
       "add_params": [
@@ -4219,6 +4268,254 @@
       "command": "DISPLAY CHLAUTH",
       "since": "9.0",
       "note": "channel availability control was introduced with MQ 9.0"
+    }
+  ],
+  "value_docs": [
+    {
+      "param": "CCSID",
+      "obj": [],
+      "values": {
+        "1208": "UTF-8 (Unicode)",
+        "819": "ISO 8859-1 (Latin-1) — typical Linux/UNIX queue-manager default",
+        "437": "US English (the historical Windows default)",
+        "1252": "Windows Latin-1 (Western European)",
+        "850": "Multilingual Latin-1",
+        "37": "EBCDIC US/Canada — typical z/OS host codepage",
+        "943": "Japanese",
+        "1386": "Simplified Chinese (GBK)",
+        "65535": "automatic — the default coded character set identifier (MQCCSI_DEFAULT)"
+      }
+    },
+    {
+      "param": "CHLTYPE",
+      "obj": [
+        "CHANNEL"
+      ],
+      "values": {
+        "SDR": "sender channel — pushes messages to a remote queue manager",
+        "RCVR": "receiver channel — accepts messages pushed in by a sender channel",
+        "SVR": "server channel — answers the requests of a requestor channel",
+        "RQSTR": "requestor channel — the requesting half of a server-channel pair",
+        "SVRCONN": "server-connection channel — serves directly connected client applications",
+        "CLNTCONN": "client-connection channel — the client-side definition of how to reach a SVRCONN channel",
+        "CLUSSDR": "cluster sender channel — sends messages and objects to another queue manager in the cluster",
+        "CLUSRCVR": "cluster receiver channel — receives cluster traffic from any cluster sender",
+        "AMQP": "AMQP channel — the queue manager's AMQP 1.0 protocol endpoint",
+        "MQTT": "MQTT channel — the queue manager's MQTT protocol endpoint"
+      }
+    },
+    {
+      "param": "TRPTYPE",
+      "obj": [
+        "CHANNEL",
+        "LISTENER"
+      ],
+      "values": {
+        "TCP": "TCP/IP — the only transport distributed MQ supports",
+        "LU62": "legacy SNA LU 6.2 transport (the z/OS world; distributed needs TCP)",
+        "NETBIOS": "legacy NetBIOS transport — retired long ago",
+        "SPX": "legacy Novell IPX/SPX transport — retired long ago",
+        "DECNET": "legacy DECnet transport — retired long ago"
+      }
+    },
+    {
+      "param": "DEFBIND",
+      "obj": [
+        "QLOCAL",
+        "QALIAS",
+        "QREMOTE"
+      ],
+      "values": {
+        "NOTFIXED": "the binding is not fixed: each subsequent open re-resolves the alias target",
+        "OPEN": "the binding is fixed at first open: the alias keeps resolving to the object chosen then"
+      }
+    },
+    {
+      "param": "DEFTYPE",
+      "obj": [
+        "QMODEL"
+      ],
+      "values": {
+        "TEMPDYN": "dynamic queues made from this model are deleted when they are last closed",
+        "PERMDYN": "dynamic queues made from this model persist after closing until explicitly deleted",
+        "SHAREDYN": "dynamic queues are shared: an open of an existing name reuses that queue"
+      }
+    },
+    {
+      "param": "TYPE",
+      "obj": [
+        "CHLAUTH"
+      ],
+      "values": {
+        "ADDRESSMAP": "a record matched on the client's IP address",
+        "BLOCKADDR": "a list of blocked client IP addresses — always denied, no mapping applies",
+        "BLOCKUSER": "a list of blocked user IDs — always denied, no mapping applies",
+        "GROUPMAP": "a record matched on a group the user belongs to",
+        "QMGRMAP": "a record matched on the name of the originating queue manager",
+        "SSLPEERMAP": "a record matched on the TLS certificate's distinguished name (SSLPeer)",
+        "USERMAP": "a record matched on the user ID the client sends",
+        "ALL": "every CHLAUTH record type (a DISPLAY filter)"
+      }
+    },
+    {
+      "param": "TYPE",
+      "obj": [
+        "QUEUE"
+      ],
+      "values": {
+        "ALL": "every queue type (a DISPLAY filter)",
+        "QLOCAL": "local queues",
+        "QALIAS": "alias queues",
+        "QMODEL": "model queues",
+        "QREMOTE": "remote queues",
+        "QCLUSTER": "queues defined by a cluster"
+      }
+    },
+    {
+      "param": "TYPE",
+      "obj": [
+        "TOPIC"
+      ],
+      "values": {
+        "LOCAL": "a local (non-cluster) topic object",
+        "CLUSTER": "a topic object published cluster-wide",
+        "ALL": "local and cluster topics alike (a DISPLAY filter)"
+      }
+    },
+    {
+      "param": "TYPE",
+      "obj": [
+        "SECURITY"
+      ],
+      "values": {
+        "AUTHSERV": "refresh the authentication service information (AUTHINFO objects)",
+        "CONNAUTH": "refresh the connection authentication objects",
+        "SSL": "refresh the server's TLS/SSL certificates and keys"
+      }
+    },
+    {
+      "param": "ACTION",
+      "obj": [
+        "CHLAUTH"
+      ],
+      "values": {
+        "REPLACE": "replace a matching record if one exists, otherwise create it",
+        "ADD": "create a new record; the command errors if a match already exists",
+        "REMOVE": "remove the matching record",
+        "REMOVEALL": "remove every matching record"
+      }
+    },
+    {
+      "param": "ACTION",
+      "obj": [
+        "POLICY"
+      ],
+      "values": {
+        "REPLACE": "replace a matching policy record if one exists, otherwise create it",
+        "ADD": "create a new policy record; the command errors if a match already exists",
+        "REMOVE": "remove the matching policy record"
+      }
+    },
+    {
+      "param": "ACTION",
+      "obj": [
+        "CHANNEL",
+        "TPIPE"
+      ],
+      "values": {
+        "COMMIT": "commit the prepared unit of work",
+        "BACKOUT": "back out (undo) the prepared unit of work"
+      }
+    },
+    {
+      "param": "CHCKCLNT",
+      "obj": [
+        "AUTHINFO"
+      ],
+      "values": {
+        "NONE": "client TLS certificates are not checked",
+        "OPTIONAL": "a certificate is validated when the client presents one, but is not required",
+        "REQUIRED": "the client must present a valid TLS certificate",
+        "REQDADM": "a certificate is required only for administrative connections"
+      }
+    },
+    {
+      "param": "CHCKCLNT",
+      "obj": [
+        "CHLAUTH"
+      ],
+      "values": {
+        "NONE": "client TLS certificates are not checked",
+        "OPTIONAL": "a certificate is validated when the client presents one, but is not required",
+        "REQUIRED": "the client must present a valid TLS certificate",
+        "REQDADM": "a certificate is required only for administrative connections",
+        "ASQMGR": "inherit the queue manager's CHCKCLNT setting"
+      }
+    },
+    {
+      "param": "AUTHTYPE",
+      "obj": [
+        "AUTHINFO"
+      ],
+      "values": {
+        "NONE": "no authentication service information (the default)",
+        "IDPWOS": "identity provisioned by the operating system — user IDs checked against platform credentials",
+        "IDPWLDAP": "identity provisioned from LDAP — user IDs checked with an LDAP bind",
+        "CRLLDAP": "certificate revocation lists fetched from LDAP",
+        "OCSP": "certificate status checked through an OCSP responder"
+      }
+    },
+    {
+      "param": "CLROUTE",
+      "obj": [
+        "TOPIC"
+      ],
+      "values": {
+        "DIRECT": "publications travel straight to the queue manager holding the subscription, bypassing a topic host",
+        "TOPICHOST": "subscriptions and publications route through a queue manager that hosts the topic"
+      }
+    },
+    {
+      "param": "CAPEXPRY",
+      "obj": [
+        "TOPIC"
+      ],
+      "values": {
+        "ASPARENT": "inherit the value from the parent topic in the topic tree",
+        "NOLIMIT": "the value never expires"
+      }
+    },
+    {
+      "param": "MCAST",
+      "obj": [
+        "TOPIC"
+      ],
+      "values": {
+        "ASPARENT": "inherit the value from the parent topic in the topic tree"
+      }
+    },
+    {
+      "param": "USEDLQ",
+      "obj": [
+        "TOPIC"
+      ],
+      "values": {
+        "ASPARENT": "inherit the value from the parent topic in the topic tree",
+        "YES": "an undeliverable message is put to the dead-letter queue",
+        "NO": "an undeliverable message is discarded"
+      }
+    },
+    {
+      "param": "CLWLUSEQ",
+      "obj": [
+        "QLOCAL",
+        "QMGR"
+      ],
+      "values": {
+        "QMGR": "fall back to the queue manager's CLWLUSEQ default",
+        "ANY": "cluster workloads may use the queue from any queue manager",
+        "LOCAL": "cluster workloads use the queue only from its own queue manager"
+      }
     }
   ]
 }

@@ -8,6 +8,19 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Hovering a parameter VALUE explains it: a fifth curated overlay
+  section, `value_docs` (`param` + object-scoped `{VALUE: meaning}`),
+  appends the value's descriptive name to the parameter card —
+  `CCSID(1208)` says "UTF-8 (Unicode)", `CHLTYPE(SDR)` "sender channel",
+  `TYPE(BLOCKUSER)` the CHLAUTH record meaning, and so on: 20 rules /
+  83 values across CCSID (incl. 65535 = automatic), CHLTYPE, TRPTYPE,
+  DEFBIND, DEFTYPE, TYPE (CHLAUTH/QUEUE/TOPIC/SECURITY), ACTION
+  (CHLAUTH/POLICY/COMMIT-BACKOUT), CHCKCLNT, AUTHTYPE, CLROUTE and the
+  topic ASPARENT family. Object scoping separates same-spelled values;
+  an anti-fabrication guard pins every curated value to a value the
+  model actually accepts. Hovering a value word now correctly shows the
+  OWNING parameter's card (value words used to be misread as parameter
+  names and produced nothing). Informational only — no diagnostics.
 - Command-level availability (diagnostic 15 grows up): a fourth curated
   overlay section, `command_availability`, flags whole `VERB OBJECT`
   commands that the configured `mqsc.targetVersion`/`mqsc.platform` does

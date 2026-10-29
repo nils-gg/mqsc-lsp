@@ -119,7 +119,22 @@ the full picture; this file only lists what is easy to get wrong.
   MAXSMSGS extractor artifacts get no rule) — plus the CHLAUTH-family
   `since: 9.0` floor; a guard test insists every rule targets a pair
   `Model::resolve` answers (DISPLAY BUFFPOOL was drafted as a rule for a
-  command the model does not even carry).
+  command the model does not even carry). A fifth curated section,
+  `value_docs` (`param` + `obj` scope → `{VALUE: meaning}`, see
+  `model::ValueDoc`), annotates the HOVERED VALUE inside a parameter group
+  (`CCSID(1208)` adds "**`1208`** — UTF-8 (Unicode)"): purely
+  informational, never a diagnostic. `Model::value_doc` prefers
+  object-restricted rules (that scoping separates `ACTION` on CHLAUTH from
+  ACTION on CHANNEL, TYPE on QUEUE from TYPE on CHLAUTH) and falls back to
+  general rules. Hover now hovers the OWNING parameter for any token
+  inside an `argument` group (value words used to be misread as parameter
+  words — hover tests pin char offsets, so re-verify them when editing
+  fixture lines); the positional object-name group cannot leak a card
+  because name tokens short-circuit earlier through `site_at`. The
+  anti-fabrication guard `every_documented_value_exists_in_the_model`
+  insists each curated value is a model enum member, a number for a
+  numeric param, or rides a definition the model leaves unconstrained
+  (e.g. DEFINE AUTHINFO AUTHTYPE, an extraction-leftover free string).
 - `settings::WorkspaceScan` (`mqsc.workspaceIndex.enabled` / `maxFiles` /
   `exclude`, same nested-or-flat lookup and per-key fallback as `Target`)
   gates the PR 7 startup scan: default on, 2000 files, `.git`/`target`/

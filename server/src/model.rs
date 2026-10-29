@@ -127,6 +127,23 @@ pub struct CmdAvailRule {
     pub note: String,
 }
 
+/// One curated value-meaning set for a parameter (overlay `value_docs`
+/// section). Like the other curated tables only parameters whose value
+/// meanings are documented with confidence are listed. `obj` limits the
+/// rule to certain canonical object types and object-restricted rules
+/// win over general ones — that scoping is what separates ACTION on
+/// CHLAUTH from ACTION on CHANNEL, or TYPE on QUEUE from TYPE on
+/// CHLAUTH. Purely informational: hover appends the meaning of the
+/// hovered value; nothing here ever flags a diagnostic.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueDoc {
+    pub param: String,
+    #[serde(default)]
+    pub obj: Vec<String>,
+    /// value spelling (uppercase) -> meaning shown in the hover card
+    pub values: HashMap<String, String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawModel {
     commands: HashMap<String, HashMap<String, CommandEntry>>,
@@ -146,6 +163,9 @@ struct RawModel {
     /// curated command availability (overlay-only data; see CmdAvailRule)
     #[serde(default)]
     command_availability: Vec<CmdAvailRule>,
+    /// curated value meanings (overlay-only data; see ValueDoc)
+    #[serde(default)]
+    value_docs: Vec<ValueDoc>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -180,6 +200,9 @@ struct Overlay {
     /// curated command availability rules (see CmdAvailRule)
     #[serde(default)]
     command_availability: Vec<CmdAvailRule>,
+    /// curated parameter value meanings (see ValueDoc)
+    #[serde(default)]
+    value_docs: Vec<ValueDoc>,
 }
 
 impl RawModel {
@@ -249,6 +272,8 @@ impl RawModel {
                 ),
             }
         }
+        // curated value meanings: overlay-only, like the tables above
+        self.value_docs.extend(ov.value_docs);
     }
 }
 
@@ -338,6 +363,9 @@ pub struct Model {
     /// `command_availability` section). Drives the same diagnostic 15 on
     /// the VERB OBJECT span; same settings gate.
     command_availability: Vec<CmdAvailRule>,
+    /// curated parameter value meanings (from the overlay's `value_docs`
+    /// section). Hover annotation only; never flags anything.
+    value_docs: Vec<ValueDoc>,
 }
 
 fn norm_syn(s: &str) -> String {
@@ -503,6 +531,7 @@ impl Model {
                 mandatory: raw.mandatory,
                 availability: raw.availability,
                 command_availability: raw.command_availability,
+                value_docs: raw.value_docs,
             }
         })
     }
@@ -616,6 +645,57 @@ impl Model {
     /// shipped table is expected to resolve in full).
     pub fn all_command_availability(&self) -> &[CmdAvailRule] {
         &self.command_availability
+    }
+
+    /// Curated meaning of `value` for `param` used on `object` (both
+    /// spelled as the model resolves them; `value` must already be
+    /// uppercased and quote-free). Object-restricted rules win over
+    /// general ones; absence means the meaning is not curated.
+    pub fn value_doc(&self, param: &str, object: &str, value: &str) -> Option<&str> {
+        let obj = norm_syn(object);
+        let param = param.to_ascii_uppercase();
+        let value = value.to_ascii_uppercase();
+        let find = |scoped: bool| {
+            self.value_docs.iter().find(|r| {
+                r.param == param
+                    && if scoped {
+                        r.obj.iter().any(|o| norm_syn(o) == obj)
+                    } else {
+                        r.obj.is_empty()
+                    }
+            })
+        };
+        find(true)
+            .and_then(|r| r.values.get(&value))
+            .or_else(|| find(false).and_then(|r| r.values.get(&value)))
+            .map(|s| s.as_str())
+    }
+
+    /// Every `(object, param)` pair the merged model carries (the
+    /// value_docs coverage guard iterates the whole table through this).
+    #[cfg(test)]
+    fn scoped_params(&self, param: &str, obj: &[String]) -> Vec<(String, Param)> {
+        let param = param.to_ascii_uppercase();
+        let mut out = Vec::new();
+        for objs in self.commands.values() {
+            for (object, &i) in objs {
+                if !obj.is_empty() && !obj.iter().any(|o| norm_syn(o) == *object) {
+                    continue;
+                }
+                let e = self.entry(i);
+                for p in &e.params {
+                    if p.name == param {
+                        out.push((object.clone(), p.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The curated `value_docs` table itself (coverage guard test input).
+    pub fn all_value_docs(&self) -> &[ValueDoc] {
+        &self.value_docs
     }
 
     /// documentation text for a parameter name, preferring contexts that
@@ -942,6 +1022,82 @@ mod tests {
         // platform — no rule, never flagged; and ordinary commands have none
         assert!(m.command_availability_for("DEFINE", "MAXSMSGS").is_none());
         assert!(m.command_availability_for("ALTER", "QLOCAL").is_none());
+    }
+
+    #[test]
+    fn value_docs_load_and_look_up_scoped() {
+        let m = model();
+        // general rule: any object carrying CCSID resolves numeric values
+        assert_eq!(
+            m.value_doc("ccsid", "COMMINFO", "1208"),
+            Some("UTF-8 (Unicode)")
+        );
+        assert!(m
+            .value_doc("CCSID", "QMGR", "65535")
+            .unwrap()
+            .contains("automatic"));
+        // object scoping separates same-spelled values on different objects
+        assert!(m.value_doc("ACTION", "CHLAUTH", "REMOVEALL").is_some());
+        assert!(m.value_doc("ACTION", "CHANNEL", "REMOVEALL").is_none());
+        assert!(m.value_doc("ACTION", "CHANNEL", "COMMIT").is_some());
+        assert!(m.value_doc("ACTION", "TPIPE", "BACKOUT").is_some());
+        assert!(m
+            .value_doc("TYPE", "CHLAUTH", "BLOCKUSER")
+            .unwrap()
+            .contains("blocked user"));
+        assert!(m
+            .value_doc("TYPE", "QUEUE", "QCLUSTER")
+            .unwrap()
+            .contains("cluster"));
+        assert!(m.value_doc("TYPE", "QMSTATUS", "HANDLE").is_none());
+        // CHCKCLNT on CHLAUTH additionally knows ASQMGR; AUTHINFO does not
+        assert!(m.value_doc("CHCKCLNT", "CHLAUTH", "ASQMGR").is_some());
+        assert!(m.value_doc("CHCKCLNT", "AUTHINFO", "ASQMGR").is_none());
+        assert!(m.value_doc("CHCKCLNT", "AUTHINFO", "OPTIONAL").is_some());
+        // unknown values, unknown params, and empty spelling stay silent
+        assert!(m.value_doc("CHLTYPE", "CHANNEL", "NOPE").is_none());
+        assert!(m.value_doc("NOPE", "CHANNEL", "SDR").is_none());
+        assert!(m.value_doc("", "CHANNEL", "SDR").is_none());
+    }
+
+    #[test]
+    fn every_documented_value_exists_in_the_model() {
+        // the anti-fabrication guard for `value_docs`: every curated
+        // meaning must key on a value the merged model actually accepts
+        // on its scoped commands — an enum value in the union of the
+        // scoped enums, a number for a numeric parameter, or a value on
+        // a definition the model does not constrain at all (the 2011
+        // extraction left some parameter kinds as free strings)
+        let m = model();
+        let table = m.all_value_docs();
+        assert_eq!(table.len(), 20, "value_docs rule count moved");
+        for r in table {
+            let hits = m.scoped_params(&r.param, &r.obj);
+            assert!(!hits.is_empty(), "{}: no scoped command", r.param);
+            let enum_of = |p: &Param| match &p.kind {
+                ValueKind::Enum(vs) => vs.clone(),
+                _ => Vec::new(),
+            };
+            let union: std::collections::HashSet<String> =
+                hits.iter().flat_map(|(_, p)| enum_of(p)).collect();
+            let numeric = hits.iter().any(|(_, p)| {
+                matches!(p.kind, ValueKind::Integer)
+                    || enum_of(p).iter().any(|x| x.eq_ignore_ascii_case("integer"))
+            });
+            let unconstrained = hits
+                .iter()
+                .any(|(_, p)| matches!(p.kind, ValueKind::Str | ValueKind::Name | ValueKind::Free));
+            for v in r.values.keys() {
+                assert!(
+                    union.contains(v)
+                        || (numeric && v.chars().all(|c| c.is_ascii_digit()))
+                        || unconstrained,
+                    "value_docs {}/{}: {v} is not a model value ({union:?})",
+                    r.param,
+                    r.obj.join(",")
+                );
+            }
+        }
     }
 
     #[test]

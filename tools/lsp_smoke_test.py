@@ -491,7 +491,8 @@ CMD_URI = "file:///tmp/cmdavail.mqsc"
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": CMD_URI, "languageId": "mqsc", "version": 1,
                      "text": "DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n"
-                             "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST('x')\n"}}})
+                             "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST('x')\n"
+                             "ALTER QMGR CCSID(1208)\n"}}})
 diags_cmd = []
 while True:
     m = pump(3)
@@ -510,6 +511,19 @@ m = request(61, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
 v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
 check("hover command card shows the curated availability (z/OS only)",
       "Availability (curated)" in v and "z/OS" in v, v[-120:])
+
+# value hover (overlay value_docs): the value token's card carries the
+# curated meaning of exactly that value, scoped by the object it is on.
+m = request(62, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
+                                       "position": {"line": 1, "character": 21}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on TYPE(BLOCKUSER)'s value explains the record type",
+      "`TYPE`" in v and "blocked user IDs" in v, v[-160:])
+m = request(63, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
+                                       "position": {"line": 2, "character": 17}})
+v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+check("hover on CCSID(1208)'s number says UTF-8 (Unicode)",
+      "`CCSID`" in v and "**`1208`** — UTF-8 (Unicode)" in v, v[-160:])
 send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
     "textDocument": {"uri": CMD_URI}}})
 send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
