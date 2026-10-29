@@ -4642,6 +4642,36 @@ mod tests {
     }
 
     #[test]
+    fn ccsid_hover_names_the_common_codes() {
+        // the curated CCSID text carries the practical code list on every
+        // command that has a hoverable CCSID parameter
+        let m = Model::load();
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        let text = "ALTER QMGR CCSID(1208)\n";
+        let tree = parse(text);
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 13), &Default::default()).expect("q"));
+        assert!(
+            md.contains("1208 = UTF-8") && md.contains("819") && md.contains("EBCDIC"),
+            "{md}"
+        );
+        // the reference text is kept, the codes are appended
+        assert!(md.contains("Coded character set identifier"), "{md}");
+        let text = "DEFINE COMMINFO(C) CCITYPE(MQI) CCSID(819)\n";
+        let tree = parse(text);
+        // the CCSID word spans chars 32..37 on line 0
+        let md =
+            md_of(hover(text, &tree, m, Position::new(0, 34), &Default::default()).expect("c"));
+        assert!(
+            md.contains("MQI bridge") && md.contains("1208 = UTF-8"),
+            "{md}"
+        );
+    }
+
+    #[test]
     fn every_command_rule_targets_a_resolvable_command() {
         // a rule for a pair the model cannot resolve is dead weight and a
         // silent lie about coverage (DISPLAY BUFFPOOL was drafted that way:
