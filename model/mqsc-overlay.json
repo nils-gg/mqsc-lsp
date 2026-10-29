@@ -350,6 +350,71 @@
         ],
         "attrs": [],
         "positional": null
+      },
+      "POLICY": {
+        "verb": "SET",
+        "object": "POLICY",
+        "title": "SET POLICY",
+        "description": "Set the security policy for signing or encryption (MQ policy table) Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "policy_name",
+        "params": [
+          {
+            "name": "ACTION",
+            "kind": "enum",
+            "values": [
+              "REPLACE",
+              "ADD",
+              "REMOVE"
+            ],
+            "optional": true
+          },
+          {
+            "name": "SIGNALG",
+            "kind": "enum",
+            "values": [
+              "NONE",
+              "MD5",
+              "SHA1",
+              "SHA256",
+              "SHA384",
+              "SHA512"
+            ],
+            "optional": true
+          },
+          {
+            "name": "ENCALG",
+            "kind": "enum",
+            "values": [
+              "NONE",
+              "RC2",
+              "DES",
+              "3DES",
+              "AES128",
+              "AES256"
+            ],
+            "optional": true
+          },
+          {
+            "name": "SIGNER",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "RECIP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "KEYREUSE",
+            "kind": "enum",
+            "values": [
+              "DISABLED",
+              "integer",
+              "UNLIMITED"
+            ],
+            "optional": true
+          }
+        ]
       }
     },
     "DEFINE": {
@@ -748,6 +813,161 @@
           "USERSRCID"
         ],
         "positional": "name"
+      },
+      "TCLUSTER": {
+        "verb": "DISPLAY",
+        "object": "TCLUSTER",
+        "title": "DISPLAY TCLUSTER",
+        "description": "Display the cluster topic records this queue manager holds Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "generic_topic_name",
+        "params": [
+          {
+            "name": "WHERE",
+            "kind": "string",
+            "optional": true
+          }
+        ]
+      },
+      "POLICY": {
+        "verb": "DISPLAY",
+        "object": "POLICY",
+        "title": "DISPLAY POLICY",
+        "description": "Display the policy table Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "policy_name",
+        "params": []
+      },
+      "AUTHREC": {
+        "verb": "DISPLAY",
+        "object": "AUTHREC",
+        "title": "DISPLAY AUTHREC",
+        "description": "Display authorization service records Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "params": [
+          {
+            "name": "PROFILE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "OBJTYPE",
+            "kind": "enum",
+            "values": [
+              "AUTHINFO",
+              "CHANNEL",
+              "CLNTCONN",
+              "COMMINFO",
+              "LISTENER",
+              "NAMELIST",
+              "PROCESS",
+              "QMGR",
+              "QUEUE",
+              "RQMNAME",
+              "SERVICE",
+              "TOPIC"
+            ],
+            "optional": true
+          },
+          {
+            "name": "PRINCIPAL",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "GROUP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "MATCH",
+            "kind": "enum",
+            "values": [
+              "PROFILE",
+              "MEMBERSHIP",
+              "EXACT"
+            ],
+            "optional": true
+          },
+          {
+            "name": "SERVCOMP",
+            "kind": "string",
+            "optional": true
+          }
+        ]
+      },
+      "AUTHSERV": {
+        "verb": "DISPLAY",
+        "object": "AUTHSERV",
+        "title": "DISPLAY AUTHSERV",
+        "description": "Display the status of the queue manager's authentication services Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "params": []
+      },
+      "ENTAUTH": {
+        "verb": "DISPLAY",
+        "object": "ENTAUTH",
+        "title": "DISPLAY ENTAUTH",
+        "description": "Display entity-level authorization records Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "params": [
+          {
+            "name": "PRINCIPAL",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "GROUP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "OBJNAME",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "OBJTYPE",
+            "kind": "enum",
+            "values": [
+              "AUTHINFO",
+              "CHANNEL",
+              "CLNTCONN",
+              "COMMINFO",
+              "LISTENER",
+              "NAMELIST",
+              "PROCESS",
+              "QMGR",
+              "QUEUE",
+              "RQMNAME",
+              "SERVICE",
+              "TOPIC"
+            ],
+            "optional": true
+          },
+          {
+            "name": "SERVCOMP",
+            "kind": "string",
+            "optional": true
+          }
+        ]
+      },
+      "APSTATUS": {
+        "verb": "DISPLAY",
+        "object": "APSTATUS",
+        "title": "DISPLAY APSTATUS",
+        "description": "Display application status (multi-instance-capable applications) Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "generic_application_name",
+        "params": [
+          {
+            "name": "TYPE",
+            "kind": "enum",
+            "values": [
+              "APPL"
+            ],
+            "optional": true
+          },
+          {
+            "name": "WHERE",
+            "kind": "string",
+            "optional": true
+          }
+        ]
       }
     },
     "ADD": {
@@ -907,6 +1127,111 @@
         ],
         "attrs": [],
         "positional": "name"
+      }
+    },
+    "PURGE": {
+      "CHANNEL": {
+        "verb": "PURGE",
+        "object": "CHANNEL",
+        "title": "PURGE CHANNEL",
+        "description": "Purge a suspended cluster-receiver or AMPLINK channel instance (MQ 9.0+) Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "channel_name",
+        "params": [
+          {
+            "name": "CLIENTID",
+            "kind": "string",
+            "optional": true
+          }
+        ]
+      }
+    },
+    "DELETE": {
+      "POLICY": {
+        "verb": "DELETE",
+        "object": "POLICY",
+        "title": "DELETE POLICY",
+        "description": "Delete a policy from the policy table Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "policy_name",
+        "params": [
+          {
+            "name": "IGNSTATE",
+            "kind": "enum",
+            "values": [
+              "YES",
+              "NO"
+            ],
+            "optional": true
+          }
+        ]
+      },
+      "COMMINFO": {
+        "verb": "DELETE",
+        "object": "COMMINFO",
+        "title": "DELETE COMMINFO",
+        "description": "Delete a publish/subscribe communications information object Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "positional": "comminfo_name",
+        "params": [
+          {
+            "name": "IGNSTATE",
+            "kind": "enum",
+            "values": [
+              "YES",
+              "NO"
+            ],
+            "optional": true
+          }
+        ]
+      },
+      "AUTHREC": {
+        "verb": "DELETE",
+        "object": "AUTHREC",
+        "title": "DELETE AUTHREC",
+        "description": "Delete an authorization service record Curated entry from the live MQ 10.0.1 oracle (tools/mq_oracle_check.py); postdates or was missed by the 2011 reference.",
+        "params": [
+          {
+            "name": "PROFILE",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "OBJTYPE",
+            "kind": "enum",
+            "values": [
+              "AUTHINFO",
+              "CHANNEL",
+              "CLNTCONN",
+              "COMMINFO",
+              "LISTENER",
+              "NAMELIST",
+              "PROCESS",
+              "QMGR",
+              "QUEUE",
+              "RQMNAME",
+              "SERVICE",
+              "TOPIC"
+            ],
+            "optional": true
+          },
+          {
+            "name": "PRINCIPAL",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "GROUP",
+            "kind": "string",
+            "optional": true
+          },
+          {
+            "name": "IGNSTATE",
+            "kind": "enum",
+            "values": [
+              "YES",
+              "NO"
+            ],
+            "optional": true
+          }
+        ]
       }
     }
   },

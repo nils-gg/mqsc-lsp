@@ -258,9 +258,9 @@ pub struct Command {
 }
 
 static VERBS: &[&str] = &[
-    "ADD", "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY", "MOVE", "PING",
-    "RECOVER", "REFRESH", "RESET", "RESOLVE", "RESUME", "RVERIFY", "SET", "START", "STOP",
-    "SUSPEND",
+    "ADD", "ALTER", "ARCHIVE", "BACKUP", "CLEAR", "DEFINE", "DELETE", "DISPLAY", "MODIFY", "MOVE",
+    "PING", "PURGE", "RECOVER", "REFRESH", "RESET", "RESOLVE", "RESUME", "RVERIFY", "SET", "START",
+    "STOP", "SUSPEND",
 ];
 
 /// Global, loaded model.
@@ -356,7 +356,13 @@ impl Model {
                 let verb: &'static str = match VERBS.iter().copied().find(|v| *v == verb_s.as_str())
                 {
                     Some(v) => v,
-                    None => continue,
+                    None => {
+                        // A command under a verb VERBS lacks would vanish
+                        // without a trace (this is how PURGE nearly got
+                        // lost): say so, like the patch-target warning.
+                        eprintln!("mqsc-model: verb {verb_s:?} not in VERBS, command dropped");
+                        continue;
+                    }
                 };
                 let slot = commands.entry(verb).or_default();
                 for (obj, e) in objs {
@@ -742,6 +748,53 @@ mod tests {
             .collect();
         assert!(names.contains(&"WARN"), "SET CHLAUTH params: {names:?}");
         assert!(names.contains(&"CHCKCLNT"));
+    }
+
+    #[test]
+    fn every_overlay_verb_is_in_the_static_verbs_list() {
+        // A command under a verb VERBS lacks is dropped at load (MODIFY
+        // CHLAUTH lived silently dead that way once; PURGE nearly joined
+        // it). Pin the contract the load-time warning can only report.
+        let ov: serde_json::Value = serde_json::from_str(OVERLAY_JSON).expect("overlay must parse");
+        let mut verbs: Vec<&str> = Vec::new();
+        if let Some(objs) = ov["commands"].as_object() {
+            verbs.extend(objs.keys().map(|k| k.as_str()));
+        }
+        if let Some(keys) = ov["patch"].as_object() {
+            verbs.extend(
+                keys.keys()
+                    .filter_map(|k| k.split_once(' ').map(|(v, _)| v)),
+            );
+        }
+        assert!(!verbs.is_empty());
+        for v in verbs {
+            assert!(VERBS.contains(&v), "overlay verb {v:?} missing from VERBS");
+        }
+    }
+
+    #[test]
+    fn oracle_added_commands_resolve() {
+        // the campaign-B4 commands (live 10.0.1 railroads)
+        for (verb, obj) in [
+            ("DISPLAY", "TCLUSTER"),
+            ("PURGE", "CHANNEL"),
+            ("SET", "POLICY"),
+            ("DELETE", "POLICY"),
+            ("DISPLAY", "POLICY"),
+            ("DELETE", "COMMINFO"),
+            ("DELETE", "AUTHREC"),
+            ("DISPLAY", "AUTHREC"),
+            ("DISPLAY", "AUTHSERV"),
+            ("DISPLAY", "ENTAUTH"),
+            ("DISPLAY", "APSTATUS"),
+            ("MODIFY", "CHLAUTH"),
+        ] {
+            assert!(model().resolve(verb, Some(obj)).is_some(), "{verb} {obj}");
+        }
+        // KEYREUSE( DISABLED | 1-9999999 | UNLIMITED ) keeps the model's
+        // integer-alternative encoding for the range form
+        let kr = param("SET", "POLICY", "KEYREUSE");
+        assert!(kr.alt_integer, "KEYREUSE lost its integer range");
     }
 
     #[test]
