@@ -6,9 +6,12 @@
     "MQ 7.1+-9.x commands and parameters. This file adds what real-world",
     "usage needs; it is merged at model load (server/src/model.rs) and",
     "flagged as curated in README 'Model gaps'.",
-    "Evidence: z/OS MQ 9.3 dmpmqcfg output (324-file real-world corpus)",
-    "plus IBM MQ 9.x documentation knowledge. Parameter kinds are",
-    "deliberately permissive (string) where the full MQSC value set could",
+    "Evidence: z/OS MQ 9.3 dmpmqcfg output (324-file real-world corpus),",
+    "IBM MQ 9.x documentation knowledge, and — authoritatively, wherever",
+    "they disagree — the MQSC syntax railroads of a live IBM MQ 10.0.1",
+    "distributed queue manager (tools/mq_oracle_check.py).",
+    "Parameter kinds are deliberately permissive (string) where the full",
+    "MQSC value set could",
     "not be verified: a string kind accepts anything and can never raise a",
     "false code-5 — the enum is narrowed only when the value list is known",
     "with confidence. Merge semantics: 'commands' upsert whole command",
@@ -678,6 +681,47 @@
           "name": "CLCHNAME",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO",
+            "QMGR"
+          ],
+          "optional": true,
+          "description": "Naming of the queue-manager's image-coverage control queue policy (railroad: YES | NO | QMGR; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MAXFSIZE",
+          "kind": "enum",
+          "values": [
+            "DEFAULT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Maximum size of a message file written for this queue (railroad: DEFAULT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STRMQOS",
+          "kind": "enum",
+          "values": [
+            "BESTEF",
+            "MUSTDUP"
+          ],
+          "optional": true,
+          "description": "Cluster stream message quality of service (railroad: BESTEF | MUSTDUP; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -736,6 +780,83 @@
           "name": "CLCHNAME",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO",
+            "QMGR"
+          ],
+          "optional": true,
+          "description": "Naming of the queue-manager's image-coverage control queue policy (railroad: YES | NO | QMGR; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MAXFSIZE",
+          "kind": "enum",
+          "values": [
+            "DEFAULT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Maximum size of a message file written for this queue (railroad: DEFAULT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STRMQOS",
+          "kind": "enum",
+          "values": [
+            "BESTEF",
+            "MUSTDUP"
+          ],
+          "optional": true,
+          "description": "Cluster stream message quality of service (railroad: BESTEF | MUSTDUP; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "TRIGGER",
+          "kind": "flag",
+          "optional": true,
+          "description": "Enables triggering on this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOTRIGGER",
+          "kind": "flag",
+          "optional": true,
+          "description": "Disables triggering on this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SHARE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Declares the queue as shared (queue-sharing group) (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOSHARE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Declares the queue as not shared (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "HARDENBO",
+          "kind": "flag",
+          "optional": true,
+          "description": "Hardens the backout indication on get-with-backout for this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOHARDENBO",
+          "kind": "flag",
+          "optional": true,
+          "description": "Does not harden the backout indication on get-with-backout (oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -768,6 +889,59 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO",
+            "QMGR"
+          ],
+          "optional": true,
+          "description": "Naming of the queue-manager's image-coverage control queue policy (railroad: YES | NO | QMGR; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MAXFSIZE",
+          "kind": "enum",
+          "values": [
+            "DEFAULT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Maximum size of a message file written for this queue (railroad: DEFAULT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STRMQOS",
+          "kind": "enum",
+          "values": [
+            "BESTEF",
+            "MUSTDUP"
+          ],
+          "optional": true,
+          "description": "Cluster stream message quality of service (railroad: BESTEF | MUSTDUP; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CLCHNAME",
+          "kind": "string",
+          "optional": true,
+          "description": "Cluster-channel name restricting which CLUSRCVR channel may be used (railroad: channel_name; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STREAMQ",
+          "kind": "string",
+          "optional": true,
+          "description": "Stream queue carrying cluster publications for this model queue (railroad: q_name; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -806,6 +980,95 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "IMGRCOVQ",
+          "kind": "enum",
+          "values": [
+            "YES",
+            "NO",
+            "QMGR"
+          ],
+          "optional": true,
+          "description": "Naming of the queue-manager's image-coverage control queue policy (railroad: YES | NO | QMGR; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "MAXFSIZE",
+          "kind": "enum",
+          "values": [
+            "DEFAULT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Maximum size of a message file written for this queue (railroad: DEFAULT | integer; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STRMQOS",
+          "kind": "enum",
+          "values": [
+            "BESTEF",
+            "MUSTDUP"
+          ],
+          "optional": true,
+          "description": "Cluster stream message quality of service (railroad: BESTEF | MUSTDUP; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "CLCHNAME",
+          "kind": "string",
+          "optional": true,
+          "description": "Cluster-channel name restricting which CLUSRCVR channel may be used (railroad: channel_name; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "TRIGGER",
+          "kind": "flag",
+          "optional": true,
+          "description": "Enables triggering on this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOTRIGGER",
+          "kind": "flag",
+          "optional": true,
+          "description": "Disables triggering on this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "SHARE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Declares the queue as shared (queue-sharing group) (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOSHARE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Declares the queue as not shared (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "HARDENBO",
+          "kind": "flag",
+          "optional": true,
+          "description": "Hardens the backout indication on get-with-backout for this queue (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOHARDENBO",
+          "kind": "flag",
+          "optional": true,
+          "description": "Does not harden the backout indication on get-with-backout (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "STREAMQ",
+          "kind": "string",
+          "optional": true,
+          "description": "Stream queue carrying cluster publications for this queue (railroad: q_name; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -838,6 +1101,16 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -861,6 +1134,16 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         }
       ],
       "extend_enum": {
@@ -884,6 +1167,16 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         }
       ]
     },
@@ -898,6 +1191,16 @@
           "name": "CUSTOMUSER",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CAPEXPRY",
+          "kind": "enum",
+          "values": [
+            "NOLIMIT",
+            "integer"
+          ],
+          "optional": true,
+          "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         }
       ]
     },
@@ -927,9 +1230,30 @@
           "name": "COMMINFO",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CLROUTE",
+          "kind": "enum",
+          "values": [
+            "DIRECT",
+            "TOPICHOST"
+          ],
+          "optional": true,
+          "description": "Cluster routing of published messages on this topic (railroad: DIRECT | TOPICHOST; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "ASPARENT",
+          "kind": "flag",
+          "optional": true,
+          "description": "Inherit unset attributes from the parent topic (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOLIMIT",
+          "kind": "flag",
+          "optional": true,
+          "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
         }
-      ],
-      "extend_enum": {}
+      ]
     },
     "ALTER TOPIC": {
       "add_params": [
@@ -957,9 +1281,30 @@
           "name": "COMMINFO",
           "kind": "string",
           "optional": true
+        },
+        {
+          "name": "CLROUTE",
+          "kind": "enum",
+          "values": [
+            "DIRECT",
+            "TOPICHOST"
+          ],
+          "optional": true,
+          "description": "Cluster routing of published messages on this topic (railroad: DIRECT | TOPICHOST; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "ASPARENT",
+          "kind": "flag",
+          "optional": true,
+          "description": "Inherit unset attributes from the parent topic (oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOLIMIT",
+          "kind": "flag",
+          "optional": true,
+          "description": "No limit on the number of cluster subscriptions/children (oracle MQ 10.0.1)"
         }
-      ],
-      "extend_enum": {}
+      ]
     },
     "DEFINE CHANNEL": {
       "add_params": [
@@ -1517,6 +1862,20 @@
           "name": "WSCHEMA",
           "kind": "string",
           "optional": true
+        }
+      ],
+      "add_params": [
+        {
+          "name": "LIKE",
+          "kind": "string",
+          "optional": true,
+          "description": "Existing subscription whose attributes are copied (railroad: subscription_name; oracle MQ 10.0.1)"
+        },
+        {
+          "name": "NOREPLACE",
+          "kind": "flag",
+          "optional": true,
+          "description": "Fail rather than replace an existing subscription of the same name (oracle MQ 10.0.1)"
         }
       ]
     },
