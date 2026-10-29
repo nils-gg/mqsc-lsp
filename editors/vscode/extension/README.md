@@ -15,13 +15,17 @@ and follow the published contribution schemas.
 - TextMate grammar fallback (`syntaxes/`) so files are readable before the
   server answers; with the server running, its semantic tokens take over
 - Full LSP wiring: diagnostics with quickfixes, completion, hover,
-  definition/references/rename (across open files), document and workspace
+  definition/references/rename (across open files **and** the workspace's
+  closed `*.mqsc` files, which the server indexes at startup; rename still
+  edits open files only), document and workspace
   symbols, folding, semantic tokens
 - Settings UI for the binary path, the server log file (writes
   `MQSC_LSP_LOG`), the MQ target (`mqsc.targetVersion` /
   `mqsc.platform`, which enable diagnostic 15 NOT_IN_TARGET; empty by
-  default = no availability checks) and a severity override per diagnostic
-  code (`default|error|warning|information|hint|off`), applied live via
+  default = no availability checks), the startup workspace scan
+  (`mqsc.workspaceIndex.enabled` / `maxFiles` / `exclude` — read once at
+  startup, so a change needs a window reload) and a severity override per
+  diagnostic code (`default|error|warning|information|hint|off`), applied live via
   `workspace/didChangeConfiguration`
 
 ## What the extension does NOT do

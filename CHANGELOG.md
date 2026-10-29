@@ -7,6 +7,27 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Added
+- Workspace indexing of closed `*.mqsc` files: after `initialize` the
+  server walks the workspace roots (once, on a background thread) and
+  remembers every `DEFINE` and name site of each file it finds — without
+  retaining any text or parse tree — so the file you have open resolves
+  names against the scripts you do not have open. Hint 12 goes quiet for a
+  name a workspace file defines (with the "in this script or another file"
+  wording), hover names the defining file, goto-definition jumps into it,
+  references list its sites, completion offers its names and
+  workspace/symbol lists its objects. Configured by
+  `mqsc.workspaceIndex.enabled` (default on), `mqsc.workspaceIndex.maxFiles`
+  (default 2000, taken in sorted order; the server warns when files had to
+  be left out) and `mqsc.workspaceIndex.exclude` (directory names skipped
+  at any depth; `.git`, `target`, `node_modules`, `dist`, `build` by
+  default); files over 4 MiB are skipped and the whole scan outcome is
+  reported in the log. An open document always overrides its on-disk entry,
+  and closing one falls back to the file on disk rather than the unsaved
+  buffer. Rename deliberately still edits open documents only until the
+  files are watched, so `references` can show a site rename will not touch
+  (`tools/workspace_index_smoke.py` covers both sessions, on and off)
+
 ### Changed
 - Internal (no behavior change): all cross-document knowledge moved from
   `server.rs` into a new `workspace::WorkspaceIndex` module — the open

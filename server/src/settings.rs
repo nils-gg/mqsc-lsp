@@ -96,6 +96,68 @@ pub struct Target {
     pub platform: Option<Platform>,
 }
 
+/// How the workspace scan of closed `*.mqsc` files behaves (Phase 3 /
+/// PR 7). Read from `mqsc.workspaceIndex.*` (or the same keys at the top
+/// level of a settings root, like every other shape this server accepts).
+/// Defaults: scanning on, up to 2000 files, the usual generated/VCS
+/// directories excluded. Bad values fall back per key — a broken setting
+/// must never disable the feature entirely nor make it walk everything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceScan {
+    pub enabled: bool,
+    pub max_files: usize,
+    /// directory NAMES skipped at any depth (".git", "target", ...)
+    pub exclude: Vec<String>,
+}
+
+/// Hard ceiling per file; MQSC scripts are configuration, not data
+/// dumps, and one runaway generated file must not stall the scan.
+pub const SCAN_MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
+
+impl Default for WorkspaceScan {
+    fn default() -> Self {
+        WorkspaceScan {
+            enabled: true,
+            max_files: 2000,
+            exclude: [".git", "target", "node_modules", "dist", "build"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+}
+
+impl WorkspaceScan {
+    /// Same lookup convention as `Target::from_settings`: nested under
+    /// `mqsc` or flat at the root; unreadable keys keep the default.
+    pub fn from_settings(root: &Value) -> WorkspaceScan {
+        let section = root
+            .get("mqsc")
+            .and_then(|m| m.get("workspaceIndex"))
+            .or_else(|| root.get("workspaceIndex"));
+        let mut cfg = WorkspaceScan::default();
+        let Some(sec) = section else {
+            return cfg;
+        };
+        if let Some(b) = sec.get("enabled").and_then(|v| v.as_bool()) {
+            cfg.enabled = b;
+        }
+        if let Some(n) = sec.get("maxFiles").and_then(|v| v.as_u64()) {
+            cfg.max_files = n as usize;
+        }
+        if let Some(list) = sec.get("exclude").and_then(|v| v.as_array()) {
+            let names: Vec<String> = list
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            // an explicitly empty list means "exclude nothing", which is
+            // different from not configuring the key at all
+            cfg.exclude = names;
+        }
+        cfg
+    }
+}
+
 /// How a parameter use falls outside the configured target.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AvailViolation {
@@ -427,6 +489,30 @@ mod tests {
         // malformed rule data is unknown data, not a violation
         let junk_r = rule("X", &[], Some("nonsense"), None, Some("atari"));
         assert_eq!(old.gate(&junk_r), None);
+    }
+
+    #[test]
+    fn workspace_scan_defaults_and_partial_overrides() {
+        let d = WorkspaceScan::default();
+        assert!(d.enabled && d.max_files == 2000 && d.exclude.contains(&".git".to_string()));
+        // no section at all: defaults
+        assert_eq!(WorkspaceScan::from_settings(&json!({})), d);
+        // nested and flat shapes both work
+        let nested = json!({"mqsc": {"workspaceIndex": {"enabled": false}}});
+        assert!(!WorkspaceScan::from_settings(&nested).enabled);
+        let flat = json!({"workspaceIndex": {"maxFiles": 50, "exclude": []}});
+        let cfg = WorkspaceScan::from_settings(&flat);
+        assert_eq!(cfg.max_files, 50);
+        assert!(cfg.exclude.is_empty(), "explicit [] excludes nothing");
+        // per-key fallback: junk values leave that key at its default
+        let junk = json!({"workspaceIndex": {"enabled": "yes", "maxFiles": "many", "exclude": 7}});
+        assert_eq!(WorkspaceScan::from_settings(&junk), d);
+        // non-string array entries are dropped, the rest survive
+        let mixed = json!({"workspaceIndex": {"exclude": [".svn", 1, "out"]}});
+        assert_eq!(
+            WorkspaceScan::from_settings(&mixed).exclude,
+            vec![".svn".to_string(), "out".to_string()]
+        );
     }
 
     #[test]

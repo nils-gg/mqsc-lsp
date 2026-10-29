@@ -65,6 +65,22 @@
           ],
           "markdownDescription": "Platform the scripts target. Enables diagnostic 15 NOT_IN_TARGET for parameters that only exist on the other platform (e.g. `BOQNAME` is z/OS-only). Empty = no platform checks."
         },
+        "mqsc.workspaceIndex.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Index the workspace's closed `*.mqsc` files at startup, so names they `DEFINE` resolve in the files you have open (hint 12, hover, definition, references, completion, workspace/symbol). Takes effect on restart."
+        },
+        "mqsc.workspaceIndex.maxFiles": {
+          "type": "number",
+          "default": 2000,
+          "markdownDescription": "Maximum number of workspace files to index (files are taken in sorted order). The server warns in the output channel when it had to leave files out. Takes effect on restart."
+        },
+        "mqsc.workspaceIndex.exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [".git", "target", "node_modules", "dist", "build"],
+          "markdownDescription": "Directory **names** skipped at any depth while scanning the workspace. Takes effect on restart."
+        },
         "mqsc.diagnostics.PARSE_ERROR": {
           "type": "string",
           "enum": ["default", "error", "warning", "information", "hint", "off"],
