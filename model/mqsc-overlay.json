@@ -70,7 +70,11 @@
     "four entries (BACKOUT since-9.1, BOQNAME/CLUSNL z/OS-only, TOQLOCAL",
     "z/OS-only) were built from documentation memory, the oracle disproved",
     "all of them (no BACKOUT parameter exists on any command; BOQNAME and",
-    "CLUSNL are distributed-valid), so they were removed."
+    "CLUSNL are distributed-valid), so they were removed.",
+    "param_docs adds hover text for parameters/attributes the 2011",
+    "reference does not document; generic_values holds meanings for the",
+    "value words shared across many parameters (hover falls back to it",
+    "only inside enum-valued parameters)."
   ],
   "commands": {
     "SET": {
@@ -4270,6 +4274,602 @@
       "note": "channel availability control was introduced with MQ 9.0"
     }
   ],
+  "param_docs": {
+    "ACTVCONO": [
+      [
+        "",
+        "Activity trace connection control: whether applications may override the queue manager's ACTVTRC setting per connection (through the MQCNO application-type setting on MQCONNX). ENABLED accepts such requests, DISABLED ignores them. Not in the 2011 reference (MQ 7.1 and later)."
+      ]
+    ],
+    "ADDRESS": [
+      [
+        "",
+        "IP address, or generic address pattern, that a CHLAUTH record matches against the network address from which the channel connection was initiated."
+      ]
+    ],
+    "ADDRESS6": [
+      [
+        "",
+        "CHLAUTH record attribute: the IPv6 address, or generic pattern, matched against the client's network address."
+      ]
+    ],
+    "ADOPTCTX": [
+      [
+        "",
+        "LDAP adopt-context option on an AUTHINFO object: after a successful password check the queue manager may reuse its existing LDAP connection for later connects by the same user, avoiding a fresh bind."
+      ]
+    ],
+    "AMQPKA": [
+      [
+        "",
+        "AMQP keep-alive interval for this channel: AUTO lets the AMQP 1.0 peer's advertised keep-alive govern; an integer is the interval in milliseconds. Not in the 2011 reference."
+      ]
+    ],
+    "AUDITCMD": [
+      [
+        "",
+        "Legacy z/OS audit setting carried by SET GLOBAL, naming the command-audit configuration. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "AUDITHON": [
+      [
+        "",
+        "Legacy z/OS audit setting carried by SET GLOBAL (audit hardware on/off). The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "AUDITPCF": [
+      [
+        "",
+        "Legacy z/OS audit setting carried by SET GLOBAL, covering audit of PCF commands. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "AUTHADD": [
+      [
+        "",
+        "Adds authorities to the authorization record: a list of the authority keywords the command railroad shows for the object type (for example PUT, GET, BROWSE, INQ, SET, ALTUSR, PASSALL; NONE replaces the record with no authorities)."
+      ]
+    ],
+    "AUTHDEL": [
+      [
+        "",
+        "Removes the listed authorities from the authorization record (the complement of AUTHADD)."
+      ]
+    ],
+    "AUTHORMD": [
+      [
+        "",
+        "How the queue manager uses LDAP to find a user's groups for authorization: OS uses the operating-system identity alone, SEARCHUSR looks up the user's own LDAP entry, SEARCHGRP searches under the class profile named by CLASSGRP/CLASSUSR."
+      ]
+    ],
+    "BASEDNG": [
+      [
+        "",
+        "Distinguished name of the LDAP node at which searches for a user's group memberships begin."
+      ]
+    ],
+    "BASEDNU": [
+      [
+        "",
+        "Distinguished-name prefix the queue manager puts in front of a user ID to build the full DN used for LDAP bind authentication."
+      ]
+    ],
+    "BUFFERS": [
+      [
+        "",
+        "Number of 4K-byte buffers in this buffer pool (required). The minimum is 100 and the default 1000; the total over all buffer pools is limited by queue manager storage. z/OS."
+      ]
+    ],
+    "BUFFPOOL": [
+      [
+        "",
+        "The buffer pool number (in the range zero through 15). This is optional. The default is zero. If the buffer pool has not already been created by a DEFINE BUFFPOOL command, the buffer pool is created with 1000 buffers."
+      ]
+    ],
+    "CERTLABL": [
+      [
+        "",
+        "Certificate label: the label of the personal certificate in the key repository that this channel (or queue manager) presents to its TLS peer. The empty label resolves to 'ibmwebspheremq' followed by the lower-case queue manager name."
+      ]
+    ],
+    "CERTQSGL": [
+      [
+        "",
+        "z/OS only: the certificate label held in the queue-sharing group profile, naming the personal certificate the queue manager uses for its queue-sharing-group identity. Not in the 2011 reference."
+      ]
+    ],
+    "CERTVALLIST": [
+      [
+        "",
+        "Legacy z/OS SET GLOBAL setting naming the certificate validation list (a keyring label) used when validating TLS peer certificates. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "CFSTRUCT": [
+      [
+        "",
+        "Name of the Coupling Facility structure in which messages for this shared queue are stored (z/OS only, for shared and model queues). Up to 12 characters, beginning with an uppercase letter A-Z and containing only A-Z and 0-9; the queue-sharing group name is prefixed to it."
+      ]
+    ],
+    "CHCKCLNT": [
+      [
+        "",
+        "Client authentication on an AUTHINFO object: whether an incoming client connection must supply a client user ID, and whether it is verified through LDAP. ASQMGR/ASDEF take the value from the queue manager, OFF disables the checking."
+      ]
+    ],
+    "CHLAUTH": [
+      [
+        "",
+        "Switch for channel authentication records: ENABLED makes the queue manager apply CHLAUTH records to incoming channels before allowing them to run; DISABLED stops that checking."
+      ]
+    ],
+    "CLASSGRP": [
+      [
+        "",
+        "Name of the MQ class profile in LDAP (a group name); its members define the set of groups that may be used for authorization under this AUTHINFO object."
+      ]
+    ],
+    "CLASSUSR": [
+      [
+        "",
+        "Userid under which the queue manager binds to LDAP when searching for group membership through the class profile."
+      ]
+    ],
+    "CLCHNAME": [
+      [
+        "",
+        "Cluster channel name: the generic name of the cluster-sender channels that use this queue as their transmission queue."
+      ]
+    ],
+    "CLIENTID": [
+      [
+        "",
+        "With PURGE CHANNEL, restricts removal of retained publish/subscribe messages to those held for this client identifier."
+      ]
+    ],
+    "CLNTUSER": [
+      [
+        "",
+        "Client user ID matched by a CHLAUTH record: a channel connection presenting this client user ID is given the record's action."
+      ]
+    ],
+    "COMMENT": [
+      [
+        "",
+        "Comment reproduced in the trace output for this trace specification, so the reason the command was issued can be recorded. Enclose in quotation marks if it contains blanks or special characters."
+      ]
+    ],
+    "COMMINFO": [
+      [
+        "",
+        "Name of the COMMINFO object (the z/OS definition of a TCP/IP group used for sysplex distribution) whose group address the target uses."
+      ]
+    ],
+    "CONNAUTH": [
+      [
+        "",
+        "Name of the AUTHINFO object (AUTHTYPE(IDPWOS)) that controls how user IDs and passwords arriving on client connections are authenticated. The empty string selects the default object SYSTEM.DEFAULT.AUTHINFO.IDPWOS."
+      ]
+    ],
+    "CUSTOM": [
+      [
+        "",
+        "Installation-defined custom attribute carried on modern queue, topic and queue manager definitions. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "CUSTOMUSER": [
+      [
+        "",
+        "Installation-defined custom attribute (user form) carried on modern queue and topic definitions. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "DATALEN": [
+      [
+        "",
+        "Length in bytes of the ping data sent by PING CHANNEL: 16 through 32 768; the default is 16."
+      ]
+    ],
+    "DECNET": [
+      [
+        "",
+        "DECnet transport option (the TRPTYPE(DECNET) value on older z/OS releases). The IBM reference carries no explanation of this parameter as a separate parameter."
+      ]
+    ],
+    "DESTCORL": [
+      [
+        "",
+        "The CorrelId used for messages published to this subscription."
+      ]
+    ],
+    "DETAIL": [
+      [
+        "",
+        "This parameter is ignored; it is retained only for compatibility with earlier releases."
+      ]
+    ],
+    "DSN": [
+      [
+        "",
+        "The name of a catalogued VSAM logical data set (page set). z/OS only."
+      ]
+    ],
+    "ENCALG": [
+      [
+        "",
+        "Encryption algorithm the policy requires for encrypted messages: NONE, RC2, DES, 3DES, AES128 or AES256."
+      ]
+    ],
+    "ENTITY": [
+      [
+        "",
+        "SET AUTHREC parameter naming the entity whose authorization record is being managed. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "ENVPARM": [
+      [
+        "",
+        "z/OS only: keyword=value strings substituted in the JCL procedure (xxxxCHIN) that starts the channel initiator address space, for example ENVPARM('HLQ=CSQ,VER=520')."
+      ]
+    ],
+    "EXCLINT": [
+      [
+        "",
+        "Seconds of recent activity to exclude from a BACKUP STRUCTURE operation: the backup leaves out the last n seconds of activity for the application structure (30 through 600, default 30). z/OS."
+      ]
+    ],
+    "FINDGRP": [
+      [
+        "",
+        "LDAP search filter the queue manager uses to find group entries when looking up a user's groups."
+      ]
+    ],
+    "FINDUSR": [
+      [
+        "",
+        "LDAP search filter the queue manager uses to find user entries when looking up a user's groups."
+      ]
+    ],
+    "GRPADDR": [
+      [
+        "",
+        "The TCP/IP address or host name of the COMMINFO group (the sysplex distribution target)."
+      ]
+    ],
+    "GRPFIELD": [
+      [
+        "",
+        "Name of the LDAP attribute that holds a group's name when group entries are located through this AUTHINFO object."
+      ]
+    ],
+    "IGNSTATE": [
+      [
+        "",
+        "Makes the command idempotent: YES causes it to succeed quietly when the object is already in the requested state. Introduced for START/STOP in MQ 9.1.1 and later extended to further commands; NO (the default) reports the error."
+      ]
+    ],
+    "IMGLOGLN": [
+      [
+        "",
+        "Automatic media image copy trigger: the queue manager takes a media image once this many megabytes of log data have been written since the last image copy; OFF suppresses the size trigger. Used with IMGSCHED(AUTO); not in the 2011 reference."
+      ]
+    ],
+    "IMGSCHED": [
+      [
+        "",
+        "Schedules automatic media image copies: AUTO makes the queue manager take them when the IMGLOGLN/IMGINTVL intervals elapse; MANUAL means images are taken only by running rcdmqimg. Not in the 2011 reference."
+      ]
+    ],
+    "INCLINT": [
+      [
+        "",
+        "Window, in minutes, before the current time: REFRESH QMGR TYPE(CONFIGEV) refreshes only objects created or changed within it (ALTDATE/ALTTIME). 0 through 999 999; zero (the default) means no limit."
+      ]
+    ],
+    "KEYREUSE": [
+      [
+        "",
+        "How often a policy's encryption key may be reused: DISABLED forbids reuse, an integer 1-9999999 caps the number of uses, UNLIMITED allows any number."
+      ]
+    ],
+    "LIKE": [
+      [
+        "",
+        "Name of an existing object whose attributes model the new definition: parameters not specified on the command take the LIKE object's values (this is how the SYSTEM.DEFAULT objects feed new definitions)."
+      ]
+    ],
+    "MATCH": [
+      [
+        "",
+        "Which CHLAUTH records the command applies to, relative to its generic name: EXACT selects only records with the identical name, GENERIC only generic records, ALL both."
+      ]
+    ],
+    "MAXPROPL": [
+      [
+        "",
+        "Maximum length in bytes of the property data that can be associated with a message (0 through 104 857 600; NOLIMIT means unrestricted apart from the ultimate upper bound)."
+      ]
+    ],
+    "MAXPUBAGINGS": [
+      [
+        "",
+        "Publish/subscribe tuning value carried by SET GLOBAL. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "MAXRTU": [
+      [
+        "",
+        "Maximum number of dedicated tape units that can be allocated to read archive log tape volumes; it overrides the archive system parameter. z/OS."
+      ]
+    ],
+    "MCAST": [
+      [
+        "",
+        "Multicast distribution attribute (z/OS): on a topic, ASPARENT inherits the parent topic's setting; the other values enable or restrict delivering the topic's publications by multicast."
+      ]
+    ],
+    "NAME": [
+      [
+        "",
+        "Requests that only objects whose names match the one specified are included. A trailing asterisk (*) matches all object names with the specified stem; an asterisk on its own specifies all objects (the default)."
+      ]
+    ],
+    "NPMGSDLV": [
+      [
+        "",
+        "z/OS global publish/subscribe tuning parameter carried by SET GLOBAL. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "OBJECT": [
+      [
+        "",
+        "Requests that only objects of the specified type are included (object-type synonyms such as QL are accepted). The default is ALL. Valid only with REFRESH QMGR TYPE(CONFIGEV)."
+      ]
+    ],
+    "PARM": [
+      [
+        "",
+        "z/OS only: load module containing the queue manager initialization parameters used by START QMGR; the default is CSQZPARM."
+      ]
+    ],
+    "PERSIST": [
+      [
+        "",
+        "Early publish/subscribe parameter on subscription definitions (values NO, YES). The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "PMGSDLV": [
+      [
+        "",
+        "z/OS global publish/subscribe tuning parameter carried by SET GLOBAL. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "PRINCIPAL": [
+      [
+        "",
+        "The user id the authorization record applies to; exactly one of PRINCIPAL(...) or GROUP(...) must be given."
+      ]
+    ],
+    "PROFILE": [
+      [
+        "",
+        "Object name or generic name pattern identifying the profile the authorization record applies to; the class of object comes from OBJTYPE."
+      ]
+    ],
+    "PSCLRSYS": [
+      [
+        "",
+        "Early publish/subscribe parameter on subscription definitions (values ALL, NONE, PUB). The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "PSCTLCASE": [
+      [
+        "",
+        "Early publish/subscribe parameter on subscription definitions. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "PSID": [
+      [
+        "",
+        "Page set identifier (two digits, 00 through 99). On DISPLAY it limits output to queues actively associated with that page set; on STGCLASS objects it names the page set assigned to the storage class. z/OS only."
+      ]
+    ],
+    "PSMSGID": [
+      [
+        "",
+        "Early publish/subscribe parameter on subscription definitions. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "PUBACCT": [
+      [
+        "",
+        "Accounting token passed by the subscriber, for propagation into messages published to this subscription in the AccountingToken field of the MQMD."
+      ]
+    ],
+    "PUBAPPID": [
+      [
+        "",
+        "Identity data passed by the subscriber, for propagation into messages published to this subscription in the ApplIdentityData field of the MQMD."
+      ]
+    ],
+    "RCVSEQ": [
+      [
+        "",
+        "The new recoverable sequence number for messages received by the queue manager on this TP pipe; hexadecimal, up to 8 digits, optionally enclosed by X' '. If omitted the partner's send sequence is set to the queue manager's receive sequence."
+      ]
+    ],
+    "RECIP": [
+      [
+        "",
+        "One or more certificate labels naming the recipients for whom messages encrypted under this policy may be encrypted."
+      ]
+    ],
+    "SELECTOR": [
+      [
+        "",
+        "An MQSC expression selecting which of the messages published to the topic are delivered to this subscription."
+      ]
+    ],
+    "SENDSEQ": [
+      [
+        "",
+        "The new recoverable sequence number for messages sent by the queue manager on this TP pipe; hexadecimal, up to 8 digits, optionally enclosed by X' '. If omitted the partner's receive sequence is set to the queue manager's send sequence."
+      ]
+    ],
+    "SEQNUM": [
+      [
+        "",
+        "Sequence number placed on the PING CHANNEL request message (1 through 999 999 999); the ping response echoes it so the requester can match response to request."
+      ]
+    ],
+    "SERVCOMP": [
+      [
+        "",
+        "Name of the service component the authorization record applies to; used for componentized authorizations (MQ 9.1 and later)."
+      ]
+    ],
+    "SHORTUSR": [
+      [
+        "",
+        "LDAP authentication option on AUTHINFO objects (values NO, YES). The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "SIGNALG": [
+      [
+        "",
+        "Signature digest algorithm the policy requires on signed messages: MD5, SHA1, SHA256, SHA384, SHA512 or NONE."
+      ]
+    ],
+    "SIGNER": [
+      [
+        "",
+        "Certificate labels of the signer certificates trusted under this policy."
+      ]
+    ],
+    "SRCGRP": [
+      [
+        "",
+        "CHLAUTH record attribute naming a source group associated with the record. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "SRCUSR": [
+      [
+        "",
+        "CHLAUTH record attribute naming a source user associated with the record. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "SSLCERT": [
+      [
+        "",
+        "Label of the personal certificate the TLS channel must present to its peer; the label must exist in the key repository of both ends."
+      ]
+    ],
+    "STREAMQ": [
+      [
+        "",
+        "z/OS queue attribute naming a stream queue. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "SUBLEVEL": [
+      [
+        "",
+        "The level within the subscription hierarchy at which this subscription is made. The range is zero through 9. The default value is 1."
+      ]
+    ],
+    "SUITEB": [
+      [
+        "",
+        "Restricts TLS to the NSA Suite B set of algorithms: NONE lifts the restriction, YES/ONLY enforce it, and 128_BIT/192_BIT require the corresponding strength. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "TIME": [
+      [
+        "",
+        "z/OS: overrides the quiesce period from the CSQ6ARVP system parameter for this command; nnn seconds in the range 001 through 999, and MODE(QUIESCE) must also be specified."
+      ]
+    ],
+    "TMPMODEL": [
+      [
+        "",
+        "Channel attribute paired with TMPQPRFX; the names suggest a temporary dynamic queue model. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "TMPQPRFX": [
+      [
+        "",
+        "Channel attribute paired with TMPMODEL; the names suggest a temporary dynamic queue name prefix. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "TNO": [
+      [
+        "",
+        "Limits STOP/START TRACE to the trace sessions identified by their trace numbers (0 to 32, up to 8 at once). TNO(*) means all active traces numbered 1 to 32; trace 0 must be named explicitly."
+      ]
+    ],
+    "TOQLOCAL": [
+      [
+        "",
+        "MOVE QLOCAL: the queue receiving the messages. TYPE(ADD) copies them, leaving the source queue alone; TYPE(MOVE) also removes them from the source."
+      ]
+    ],
+    "TPROOT": [
+      [
+        "",
+        "Channel attribute (transaction-protocol related). The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "USEDLQ": [
+      [
+        "",
+        "Whether a message that cannot be delivered is put to the dead-letter queue (YES) or discarded (NO); ASPARENT inherits the setting from the parent topic."
+      ]
+    ],
+    "USERLIST": [
+      [
+        "",
+        "CHLAUTH record parameter carried by ADD/SET/MODIFY CHLAUTH. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "USERSRC": [
+      [
+        "",
+        "CHLAUTH record attribute saying where the user id of a matching connection comes from: CHANNEL keeps the id supplied by the sender, MAP runs it under the id the record maps to, NOACCESS gives the connection no authority (MQ 9.x)."
+      ]
+    ],
+    "USERSRCID": [
+      [
+        "",
+        "CHLAUTH record attribute holding a user id associated with the record. The IBM reference carries no explanation of this parameter."
+      ]
+    ],
+    "USRFIELD": [
+      [
+        "",
+        "Name of the LDAP attribute that holds a user's id when user entries are located or their DNs are built through this AUTHINFO object."
+      ]
+    ],
+    "WARN": [
+      [
+        "",
+        "SET CHLAUTH switch (values NO, YES). The IBM reference carries no explanation of this parameter."
+      ]
+    ]
+  },
+  "generic_values": {
+    "ALL": "everything in the set this parameter refers to",
+    "AUTO": "the queue manager decides or schedules this automatically",
+    "CHANNEL": "the object referred to is a channel",
+    "DEFAULT": "the default the queue manager itself chooses",
+    "DISABLED": "the feature this parameter controls is turned off",
+    "ENABLED": "the feature this parameter controls is turned on",
+    "FORCE": "override the normal compatibility or safety checks and use the value as given",
+    "MANUAL": "done by you by hand, not automatically by the queue manager",
+    "NO": "no - the behaviour or feature the parameter describes does not apply",
+    "NONE": "nothing of the kind this parameter names is used or required",
+    "OFF": "the feature or collection this parameter names is switched off",
+    "ON": "the feature or collection this parameter names is switched on",
+    "QUEUE": "the object referred to is a queue",
+    "SHARED": "shared across the queue managers of the queue-sharing group",
+    "UNLIMITED": "no limit",
+    "YES": "yes - the behaviour or feature the parameter describes applies"
+  },
   "value_docs": [
     {
       "param": "CCSID",
@@ -4515,6 +5115,152 @@
         "QMGR": "fall back to the queue manager's CLWLUSEQ default",
         "ANY": "cluster workloads may use the queue from any queue manager",
         "LOCAL": "cluster workloads use the queue only from its own queue manager"
+      }
+    },
+    {
+      "param": "MONQ",
+      "obj": [],
+      "values": {
+        "OFF": "no queue statistics are collected",
+        "LOW": "minimal queue statistics are collected",
+        "MEDIUM": "a medium level of queue statistical detail is collected",
+        "HIGH": "the fullest level of queue statistical detail is collected"
+      }
+    },
+    {
+      "param": "MONCHL",
+      "obj": [],
+      "values": {
+        "OFF": "no channel statistics are collected",
+        "LOW": "minimal channel statistics are collected",
+        "MEDIUM": "a medium level of channel statistical detail is collected",
+        "HIGH": "the fullest level of channel statistical detail is collected"
+      }
+    },
+    {
+      "param": "MONACLS",
+      "obj": [],
+      "values": {
+        "OFF": "no class-level statistics are collected",
+        "LOW": "minimal class-level statistics are collected",
+        "MEDIUM": "a medium level of class-level statistical detail is collected",
+        "HIGH": "the fullest level of class-level statistical detail is collected"
+      }
+    },
+    {
+      "param": "STATACLS",
+      "obj": [],
+      "values": {
+        "OFF": "no class-level interval statistics are written",
+        "LOW": "minimal class-level interval statistics are written",
+        "MEDIUM": "a medium level of class-level interval statistics is written",
+        "HIGH": "the fullest class-level interval statistics are written"
+      }
+    },
+    {
+      "param": "STATCHL",
+      "obj": [],
+      "values": {
+        "OFF": "no channel interval statistics are written",
+        "LOW": "minimal channel interval statistics are written",
+        "MEDIUM": "a medium level of channel interval statistics is written",
+        "HIGH": "the fullest channel interval statistics are written"
+      }
+    },
+    {
+      "param": "CHCKLOCL",
+      "obj": [
+        "AUTHINFO"
+      ],
+      "values": {
+        "OPTIONAL": "a client user id is checked locally when one is supplied",
+        "REQUIRED": "every client connection must supply a user id, which is checked locally",
+        "NONE": "no local checking of client user ids",
+        "REQDADM": "clients issuing administrative commands must supply an authorised user id"
+      }
+    },
+    {
+      "param": "ADOPTCTX",
+      "obj": [
+        "AUTHINFO"
+      ],
+      "values": {
+        "YES": "reuse the queue manager's existing LDAP connection for later connects by the same user",
+        "NO": "bind to LDAP afresh for every connect"
+      }
+    },
+    {
+      "param": "AUTHORMD",
+      "obj": [
+        "AUTHINFO"
+      ],
+      "values": {
+        "OS": "use the operating-system identity; no LDAP group search",
+        "SEARCHUSR": "find groups by searching from the user's own LDAP entry",
+        "SEARCHGRP": "find groups by searching under the class profile named by CLASSGRP"
+      }
+    },
+    {
+      "param": "DEFPSIST",
+      "obj": [],
+      "values": {
+        "YES": "messages put with persistence 'as queue default' are persistent",
+        "NO": "messages put with persistence 'as queue default' are non-persistent"
+      }
+    },
+    {
+      "param": "DEFRECON",
+      "obj": [],
+      "values": {
+        "YES": "restartable channels restart automatically when the queue manager restarts",
+        "NO": "restartable channels do not restart automatically"
+      }
+    },
+    {
+      "param": "USERSRC",
+      "obj": [
+        "CHLAUTH"
+      ],
+      "values": {
+        "CHANNEL": "the connection keeps the user id supplied by the sender",
+        "MAP": "the connection runs under the user id this record maps it to",
+        "NOACCESS": "connections matching this record get no access to the queue manager"
+      }
+    },
+    {
+      "param": "VARUSER",
+      "obj": [
+        "SUB"
+      ],
+      "values": {
+        "ANY": "authorization uses the publisher's identity when the message is delivered",
+        "FIXED": "authorization uses the subscription's SUBUSER identity"
+      }
+    },
+    {
+      "param": "QSGDISP",
+      "obj": [],
+      "values": {
+        "SHARED": "the queue is shared by the queue managers of the queue-sharing group",
+        "COPY": "a private copy of the group object definition",
+        "QMGR": "the queue belongs to this queue manager alone"
+      }
+    },
+    {
+      "param": "CLWLRANK",
+      "obj": [],
+      "values": {
+        "FORCE": "use the CLWLNAME given here rather than one supplied by the partner"
+      }
+    },
+    {
+      "param": "PROPCTL",
+      "obj": [],
+      "values": {
+        "ALL": "message properties propagate across this object to subscribers",
+        "NONE": "message properties do not propagate across this object",
+        "COMPAT": "properties propagate only where the far end supports message properties",
+        "FORCE": "properties propagate even towards systems that do not support them"
       }
     }
   ]

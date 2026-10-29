@@ -134,7 +134,26 @@ the full picture; this file only lists what is easy to get wrong.
   anti-fabrication guard `every_documented_value_exists_in_the_model`
   insists each curated value is a model enum member, a number for a
   numeric param, or rides a definition the model leaves unconstrained
-  (e.g. DEFINE AUTHINFO AUTHTYPE, an extraction-leftover free string).
+  (e.g. DEFINE AUTHINFO AUTHTYPE, an extraction-leftover free string). A
+  sixth section, `param_docs` (name → `[[ctx, text]]`), supplies hover text
+  for the 96 names the reference leaves undocumented — merged by appending
+  AFTER the base docs, and `param_doc` returns the first non-empty doc, so
+  an entry only surfaces where the base has nothing for the context (empty
+  ctx is the fallback). Names without real prose say so honestly ("the IBM
+  reference carries no explanation"). A seventh, `generic_values`, is the
+  shared value-word vocabulary: hover's value chain is param-scoped
+  `value_docs` → generic vocabulary **only for Enum-kind params** (a word
+  in a Str/Name group is user data, never vocabulary) → a plain integer
+  note for numeric params. Value words that exist ONLY as extractor pooling
+  artifacts (DISPLAY QMGR's misparsed enum parameters carry neighbouring
+  attribute names as values — SSLEV, RCVTTYPE, SCHINIT…) are deliberately
+  unannotated. Attrs normalize at load via `norm_attr` (drop the
+  ` ( arg )` suffix and multi-word footer debris; raw JSON untouched) so
+  hover/`attr_set`/`known_attrs`/completion all join on bare words. Four
+  guards pin the contract: `every_parameter_has_a_description`,
+  `every_attribute_has_a_description`,
+  `every_generic_value_word_exists_in_the_model` (a generic word must be
+  SOME model enum value) and `attrs_load_as_bare_words`.
 - `settings::WorkspaceScan` (`mqsc.workspaceIndex.enabled` / `maxFiles` /
   `exclude`, same nested-or-flat lookup and per-key fallback as `Target`)
   gates the PR 7 startup scan: default on, 2000 files, `.git`/`target`/

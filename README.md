@@ -145,7 +145,7 @@ page when it finds nothing instead of failing silently.
 | Capability | Behaviour |
 | --- | --- |
 | Diagnostics | pushed on open/change — see code table below; every code is configurable (see Configuration) |
-| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; a value inside a parameter group → that parameter's card plus the curated meaning of the hovered value where documented (`1208` → "UTF-8 (Unicode)", `SDR` → sender channel, `BLOCKUSER` → …, per-object scoped in `value_docs`); object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
+| Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text (every parameter and attribute has one — reference prose, curated `param_docs`, or an honest "no explanation" note); a value inside a parameter group → that parameter's card plus the curated meaning of the hovered value: parameter-scoped `value_docs` first, then the `generic_values` vocabulary for enum slots (`AUTO` → "the queue manager decides…"), then a plain integer note — and for z/OS-style spellings the attribute itself (`PORT` in `STOP LISTENER(... PORT(...))` is matched despite the reference's `PORT ( port-number )` notation); object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
 | Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document / indexed workspace file** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
 | definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every indexed document — open or closed — keeping quoted/bare style (closed files are watched, so the mass edit rests on current content — see "Object knowledge") |
@@ -371,8 +371,13 @@ non-zero when a check fails.
   property rules (diagnostic 14), the per-parameter `availability`
   table, the command-level `command_availability` table behind
   diagnostic 15 (version/platform, both consulted only when a
-  target is configured), and the `value_docs` table of curated
-  value meanings shown on hover (CCSID 1208 → UTF-8).
+  target is configured), the `value_docs` table of curated
+  value meanings shown on hover (CCSID 1208 → UTF-8) plus the
+  `generic_values` vocabulary for words shared across many
+  parameters (DISABLED, AUTO, SHARED, …), and `param_docs` hover
+  text for the 96 names the reference does not document — with it,
+  every parameter and display attribute in the model carries a
+  description (a guard test enforces both halves of that promise).
 - **The overlay is oracle-verified**: `tools/mq_oracle_check.py` diffs the
   model against a live IBM MQ 10.0.1 installation (`runmqsc` never executes
   a failing parse, so probing is safe) — every verb×object pair's parameter
@@ -389,9 +394,11 @@ non-zero when a check fails.
   structurally removes that keyword from its parser, so the oracle is blind
   to it and its rejection is not disproof.
 - **Model gaps are warnings, never errors.** The extractor recovers some
-  commands from railroad diagrams only (`recovered: true` params exist), and
-  a few parameter descriptions are missing; hover/completion degrade
-  gracefully there.
+  commands from railroad diagrams only (`recovered: true` params exist),
+  and the reference's missing descriptions are filled from curated
+  `param_docs` overlay text, so hover never shows a bare name
+  (`every_parameter_has_a_description` / `every_attribute_has_a_description`
+  guard the coverage); completion degrades gracefully regardless.
 - **Knowledge spans open documents plus a watched workspace scan, not the
   queue manager**: the server is a script checker. Objects that live only in
   the queue manager — or in `*.mqsc` files outside the workspace roots, in
