@@ -2265,9 +2265,23 @@ pub fn hover(
             md.push_str(&format!("\n\n> {f}"));
         }
         // curated meaning of the HOVERED VALUE itself (overlay value_docs):
-        // hovering CCSID(1208) explains "UTF-8 (Unicode)" right on the card
+        // hovering CCSID(1208) explains "UTF-8 (Unicode)" right on the card.
+        // Parameter-scoped rules win; then the generic vocabulary, but only
+        // where a word CAN be a keyword (an enum slot — a word inside a
+        // Str/Name group is the user's data, not vocabulary); then a plain
+        // integer note for any parameter that accepts numbers.
         if let Some(v) = &value_word {
-            if let Some(meaning) = m.value_doc(&pname, e.object, v) {
+            let numeric = matches!(p.kind, ValueKind::Integer) || p.alt_integer;
+            let meaning = m.value_doc(&pname, e.object, v).or_else(|| {
+                if matches!(p.kind, ValueKind::Enum(_)) {
+                    m.generic_value_doc(v)
+                } else if numeric && !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) {
+                    Some("an integer value for this parameter")
+                } else {
+                    None
+                }
+            });
+            if let Some(meaning) = meaning {
                 md.push_str(&format!("\n\n**`{v}`** — {meaning}"));
             }
         }
@@ -4685,14 +4699,24 @@ mod tests {
             md.contains("**`REPLACE`**") && md.contains("CHLAUTH"),
             "{md}"
         );
-        // a value the table does not cover keeps the card untouched
+        // a value the scoped table does not cover: an integer parameter
+        // gets the plain integer note instead
         let md = md_of("SET CHLAUTH(*) TYPE(BLOCKUSER)\n", 0, 21);
         assert!(md.contains("blocked user IDs"), "{md}");
         let md = md_of("DEFINE QLOCAL(Q) MAXDEPTH(99)\n", 0, 26);
         assert!(
-            md.contains("`MAXDEPTH`") && !md.contains("**`99`**"),
+            md.contains("`MAXDEPTH`") && md.contains("**`99`** — an integer value"),
             "{md}"
         );
+        // the generic vocabulary explains enum words the scoped table
+        // leaves out — but only in enum slots, never in string parameters
+        let md = md_of("ALTER QMGR ACCTCONO(DISABLED)\n", 0, 24);
+        assert!(
+            md.contains("**`DISABLED`**") && md.contains("turned off"),
+            "{md}"
+        );
+        let md = md_of("ALTER QLOCAL(A) DESCR(NONE)\n", 0, 25);
+        assert!(md.contains("`DESCR`") && !md.contains("**`NONE`**"), "{md}");
     }
 
     #[test]
@@ -4731,13 +4755,13 @@ mod tests {
             md.contains("`TYPE`") && md.contains("blocked user IDs"),
             "{md}"
         );
-        // an undocumented value still gets the plain parameter card
+        // an undocumented integer value gets the plain integer note
         let text = "ALTER QLOCAL(A) MAXDEPTH(99)\n";
         let tree = parse(text);
         let md =
             md_of(hover(text, &tree, m, Position::new(0, 25), &Default::default()).expect("v"));
         assert!(
-            md.contains("`MAXDEPTH`") && !md.contains("**`99`**"),
+            md.contains("`MAXDEPTH`") && md.contains("**`99`** — an integer value"),
             "{md}"
         );
         // hovering the PARAMETER word itself: no value annotation

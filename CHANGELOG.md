@@ -8,6 +8,30 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 ## [Unreleased]
 
 ### Added
+- Hover now has full documentation coverage: every parameter and every
+  displayable attribute in the merged model carries a description. Two new
+  curated overlay sections make that possible — `param_docs` adds hover
+  text for the 96 names the 2011 reference leaves undocumented (official
+  reference prose where the extraction missed it, oracle/DDG-confirmed
+  wording for modern parameters like `IMGSCHED`/`ACTVCONO`/`AMQPKA`/
+  `IGNSTATE`, and an honest "the IBM reference carries no explanation"
+  note for the genuinely unexplainable legacy residue), and
+  `generic_values` explains the value words shared across many parameters
+  (`DISABLED` → "the feature this parameter controls is turned off") —
+  used only inside enum-valued parameters, so a word in a string group is
+  never treated as vocabulary. The hover value chain is now: scoped
+  `value_docs` → generic vocabulary → a plain integer note for numeric
+  parameters, and 17 more scoped `value_docs` rules cover the statistics
+  levels (MONQ/MONCHL/MONACLS/STATACLS/STATCHL), LDAP AUTHINFO
+  (CHCKLOCL/ADOPTCTX/AUTHORMD), SET POLICY, SET AUTHREC, QSGDISP, USERSRC
+  and PROPCTL spellings the model actually carries. Display attributes
+  normalize to bare words at model load (`PORT ( port-number )` → `PORT`),
+  finally matching hover and completion. Four guard tests pin it all:
+  parameter and attribute coverage, generic-word existence in the model,
+  and the bare-word attr form. Diagnostics are untouched — corpus probe
+  byte-identical at 2653.
+
+### Added
 - Hovering a parameter VALUE explains it: a fifth curated overlay
   section, `value_docs` (`param` + object-scoped `{VALUE: meaning}`),
   appends the value's descriptive name to the parameter card —

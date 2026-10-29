@@ -166,6 +166,9 @@ struct RawModel {
     /// curated value meanings (overlay-only data; see ValueDoc)
     #[serde(default)]
     value_docs: Vec<ValueDoc>,
+    /// curated meanings for shared value words (overlay-only data)
+    #[serde(default)]
+    generic_values: HashMap<String, String>,
 }
 
 /// One `"VERB OBJECT"` patch in the overlay; every operation optional.
@@ -203,6 +206,10 @@ struct Overlay {
     /// curated parameter value meanings (see ValueDoc)
     #[serde(default)]
     value_docs: Vec<ValueDoc>,
+    /// curated meanings for value words shared across many parameters
+    /// (see Model::generic_values)
+    #[serde(default)]
+    generic_values: HashMap<String, String>,
 }
 
 impl RawModel {
@@ -274,6 +281,7 @@ impl RawModel {
         }
         // curated value meanings: overlay-only, like the tables above
         self.value_docs.extend(ov.value_docs);
+        self.generic_values.extend(ov.generic_values);
     }
 }
 
@@ -366,10 +374,25 @@ pub struct Model {
     /// curated parameter value meanings (from the overlay's `value_docs`
     /// section). Hover annotation only; never flags anything.
     value_docs: Vec<ValueDoc>,
+    /// curated meanings for value words shared across many parameters
+    /// (from the overlay's `generic_values` section). Hover fallback of the
+    /// `value_docs` lookup; never flags anything.
+    generic_values: HashMap<String, String>,
 }
 
 fn norm_syn(s: &str) -> String {
     s.trim().to_ascii_uppercase()
+}
+
+/// The bare keyword of a modelled display attribute. The reference spells
+/// some attrs with their argument in the attrs list (`PORT ( port-number )`),
+/// but every consumer — hover match, completion label, the "looks like a
+/// continuation word" checks — sees only the bare word, so the loaded model
+/// stores just that. Page-footer debris that the extractor picked up into
+/// an attrs list (multi-word junk) normalises to nothing and is dropped.
+fn norm_attr(a: &str) -> Option<&str> {
+    let w = a.split('(').next().unwrap_or("").trim();
+    (!w.is_empty() && !w.chars().any(|c| c.is_whitespace())).then_some(w)
 }
 
 fn kind_of(p: &RawParam) -> (ValueKind, bool) {
@@ -457,8 +480,18 @@ impl Model {
                             description: rp.description.clone(),
                         });
                     }
-                    let attr_set: HashSet<String> = e.attrs.iter().cloned().collect();
-                    known_attrs.extend(e.attrs.iter().cloned());
+                    // attrs normalise to bare words (see norm_attr); the set
+                    // is built from the same pass, deduping what the
+                    // normalisation makes identical
+                    let mut attr_set: HashSet<String> = HashSet::new();
+                    let attrs: Vec<String> = e
+                        .attrs
+                        .iter()
+                        .filter_map(|a| norm_attr(a))
+                        .map(|w| w.to_owned())
+                        .filter(|w| attr_set.insert(w.clone()))
+                        .collect();
+                    known_attrs.extend(attrs.iter().cloned());
 
                     // synonyms: first token is the verb abbreviation, the
                     // rest the object abbreviation ("DEF QL" => DEF->DEFINE,
@@ -487,7 +520,7 @@ impl Model {
                         description: e.description.clone(),
                         synonyms: std::mem::take(&mut syns),
                         params,
-                        attrs: e.attrs.clone(),
+                        attrs,
                         positional: e.positional.clone(),
                         footnotes: e.footnotes.clone(),
                         by_name,
@@ -532,6 +565,7 @@ impl Model {
                 availability: raw.availability,
                 command_availability: raw.command_availability,
                 value_docs: raw.value_docs,
+                generic_values: raw.generic_values,
             }
         })
     }
@@ -671,6 +705,15 @@ impl Model {
             .map(|s| s.as_str())
     }
 
+    /// Curated meaning of a GENERIC value word (overlay `generic_values`):
+    /// the fallback for hover when no parameter-scoped `value_docs` rule
+    /// explains the value. Purely informational, like the scoped table.
+    pub fn generic_value_doc(&self, value: &str) -> Option<&str> {
+        self.generic_values
+            .get(&value.to_ascii_uppercase())
+            .map(|s| s.as_str())
+    }
+
     /// Every `(object, param)` pair the merged model carries (the
     /// value_docs coverage guard iterates the whole table through this).
     #[cfg(test)]
@@ -696,6 +739,59 @@ impl Model {
     /// The curated `value_docs` table itself (coverage guard test input).
     pub fn all_value_docs(&self) -> &[ValueDoc] {
         &self.value_docs
+    }
+
+    /// The curated `generic_values` table itself (guard test input).
+    #[cfg(test)]
+    fn all_generic_values(&self) -> &HashMap<String, String> {
+        &self.generic_values
+    }
+
+    /// Every enum value word the merged model accepts anywhere (the
+    /// generic_values existence guard checks its words against this).
+    #[cfg(test)]
+    fn all_enum_words(&self) -> std::collections::HashSet<String> {
+        let mut out = std::collections::HashSet::new();
+        for objs in self.commands.values() {
+            for &i in objs.values() {
+                for p in &self.entry(i).params {
+                    if let ValueKind::Enum(vs) = &p.kind {
+                        out.extend(vs.iter().cloned());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Every `(object, attribute)` pair the merged model carries (the
+    /// attribute-description coverage guard iterates through this).
+    #[cfg(test)]
+    fn all_scoped_attrs(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for objs in self.commands.values() {
+            for (object, &i) in objs {
+                for a in &self.entry(i).attrs {
+                    out.push((object.clone(), a.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Every `(object, param)` pair the merged model carries (the
+    /// parameter-description coverage guard iterates through this).
+    #[cfg(test)]
+    fn all_params(&self) -> Vec<(String, Param)> {
+        let mut out = Vec::new();
+        for objs in self.commands.values() {
+            for (object, &i) in objs {
+                for p in &self.entry(i).params {
+                    out.push((object.clone(), p.clone()));
+                }
+            }
+        }
+        out
     }
 
     /// documentation text for a parameter name, preferring contexts that
@@ -1070,7 +1166,7 @@ mod tests {
         // extraction left some parameter kinds as free strings)
         let m = model();
         let table = m.all_value_docs();
-        assert_eq!(table.len(), 20, "value_docs rule count moved");
+        assert_eq!(table.len(), 35, "value_docs rule count moved");
         for r in table {
             let hits = m.scoped_params(&r.param, &r.obj);
             assert!(!hits.is_empty(), "{}: no scoped command", r.param);
@@ -1097,6 +1193,88 @@ mod tests {
                     r.obj.join(",")
                 );
             }
+        }
+    }
+
+    #[test]
+    fn attrs_load_as_bare_words() {
+        // the reference spells some attrs with their argument
+        // (`PORT ( port-number )`); the loaded model must keep the bare
+        // word only, or hover/completion matching cannot see them — and
+        // the page-footer debris the extractor left in ALTER QLOCAL's
+        // attrs list must not be "known" as a word
+        let m = model();
+        assert!(
+            m.known_attrs.contains("PORT"),
+            "PORT lost its bare-word form"
+        );
+        assert!(m.known_attrs.contains("QMNAME"));
+        assert!(m.known_attrs.contains("IPADDR"));
+        assert!(
+            !m.known_attrs.iter().any(|a| a.contains(' ')),
+            "debris survived"
+        );
+        let i = m.commands["DISPLAY"]["THREAD"];
+        assert!(m.entry(i).attr_set.contains("QMNAME"));
+        // and the raw junk string never reaches the command-card attrs list
+        let i = m.commands["ALTER"]["QLOCAL"];
+        assert!(m.entry(i).attrs.iter().all(|a| !a.contains("Page")));
+    }
+
+    #[test]
+    fn every_attribute_has_a_description() {
+        // the user-visible contract for attribute hover: no DISPLAY
+        // attribute anywhere in the merged model may render as a bare
+        // label — attr hover text comes through param_doc, exactly like
+        // the hover card's attribute branch does
+        let m = model();
+        let mut missing = Vec::new();
+        for (obj, attr) in m.all_scoped_attrs() {
+            if m.param_doc(&attr, &obj).unwrap_or("").trim().is_empty() {
+                missing.push(format!("{obj} {attr}"));
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "attributes with no hover text: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn every_parameter_has_a_description() {
+        // same contract for parameters: a param card falls back from
+        // p.description to param_doc, so the pair must not BOTH be empty
+        let m = model();
+        let mut missing = Vec::new();
+        for (obj, p) in m.all_params() {
+            let has = !p.description.trim().is_empty()
+                || !m.param_doc(&p.name, &obj).unwrap_or("").trim().is_empty();
+            if !has {
+                missing.push(format!("{obj} {}", p.name));
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "parameters with no hover text: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn every_generic_value_word_exists_in_the_model() {
+        // anti-fabrication guard for `generic_values`: a word that is not
+        // an enum value SOMEWHERE in the model has no business in the
+        // generic vocabulary (hover would annotate spellings MQ rejects)
+        let m = model();
+        let words = m.all_enum_words();
+        for w in m.all_generic_values().keys() {
+            assert!(
+                words.contains(w),
+                "generic_values word {w:?} is no model enum value"
+            );
         }
     }
 
