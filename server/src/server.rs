@@ -32,6 +32,14 @@ pub struct MqscServer {
     /// for the PR 7 closed-file scan that runs in `initialized` (the scan
     /// needs the client's settings, which only exist after initialize).
     ws_roots: RwLock<Vec<PathBuf>>,
+    /// The scan/watch settings as they were at `initialize`. PR 8's
+    /// watched-file reindexing consults the same snapshot, so the whole
+    /// workspace index honors one restart-only contract.
+    ws_scan: RwLock<WorkspaceScan>,
+    /// Whether the client accepts dynamic registration of
+    /// `workspace/didChangeWatchedFiles` — the only way a server can ask
+    /// for file events (LSP has no static server-side file watching).
+    dyn_watch: AtomicBool,
 }
 
 impl MqscServer {
@@ -42,6 +50,8 @@ impl MqscServer {
             settings: RwLock::new(None),
             snippet_support: AtomicBool::new(false),
             ws_roots: RwLock::new(Vec::new()),
+            ws_scan: RwLock::new(WorkspaceScan::default()),
+            dyn_watch: AtomicBool::new(false),
         }
     }
 
@@ -105,6 +115,31 @@ impl MqscServer {
     async fn refresh_others(&self, skip: &Url) {
         for u in self.index.open_uris_excluding(skip) {
             self.refresh(&u).await;
+        }
+    }
+
+    /// Ask the client to watch `**/*.mqsc` and report events to
+    /// `workspace/didChangeWatchedFiles` (PR 8). The spec offers no static
+    /// server-side file watching, so this request is the only route; a client
+    /// that refuses simply leaves the entries as scanned.
+    async fn register_file_watcher(&self) {
+        let watchers = vec![FileSystemWatcher {
+            glob_pattern: GlobPattern::String("**/*.mqsc".into()),
+            // kind omitted = create | change | delete, which is all three we handle
+            kind: None,
+        }];
+        let options = DidChangeWatchedFilesRegistrationOptions { watchers };
+        let reg = Registration {
+            id: "mqsc-workspace-files".into(),
+            method: "workspace/didChangeWatchedFiles".into(),
+            register_options: serde_json::to_value(options).ok(),
+        };
+        match self.client.register_capability(vec![reg]).await {
+            Ok(()) => crate::tlog!("watched files: registered **/*.mqsc with the client"),
+            Err(e) => crate::tlog!(
+                "watched files: client refused registration ({e}) \
+                 — closed files stay as scanned until the server restarts"
+            ),
         }
     }
 
@@ -220,6 +255,34 @@ impl LanguageServer for MqscServer {
         }
         *wr(&self.ws_roots) = roots;
 
+        // PR 7/8 contract: the workspace index is configured once, here.
+        // Settings changes later must not silently change what is indexed
+        // or watched mid-session (documented as restart-only).
+        let scan = params
+            .initialization_options
+            .as_ref()
+            .map(WorkspaceScan::from_settings)
+            .unwrap_or_default();
+        crate::tlog!(
+            "workspace index settings: enabled={} max_files={} exclude={:?}",
+            scan.enabled,
+            scan.max_files,
+            scan.exclude
+        );
+        *wr(&self.ws_scan) = scan;
+        // LSP 3.17 is explicit that file changes "from the server side" have
+        // no static configuration: the server has to register dynamically.
+        self.dyn_watch.store(
+            params
+                .capabilities
+                .workspace
+                .as_ref()
+                .and_then(|w| w.did_change_watched_files.as_ref())
+                .and_then(|w| w.dynamic_registration)
+                .unwrap_or(false),
+            Ordering::Relaxed,
+        );
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "mqsc-lsp".into(),
@@ -293,17 +356,14 @@ impl LanguageServer for MqscServer {
         // a 300-file scan. Settings are read before the await; no lock
         // guard may cross it (futures must stay Send).
         let roots = rd(&self.ws_roots).clone();
-        let scan = rd(&self.settings)
-            .as_ref()
-            .map(WorkspaceScan::from_settings)
-            .unwrap_or_default();
+        let scan = rd(&self.ws_scan).clone();
         if !scan.enabled || roots.is_empty() {
             crate::tlog!(
                 "workspace scan skipped (enabled={}, roots={})",
                 scan.enabled,
                 roots.len()
             );
-            return;
+            return; // index off: nothing to index, and nothing to watch either
         }
         let max_files = scan.max_files;
         let t0 = std::time::Instant::now();
@@ -345,6 +405,78 @@ impl LanguageServer for MqscServer {
                     ),
                 )
                 .await;
+        }
+
+        // PR 8: ask the client to tell us when those files change. Registered
+        // AFTER the scan on purpose — a client that ignores the request then
+        // costs us nothing but freshness, never the index itself. The window
+        // between the walk passing a directory and the watcher starting is
+        // self-healing: any later change to such a file reaches us, and a
+        // file that never changes was already read from disk if the walk had
+        // not reached it yet.
+        if self.dyn_watch.load(Ordering::Relaxed) {
+            self.register_file_watcher().await;
+        } else {
+            crate::tlog!(
+                "watched files: client has no dynamic registration for didChangeWatchedFiles \
+                 — closed files stay as scanned until the server restarts"
+            );
+        }
+    }
+
+    /// PR 8: keep the index current. One file per event (never a rescan), the
+    /// read + parse off the LocalSet, and open documents untouched — saving a
+    /// file fires an event for it even though `didChange` already delivered
+    /// that content, and the buffer may hold more than the disk does.
+    async fn did_change_watched_files(&self, p: DidChangeWatchedFilesParams) {
+        let kinds = p
+            .changes
+            .iter()
+            .map(|c| match c.typ {
+                t if t == FileChangeType::CREATED => "created",
+                t if t == FileChangeType::DELETED => "deleted",
+                _ => "changed",
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        crate::tlog!(
+            "didChangeWatchedFiles: {} events [{kinds}]",
+            p.changes.len()
+        );
+        let cfg = rd(&self.ws_scan).clone();
+        if !cfg.enabled || p.changes.is_empty() {
+            return;
+        }
+        let roots = rd(&self.ws_roots).clone();
+        let changes = p.changes;
+        let cfg_for_scan = cfg.clone();
+        let t0 = std::time::Instant::now();
+        let updates = match tokio::task::spawn_blocking(move || {
+            workspace::reindex_from_events(&changes, &cfg_for_scan, &roots)
+        })
+        .await
+        {
+            Ok(updates) => updates,
+            Err(e) => {
+                crate::tlog!("watched reindex failed to run: {e}");
+                return;
+            }
+        };
+        let applied = self.index.apply_disk_updates(updates, &cfg);
+        crate::tlog!(
+            "watched reindex: applied={} capped={} ws_files={} in {}ms",
+            applied.changed,
+            applied.capped,
+            self.index.total(),
+            t0.elapsed().as_millis()
+        );
+        if applied.changed == 0 {
+            return;
+        }
+        // the change is visible to every OTHER document's references, so the
+        // republish rule is did_open's again
+        for u in self.index.open_uris() {
+            self.refresh(&u).await;
         }
     }
 

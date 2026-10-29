@@ -68,7 +68,7 @@
         "mqsc.workspaceIndex.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Index the workspace's closed `*.mqsc` files at startup, so names they `DEFINE` resolve in the files you have open (hint 12, hover, definition, references, completion, workspace/symbol). Takes effect on restart."
+          "markdownDescription": "Index the workspace's closed `*.mqsc` files at startup and keep them current via a file watcher the server registers, so names they `DEFINE` resolve in the files you have open (hint 12, hover, definition, references, completion, rename, workspace/symbol). Takes effect on restart."
         },
         "mqsc.workspaceIndex.maxFiles": {
           "type": "number",
@@ -79,7 +79,7 @@
           "type": "array",
           "items": { "type": "string" },
           "default": [".git", "target", "node_modules", "dist", "build"],
-          "markdownDescription": "Directory **names** skipped at any depth while scanning the workspace. Takes effect on restart."
+          "markdownDescription": "Directory **names** skipped at any depth while scanning the workspace and while reindexing watched file events. Takes effect on restart."
         },
         "mqsc.diagnostics.PARSE_ERROR": {
           "type": "string",

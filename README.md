@@ -36,7 +36,7 @@ asserts the pane, so a plain run doubles as an end-to-end UI test,
 grammars/tree-sitter-mqsc/   tree-sitter grammar + external scanner + corpus tests + highlight queries
 tools/extract_model.py        extracts the command model from the reference markdown
 tools/lsp_smoke_test.py       protocol-level end-to-end test client
-tools/workspace_index_smoke.py  end-to-end test for the workspace scan of closed files
+tools/workspace_index_smoke.py  end-to-end test for the workspace index (scan + watching)
 tools/record_demo.sh          drives/records the feature demo (docs/demo.cast)
 model/mqsc-model.json         the extracted model (128 commands, 1336 params, docs, attrs, synonyms)
 server/                       Rust LSP server (tower-lsp + tree-sitter), embeds the model
@@ -134,13 +134,13 @@ Point your editor at the binary and associate `*.mqsc` with language id
 | Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text; object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
 | Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document / indexed workspace file** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
-| definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every **open** document keeping quoted/bare style (workspace files are shown by references but not edited by rename — see "Object knowledge") |
+| definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every indexed document — open or closed — keeping quoted/bare style (closed files are watched, so the mass edit rests on current content — see "Object knowledge") |
 | documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
 | workspace/symbol | every object `DEFINE`d in an open document or an indexed workspace file, grouped by object type |
 | foldingRange | multi-line continuation chains + comment blocks |
 | documentHighlight | same-word highlights |
 | semanticTokens | verb / object / parameter / value / string / number / wildcard / comment classification (survives theme changes); full and range requests; enum values equal to the parameter default carry the `default` modifier |
-| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (` `, `(`, `,`, `:` triggers — the blank opens the next-word list as soon as a token is committed), code actions, symbols, folding, highlights, semantic tokens, definition, references, rename, workspace symbols |
+| Sync | full-text with a cached parse tree reused by every request; `initialize` advertises hover, completion (` `, `(`, `,`, `:` triggers — the blank opens the next-word list as soon as a token is committed), code actions, symbols, folding, highlights, semantic tokens, definition, references, rename, workspace symbols; after the startup scan the server additionally asks the client (dynamic registration) to report changes to `**/*.mqsc` |
 
 ### Diagnostic codes
 
@@ -211,14 +211,17 @@ configured by three more keys:
 } } }
 ```
 
-`enabled` switches the scan off (then only open documents are known),
-`maxFiles` caps how many files are indexed (taken in sorted order; the
-server logs a window warning when files had to be left out), and `exclude`
-lists directory *names* skipped at any depth. An explicitly empty `exclude`
+`enabled` switches the index off (then only open documents are known, and no
+file watcher is requested either), `maxFiles` caps how many files are
+indexed (taken in sorted order; the server logs a window warning when files
+had to be left out, and watched-file events keep refusing only *new* files
+beyond the cap), and `exclude` lists directory *names* skipped at any depth
+(startup scan and watched events alike). An explicitly empty `exclude`
 means "exclude nothing"; unreadable values fall back per key. Files over
 4 MiB are skipped. These three are read once at `initialize`, so a change
-takes effect on the next server start, and the scan outcome is always in
-the log (`workspace scan: found=… indexed=… merged=…`).
+takes effect on the next server start, and outcomes are always in the log
+(`workspace scan: found=… indexed=… merged=…`,
+`watched reindex: applied=… capped=…`).
 
 ### Object knowledge (open documents + the workspace)
 
@@ -254,10 +257,17 @@ feature then resolves names against them exactly as against open documents
 (hint 12 stays silent, hover names the file, goto-definition jumps into it,
 workspace/symbol lists it, completion offers the name), and files opened
 later override their on-disk entry — an unsaved buffer is the truth while
-it is open, and closing falls back to the file on disk. Rename is the one
-deliberate exception: it edits open documents only, because a closed
-entry's content is only as fresh as the last scan; `references` may
-therefore show a site that rename will not touch until the file is open.
+it is open, and closing falls back to the file on disk. The entries stay
+current after the scan, too: the server registers a `**/*.mqsc` watcher
+with the client (`client/registerCapability`, since LSP has no static
+server-side file watching), and every create/change/delete event reindexes
+exactly the file it names — never a rescan. An event for an open document
+never touches the buffer (saving a file fires one anyway), events below
+excluded directories are filtered out, and affected diagnostics are
+republished. Because watched entries are as fresh as the disk, rename
+covers closed files too. A client that cannot or will not register the
+watcher keeps closed entries as scanned until the server restarts — the
+server logs that, and read features keep working on the scanned content.
 See the `mqsc.workspaceIndex.*` settings.
 
 Names resolve inside object namespaces, and that rule is shared by every
@@ -276,14 +286,16 @@ opening or closing a document re-publishes every other document's
 diagnostics; typing only re-analyses the edited document (per keystroke,
 re-analysing all siblings would be quadratic). Closing a file keeps it in
 the index by re-reading it from disk (the unsaved buffer stops counting,
-the file on disk keeps counting), and the workspace scan that ran at
-startup is repeated only by restarting the server.
+the file on disk keeps counting). The startup scan itself is never
+repeated, but watched-file events keep its entries current — a watched
+change reindexes one file and re-publishes every open document's
+diagnostics, since the change is visible to all of them.
 
 ## Testing
 
 ```sh
 cd server
-cargo test                                       # 115 unit tests + 3 grammar-corpus tests
+cargo test                                       # 120 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
@@ -293,8 +305,10 @@ python3 tools/lsp_smoke_test.py                  # full assertive LSP session (s
                                                  # settings, server log — exit != 0 on FAIL
 python3 tools/workspace_index_smoke.py           # assertive session against a throwaway
                                                  # workspace: closed *.mqsc files resolve
-                                                 # names, excludes/cap/buffer-override and
-                                                 # the enabled=false gate — exit != 0 on FAIL
+                                                 # names, excludes/cap/buffer-override, the
+                                                 # watcher registration and single-file
+                                                 # create/change/delete reindexing, and the
+                                                 # enabled=false gate — exit != 0 on FAIL
 python3 tools/check_model.py                     # model is byte-identical to extractor output
                                                  # (skips cleanly without the IBM reference)
 cd server
@@ -340,15 +354,16 @@ non-zero when a check fails.
   commands from railroad diagrams only (`recovered: true` params exist), and
   a few parameter descriptions are missing; hover/completion degrade
   gracefully there.
-- **Knowledge spans open documents plus a startup scan, not the queue
-  manager**: the server is a script checker. Objects that live only in the
-  queue manager — or in `*.mqsc` files outside the workspace roots, in an
-  excluded directory, or beyond `mqsc.workspaceIndex.maxFiles` — are
-  invisible (which is exactly why hint 12 is only a hint). Closed workspace
-  files are indexed at startup only: they are not watched for changes, so a
-  file edited outside the editor stays stale until restart, and rename
-  therefore never edits them. `workspace/didChangeWatchedFiles` reindexing
-  is the natural next step.
+- **Knowledge spans open documents plus a watched workspace scan, not the
+  queue manager**: the server is a script checker. Objects that live only in
+  the queue manager — or in `*.mqsc` files outside the workspace roots, in
+  an excluded directory, or beyond `mqsc.workspaceIndex.maxFiles` — are
+  invisible (which is exactly why hint 12 is only a hint). Closed files
+  stay fresh only while the client honors the server's watcher request
+  (LSP offers no static server-side file watching); a client without
+  dynamic registration for `workspace/didChangeWatchedFiles` ages scanned
+  entries until a restart; VS Code (the shipped extension) honors it, and
+  the server logs when a client does not.
 - **False positives are measured, not eliminated**: on a 324-file
   `dmpmqcfg` acceptance corpus (260k diagnostics before the model work),
   the count sits at ≈19.9k after the model/overlay/grammar fixes (-92.5%);
