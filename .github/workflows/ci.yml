@@ -125,19 +125,22 @@ jobs:
       # The same tree-sitter C files the Release job ships, compiled by
       # MSVC; the tests are the portability check (URI/path handling was
       # the one Windows-hostile spot, fixed in PR 10).
-      # The step summary is the ONE log surface that is public without
-      # auth (GH requires rights for log downloads even on public repos),
-      # so a red platform job publishes its own failure output here.
+      # Failure output goes out through TWO public surfaces: the step
+      # summary (for logged-in readers) and a ::error:: annotation —
+      # anonymous visitors can read annotations, but GitHub hides step
+      # summaries and logs from anyone without repo rights, so the
+      # annotation is the channel that is actually public.
       - name: cargo test --locked
         shell: bash
         working-directory: server
         run: set -o pipefail; cargo test --locked 2>&1 | tee ../test-output.log
 
-      - name: Publish failure output (public step summary)
+      - name: Publish failure output (public step summary + annotation)
         if: failure()
         shell: bash
         run: |
           { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"
 
   macos:
     name: test (macos, stable Rust)
@@ -157,8 +160,9 @@ jobs:
         working-directory: server
         run: set -o pipefail; cargo test --locked 2>&1 | tee ../test-output.log
 
-      - name: Publish failure output (public step summary)
+      - name: Publish failure output (public step summary + annotation)
         if: failure()
         shell: bash
         run: |
           { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"
