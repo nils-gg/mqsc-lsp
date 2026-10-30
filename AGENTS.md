@@ -69,9 +69,12 @@ the full picture; this file only lists what is easy to get wrong.
   and `apply_disk_updates` never touches Open entries — a save fires a
   watched event for the very buffer); **cap refuses growth only** (a
   `max_files` overflow keeps reindexing already-indexed files); and
-  **`rename_sites` covers every entry** now that closed files are watched
-  (it lost its open_only filter — do not reintroduce one, references and
-  rename must keep returning the identical join). Because a merge or a
+  **the unscoped `rename_sites`/`sites` cover every entry** now that closed
+  files are watched (they lost their open_only filters — do not reintroduce
+  them there: references, and rename with `crossFileNavigation` on, must
+  keep returning the identical join; the navigation-scope default is applied
+  by the separate `*_in_file` variants, never by filtering the shared ones).
+  Because a merge or a
   watch apply changes what already-open documents resolve, both
   `initialized()` and `did_change_watched_files` republish all open
   documents when anything changed. `server.rs` is protocol-only on top of
@@ -175,6 +178,15 @@ the full picture; this file only lists what is easy to get wrong.
   restart (documented in README and in the extension's setting
   descriptions). The CLI never scans: `--check` output must stay
   byte-identical to the baseline.
+- `settings::Navigation` (`mqsc.crossFileNavigation`, same nested-or-flat
+  lookup) decides whether `definition` and `rename` reach other documents:
+  **default false — same-file only**. Unlike `WorkspaceScan` (restart-gated)
+  it is read **live per request** by `MqscServer::nav_cross_file` from the
+  settings snapshot, like the severity map, because an edit-scope setting
+  must react the moment the user flips it. Scope is enforced in the `rename`
+  handler itself (clients may skip `prepareRename` — esql-lsp lesson), which
+  is why `rename_sites_in_file` exists beside the unscoped join. References,
+  hover, completion and hint 12 never consult it.
 - `telemetry.rs` is silent unless `--log-file`/`MQSC_LSP_LOG` is set; in
   stdio mode nothing but LSP traffic may ever reach stdout. The `Observed`
   tower wrapper catches handler panics into `-32603` responses — handlers

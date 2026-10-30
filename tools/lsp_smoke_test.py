@@ -374,8 +374,8 @@ m = request(22, "textDocument/definition", {"textDocument": {"uri": uri},
 res = (m or {}).get("result")
 locs = res if isinstance(res, list) else ([res] if res else [])
 got = [(l["uri"], l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs]
-check("definition jumps from DOC's TARGET(NO.SUCH.Q) into the sibling",
-      got == [(uri2, 0, 14)], str(got))
+check("definition stays in the edited document by default (no jump into the sibling)",
+      got == [], str(got))
 
 m = request(23, "textDocument/references", {"textDocument": {"uri": uri},
                                            "position": {"line": 7, "character": 25},
@@ -408,9 +408,30 @@ ch = (((m or {}).get("result") or {}).get("changes") or {})
 edits = {u: sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"])
                    for e in el) for u, el in ch.items()}
 print("  ", edits)
-check("rename edits both documents",
+check("rename by default edits only the document under the cursor",
+      edits == {uri: [(7, 25, "RENAMED.Q")]}, str(edits))
+
+print("\n== crossFileNavigation=true restores workspace-wide definition + rename ==")
+send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+      "params": {"settings": {"mqsc": {"crossFileNavigation": True}}}})
+m = request(60, "textDocument/definition", {"textDocument": {"uri": uri},
+                                           "position": {"line": 7, "character": 25}})
+res = (m or {}).get("result")
+locs = res if isinstance(res, list) else ([res] if res else [])
+got = [(l["uri"], l["range"]["start"]["line"], l["range"]["start"]["character"]) for l in locs]
+check("opt-in: definition jumps from DOC's TARGET(NO.SUCH.Q) into the sibling",
+      got == [(uri2, 0, 14)], str(got))
+m = request(61, "textDocument/rename", {"textDocument": {"uri": uri},
+                                        "position": {"line": 7, "character": 25},
+                                        "newName": "RENAMED.Q"})
+ch = (((m or {}).get("result") or {}).get("changes") or {})
+edits = {u: sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"])
+                   for e in el) for u, el in ch.items()}
+check("opt-in: rename edits both documents",
       edits.get(uri) == [(7, 25, "RENAMED.Q")] and edits.get(uri2) == [(0, 14, "RENAMED.Q")],
       str(edits))
+send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+      "params": {"settings": {"mqsc": {}}}})
 
 print("\n== cross-file teardown: close the sibling ==")
 send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {

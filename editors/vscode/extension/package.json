@@ -71,6 +71,11 @@
           ],
           "markdownDescription": "Platform the scripts target. Enables diagnostic 15 NOT_IN_TARGET for parameters that only exist on the other platform (e.g. `BOQNAME` is z/OS-only). Empty = no platform checks."
         },
+        "mqsc.crossFileNavigation": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Let **Go to Definition** and **Rename Symbol** reach every indexed document (open editors and scanned workspace files). Default `false`: both stay inside the file being edited, so a rename never mass-edits files you have not opened. References, hover, completion, and the undefined-object hint (12) always see the whole workspace regardless. Takes effect immediately."
+        },
         "mqsc.workspaceIndex.enabled": {
           "type": "boolean",
           "default": true,

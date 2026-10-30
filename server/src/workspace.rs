@@ -343,7 +343,24 @@ impl WorkspaceIndex {
     /// `definitions_only: Some(true)` keeps only DEFINE sites,
     /// `Some(false)` only uses.
     pub fn sites(&self, key: &SymbolKey, definitions_only: Option<bool>) -> Vec<Location> {
-        self.sites_at(key, definitions_only)
+        self.sites_at(key, definitions_only, None)
+            .into_iter()
+            .map(|s| s.loc)
+            .collect()
+    }
+
+    /// `sites` restricted to one document — the join is the same index
+    /// the unscoped call uses, so a same-file answer can never disagree
+    /// with what the unscoped one would have said about those sites.
+    /// This is the `mqsc.crossFileNavigation=false` shape of
+    /// go-to-definition (see `settings::Navigation`).
+    pub fn sites_in_file(
+        &self,
+        key: &SymbolKey,
+        definitions_only: Option<bool>,
+        uri: &Url,
+    ) -> Vec<Location> {
+        self.sites_at(key, definitions_only, Some(uri))
             .into_iter()
             .map(|s| s.loc)
             .collect()
@@ -354,16 +371,33 @@ impl WorkspaceIndex {
     /// safety gate. Every entry, open or closed: since PR 8 closed entries
     /// are kept current by watched-file events, so a mass edit may rest on
     /// them (and the client's own watcher then reindexes the files rename
-    /// just wrote, so the index follows the edit it caused).
+    /// just wrote, so the index follows the edit it caused). The server
+    /// hands this unscoped list only when `mqsc.crossFileNavigation` is
+    /// on; with the default the caller uses `rename_sites_in_file` and the
+    /// mass edit stays inside the document under the cursor.
     pub fn rename_sites(&self, key: &SymbolKey) -> Vec<SiteAt> {
-        self.sites_at(key, None)
+        self.sites_at(key, None, None)
     }
 
-    fn sites_at(&self, key: &SymbolKey, definitions_only: Option<bool>) -> Vec<SiteAt> {
+    /// `rename_sites` restricted to one document (the navigation-scope
+    /// default); same join, same safety-gate inputs, smaller reach.
+    pub fn rename_sites_in_file(&self, key: &SymbolKey, uri: &Url) -> Vec<SiteAt> {
+        self.sites_at(key, None, Some(uri))
+    }
+
+    fn sites_at(
+        &self,
+        key: &SymbolKey,
+        definitions_only: Option<bool>,
+        only: Option<&Url>,
+    ) -> Vec<SiteAt> {
         let mut out = Vec::new();
         let ns = key.scope.namespace();
         let docs = rd(&self.docs);
         for (u, doc) in docs.iter() {
+            if only.is_some_and(|o| o != u) {
+                continue;
+            }
             for s in doc
                 .sites
                 .iter()
@@ -697,6 +731,28 @@ mod tests {
         assert_eq!(cdefs.len(), 1);
         assert_eq!(cdefs[0].uri, b);
         assert_eq!(cdefs[0].range.start.line, 1);
+    }
+
+    #[test]
+    fn scoped_joins_stay_in_their_document() {
+        // the navigation-scope shape: *_in_file sees only the edited
+        // document, the unscoped joins keep seeing the whole index —
+        // server-side, crossFileNavigation picks between the two.
+        let (index, a, b) = fixture();
+        let q = key_at(&index, &b, 0, 25);
+        assert_eq!(index.rename_sites(&q).len(), 2, "unscoped sees both files");
+        let only_b = index.rename_sites_in_file(&q, &b);
+        assert_eq!(only_b.len(), 1, "b sees only its own use");
+        assert_eq!(only_b[0].loc.uri, b);
+        assert!(only_b[0].defines.is_none(), "the DEFINE lives in a");
+        // …so same-file definition from b finds nothing, while a finds its own
+        assert!(index.sites_in_file(&q, Some(true), &b).is_empty());
+        let only_a = index.sites_in_file(&q, Some(true), &a);
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].uri, a);
+        // unscoped joins unchanged (references still uses them)
+        assert_eq!(index.sites(&q, Some(true)).len(), 1);
+        assert_eq!(index.sites(&q, None).len(), 2);
     }
 
     #[test]
