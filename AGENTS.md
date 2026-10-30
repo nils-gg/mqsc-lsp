@@ -208,6 +208,8 @@ python3 tools/workspace_index_smoke.py              # repo root; assertive works
 python3 tools/check_model.py                        # model byte-reproducibility guard
 python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json (= tag) guard
 node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
+tools/record_demo.sh                     # repo root; 10-step tmux/nvim tour, asserts every beat (e2e UI test)
+DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: agg docs/demo.cast docs/demo.gif)
 ```
 
 - `lsp_smoke_test.py` is **assertive**: it checks quickfixes, script-defined
@@ -246,6 +248,14 @@ node tools/extension_resolve_test.js                # extension server-lookup be
   run a bare `tree-sitter generate` here: without `--abi 14` it rewrites the
   committed `parser.c` to a newer ABI. Server-side work never needs the CLI
   at all: cargo compiles the committed `parser.c`/`scanner.c` directly.
+- **Demo freshness is testable**: `tools/record_demo.sh` (plain run) is the
+  staleness gate for `docs/demo.gif`/`cast` — run it against a build of the
+  release commit; green means the recorded content still matches shipped
+  behavior. Re-record with `DEMO_SCALE=2 --record` (that pacing is what is
+  committed), then `agg docs/demo.cast docs/demo.gif`; the record run asserts
+  the same beats, so green-while-capturing proves the frames. Grepping the raw
+  cast can lie (nvim SGR redraw splits words mid-token) — check the
+  escape-stripped stream instead.
 - Fast iteration without the protocol, from `server/`:
   `echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe` —
   `probe` reads **stdin** and ignores extra arguments.
