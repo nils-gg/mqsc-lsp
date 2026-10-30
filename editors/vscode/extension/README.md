@@ -15,11 +15,12 @@ in CI, but nothing here has been executed inside a real VS Code window.
 - TextMate grammar fallback (`syntaxes/`) so files are readable before the
   server answers; with the server running, its semantic tokens take over
 - Full LSP wiring: diagnostics with quickfixes, completion, hover,
-  definition/references/rename (across open files **and** the workspace's
-  closed `*.mqsc` files — the server indexes them at startup and keeps
-  them current through a file watcher it registers with VS Code; rename
-  rewrites all of it), document and workspace
-  symbols, folding, semantic tokens
+  definition/references/rename (the server indexes the workspace's closed
+  `*.mqsc` files at startup and keeps them current through a file watcher
+  it registers with VS Code, so references, hover and completion see the
+  open files **and** the indexed ones; definition and rename stay inside
+  the edited file unless `mqsc.crossFileNavigation` is enabled), document
+  and workspace symbols, folding, semantic tokens
 - Server lookup without configuration: `mqsc.server.path` when set to a
   real command/path is honored exactly; the default auto mode searches
   `PATH`, then `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`

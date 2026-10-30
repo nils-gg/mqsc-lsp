@@ -7,6 +7,15 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
+First release: tree-sitter MQSC grammar (structure only; comments,
+continuations, quoting), command model extracted from the IBM Script (MQSC)
+Command Reference, tower-lsp server with 15 diagnostic codes and quickfixes,
+completion, hover, folding, semantic tokens, workspace indexing of closed
+`*.mqsc` files with dynamic file watching, severity/target/navigation
+settings, the VS Code extension, and nvim/helix configuration examples.
+
 ### Changed
 - **Definition and rename now default to the edited file.** Go-to-definition
   jumps only to `DEFINE`s inside the document under the cursor, and Rename
@@ -416,12 +425,3 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   other open documents")
 - Quickfix `isPreferred`, quoted-name rename/rehover spans, and the
   code-12 `arms()` gate for per-object-type dump scripts
-
-## [0.1.0] - never released
-
-### Added
-- tree-sitter MQSC grammar (structure only; comments, continuations,
-  quoting), command model extracted from the IBM Script (MQSC) Command
-  Reference, tower-lsp server with diagnostics (12 codes), quickfixes,
-  completion, hover, folding, semantic tokens, same-file DEFINE knowledge,
-  severity settings, nvim/vscode/helix configuration examples
