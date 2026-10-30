@@ -7,6 +7,14 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+- Fixed: an unclosed argument group — e.g. a dump line truncated to
+  `DEFINE QLOCAL(` — produced no diagnostic and `--check` exited 0, while
+  `runmqsc` rejects it (AMQ8405I). The parser repairs the tree with an
+  invisible `MISSING ")"` token that the error walker could never reach;
+  it is now reported as PARSE_ERROR with the broken group underlined
+  (oracle-verified against MQ 10.0.1; the three real-world hits this
+  surfaced in the regression corpus are genuine truncations).
+
 ## [0.1.0] - 2026-10-30
 
 First release: tree-sitter MQSC grammar (structure only; comments,
