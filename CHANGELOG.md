@@ -7,6 +7,29 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Fixed
+- Fabricated parameter values removed: the 2011 reference renders a
+  DISPLAY page's displayable attributes as a dump of bare `[ WORD ]`
+  selections, and the extractor read each run of that dump as the enum of
+  whatever parameter preceded it — so `DISPLAY QMGR SSLEV` "accepted"
+  SSLFIPS, SSLKEYR, … (the next attributes on the page), 53 parameters
+  across DISPLAY QMGR/CONN/CHSTATUS/QSTATUS/CHANNEL in total. Every one of
+  these words is a bare attribute selector in the live MQ 10.0.1
+  railroads, so a new `flag_params` overlay operation demotes them to
+  kind=flag (bare word, no value group — `DISPLAY QMGR SSLEV(DISABLED)`
+  now reports the unexpected-group error real MQ raises) while keeping
+  the genuine descriptions for hover. Genuine enums on the same pages
+  survive untouched — QSGDISP, TRPTYPE, PUTAUT and the ALTER QMGR value
+  lists were checked against the live queue manager (SSLEV(DISABLED),
+  SCHINIT(QMGR), IPADDRV(IPV4), SUITEB(NONE) are all real MP 10.0.1
+  spellings). Two new guards: `no_parameter_enumerates_its_own_siblings`
+  pins the artifact fingerprint (≥6-value enums may not enumerate their
+  own command's parameters), and `pooled_attribute_words_load_as_flags`
+  pins the demotions plus the surviving genuine ALTER QMGR enums.
+  Completion now offers these words as bare keywords instead of `WORD(`
+  groups with invented value snippets. Diagnostics are untouched —
+  corpus probe byte-identical at 2653.
+
 ### Added
 - Hover now has full documentation coverage: every parameter and every
   displayable attribute in the merged model carries a description. Two new

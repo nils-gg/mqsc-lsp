@@ -87,7 +87,19 @@ the full picture; this file only lists what is easy to get wrong.
   over the base model at load time (`Model::load`); the base JSON must stay
   byte-identical to `extract_model.py` output (`tools/check_model.py`
   guards it; overlay `add_params` REPLACE base params — remove overlay
-  entries whenever the extractor itself gets fixed). Its `name_max`
+  entries whenever the extractor itself gets fixed). One base-model
+  artifact family is repaired by the `flag_params` patch op: the extractor
+  read each DISPLAY page's "the following attributes are displayable" dump
+  as the preceding parameter's enum, so those parameters "accept" the NEXT
+  attribute names as values (DISPLAY QMGR SSLEV's first invented value is
+  SSLFIPS). The live railroads show every such word is a bare `[ WORD ]`
+  selector, so the op forces kind=flag and drops the value list while the
+  real description survives; 53 parameters across DISPLAY QMGR/CONN/
+  CHSTATUS/QSTATUS/CHANNEL are demoted. Two guards pin it:
+  `no_parameter_enumerates_its_own_siblings` (a ≥6-value enum may not be
+  mostly same-command parameter names — genuine short enums like
+  TYPE(ALL|LOCAL|CLUSTER) legitimately collide with flag params and stay)
+  and `pooled_attribute_words_load_as_flags`. Its `name_max`
   section (object type → max positional-name chars: 48, channels 1024) is
   read by `Model::name_max_len` to drive code 13 `NAME_TOO_LONG`, and its
   `mandatory` section (per DEFINE object type: rules demanding one of
@@ -286,3 +298,14 @@ node tools/extension_resolve_test.js                # extension server-lookup be
   parse `file:///…` URLs), anything standing for a real file goes through
   `open_disk` with a `temp_ws` path. The CI windows job is the only
   enforcer — a literal `/tmp` string reappearing in a test turns it red.
+
+## OmniMem project name (cross-machine consistency)
+
+- This project's OmniMem memories live under the project name **`mqsc-lsp`**
+  — exactly that string, lowercase with hyphen. Every machine passes it
+  verbatim to `briefing`, `remember`, `recall` and `update_project_state`;
+  any variant (`mqsc_lsp`, `MQSC-LSP`, the absolute repo path) creates a
+  second fragment of memory instead of joining this one.
+- The name is also the one already registered with a project state, so
+  `update_project_state("mqsc-lsp", ...)` updates it — a never-seen variant
+  name fails with `not_found` instead of creating context.

@@ -366,7 +366,10 @@ non-zero when a check fails.
   `RUN`/`REPLACE` `REPLMSG`/`REPLSTR` parameter families are not in the model.
   What real usage proved necessary lives in `model/mqsc-overlay.json`, a
   clearly-labelled curated add-on merged over the extracted model at load
-  time: post-2011 commands, the queue-name `BOQNAME` retyping, per-type
+  time: post-2011 commands, the queue-name `BOQNAME` retyping, the
+  `flag_params` demotions of the 53 attribute words whose invented enum
+  the extractor read out of a page's attribute dump (the live railroads
+  show each word is a bare `[ WORD ]` selector), per-type
   `name_max` limits, per-type `mandatory`
   property rules (diagnostic 14), the per-parameter `availability`
   table, the command-level `command_availability` table behind
