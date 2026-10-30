@@ -1,0 +1,50 @@
+name: False positive
+description: The server flagged something your queue manager accepts
+title: "FP: "
+# labels: [false-positive]  # uncomment once: gh label create false-positive --repo nils-gg/mqsc-lsp --color d93f0b --description "Correct MQSC flagged as wrong"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A diagnostic that fires on correct MQSC is the worst failure mode
+        this project has — thank you for reporting it. Real-world scripts
+        are how the model gets better.
+  - type: textarea
+    id: snippet
+    attributes:
+      label: The MQSC that got flagged
+      description: A minimal excerpt is perfect; please keep it valid as-is (quotes and all).
+      render: vb
+    validations:
+      required: true
+  - type: textarea
+    id: message
+    attributes:
+      label: The diagnostic you got
+      description: The full message line (it contains the code, e.g. `UNDEFINED_OBJECT`), exactly as shown.
+    validations:
+      required: true
+  - type: input
+    id: qm
+    attributes:
+      label: Your queue manager
+      description: >-
+        Distributed or z/OS, and its version — the output of
+        `DISPLAY QMGR VERSION` (z/OS: plus SMp level if you know it) is ideal.
+      placeholder: distributed 9.4.0.3 / z/OS 9.1
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Your mqsc settings
+      description: targetVersion / platform / severity overrides, if any (default settings = leave empty).
+      render: json
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this is valid MQSC
+      description: >-
+        Where does it run cleanly today (runmqsc / CSQIBP00 / AMQMQSC)? A
+        quote from the command reference or an InfoCenter page helps, but a
+        working queue manager is evidence enough.

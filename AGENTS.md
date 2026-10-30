@@ -260,7 +260,7 @@ DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: a
   `echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe` —
   `probe` reads **stdin** and ignores extra arguments.
   `complete` and `fold` use hardcoded fixture text inside the example files.
-- Real-world regression corpus (sibling checkout): `/home/nige/Code/esql-lsp/
+- Real-world regression corpus (sibling checkout): `~/Code/esql-lsp/
   dmpmqcfg/*.mqsc`. `probe` must show no panics and stable diagnostic counts.
 
 ## Model regeneration quirks

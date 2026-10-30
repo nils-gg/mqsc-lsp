@@ -16,3 +16,9 @@ Thumbs.db
 *~
 __pycache__/
 *.pyc
+
+# Personal working notes (internal reviews/backlogs with private corpus
+# paths — never destined for the public repository)
+REVIEW.md
+TASKS.md
+server/patch.md

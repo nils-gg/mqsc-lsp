@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Releases & prebuilt binaries
+    url: https://github.com/nils-gg/mqsc-lsp/releases
+    about: Download binaries, the VS Code extension and checksums.
