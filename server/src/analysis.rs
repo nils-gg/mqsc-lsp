@@ -355,16 +355,39 @@ pub fn analyze_with_target(
     }
 
     // ---- parse errors
+    // Walk ALL children, not just named ones: tree-sitter repairs an
+    // unclosed argument group by inserting an invisible `MISSING ")"` token
+    // (an anonymous child of `argument`), which a named-only walk never sees
+    // — a truncated `DEFINE QLOCAL(` then parses "cleanly" and vanishes
+    // without a diagnostic while runmqsc rejects it (AMQ8405I).
     let root = tree.root_node();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
-        if n.is_error() {
+        // Recovery-inserted artifacts: `is_missing()` is true for every
+        // MISSING token. The visible ones carry kind "MISSING"; the common
+        // ones are anonymous tokens (kind ")", valid symbol, `is_error()`
+        // false!) that only a full child walk can reach at all.
+        let inserted = n.is_missing();
+        if inserted || n.is_error() {
             let off = n.start_byte();
             let word_at = first_word(n, src);
             let mut msg = if n.kind() == "MISSING" {
                 "Incomplete command: something must follow here. A command is \
                  `VERB OBJECTTYPE(NAME)` followed by `PARAM(value)` items."
                     .to_string()
+            } else if inserted {
+                if n.kind() == ")" {
+                    "Unclosed argument group: this group is never closed by ')'. \
+                     Commands look like `VERB OBJECTTYPE(NAME)` plus `PARAM(value)` \
+                     items — add the missing ')'."
+                        .to_string()
+                } else {
+                    format!(
+                        "Incomplete command: a `{}` is missing here. A command is \
+                         `VERB OBJECTTYPE(NAME)` followed by `PARAM(value)` items.",
+                        n.kind()
+                    )
+                }
             } else {
                 "Syntax error".to_string()
             };
@@ -396,12 +419,17 @@ pub fn analyze_with_target(
                      items — check for a stray, missing or unclosed token here."
                 );
             }
-            d.push(
-                lines.range(n.start_byte(), n.end_byte().max(n.start_byte() + 1)),
-                DiagnosticSeverity::ERROR,
-                code,
-                msg,
-            );
+            // A repaired MISSING token is zero-width; underline the item it
+            // was supposed to close instead of pointing at one blank column.
+            let (rs, re) = if inserted && n.kind() == ")" {
+                match n.parent() {
+                    Some(p) => (p.start_byte(), p.end_byte().max(p.start_byte() + 1)),
+                    None => (off, off + 1),
+                }
+            } else {
+                (n.start_byte(), n.end_byte().max(n.start_byte() + 1))
+            };
+            d.push(lines.range(rs, re), DiagnosticSeverity::ERROR, code, msg);
             continue; // do not descend into error noise
         }
         if n.kind() == "dangling_continuation" {
@@ -420,8 +448,8 @@ pub fn analyze_with_target(
                 ),
             );
         }
-        for i in 0..n.named_child_count() {
-            if let Some(c) = n.named_child(i) {
+        for i in 0..n.child_count() {
+            if let Some(c) = n.child(i) {
                 stack.push(c);
             }
         }
@@ -3477,6 +3505,40 @@ mod tests {
     #[test]
     fn code01_parse_error() {
         assert!(has("DEFINE QLOCAL(A) #oops 1\n", CODE_PARSE));
+    }
+
+    #[test]
+    fn code01_unclosed_argument_group() {
+        // `runmqsc` rejects these (AMQ8405I), but the parser "repairs" them
+        // with a zero-width MISSING ')': a valid-symbol anonymous token that
+        // is_error() never reports and a named-only walk cannot even reach.
+        // The walker must flag it (issue.txt: a dmpmqcfg dump line truncated
+        // to `DEFINE QLOCAL(` sailed through --check with exit 0).
+        for src in [
+            "DEFINE QLOCAL(\n", // truncated at EOF
+            "ALTER QMGR(\n",
+            "DEFINE QLOCAL(\nDEFINE QLOCAL('OK') REPLACE\n", // mid-file; rest survives
+            "DEFINE QLOCAL( DESCR('x') MAXDEPTH(5000)\n",    // unclosed with content
+        ] {
+            assert!(
+                has(src, CODE_PARSE),
+                "unclosed group must be a PARSE error, got {:?}",
+                codes(src)
+            );
+        }
+        // The diagnostic underlines the broken group, not a blank column.
+        let d = analyze(
+            "DEFINE QLOCAL(\n",
+            &parse("DEFINE QLOCAL(\n"),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        )
+        .into_iter()
+        .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_PARSE)))
+        .expect("CODE_PARSE missing");
+        assert_eq!((d.range.start.character, d.range.end.character), (13, 14));
+        assert!(d.message.starts_with("Unclosed argument group"));
     }
 
     #[test]
