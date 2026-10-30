@@ -128,8 +128,13 @@ jobs:
           cargo build --release --locked --target aarch64-apple-darwin
           cargo build --release --locked --target x86_64-apple-darwin
       - name: Smoke-test the native (arm64) artifact
-        run: python3 tools/lsp_smoke_test.py \
-          server/target/aarch64-apple-darwin/release/mqsc-lsp
+        run: |
+          set -o pipefail
+          python3 tools/lsp_smoke_test.py \
+            server/target/aarch64-apple-darwin/release/mqsc-lsp 2>&1 | tee smoke-macos.log
+      - name: Publish smoke failure (public annotation)
+        if: failure()
+        run: python3 tools/ci_publish_failure.py smoke-macos.log "macOS smoke"
       - name: Package
         run: |
           for arch in aarch64 x86_64; do
