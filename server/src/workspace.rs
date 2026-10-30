@@ -667,7 +667,17 @@ mod tests {
             .unwrap()
     }
 
-    /// A throwaway directory under the temp dir, cleaned before use.
+    /// A throwaway directory under the temp dir, cleaned before use and
+    /// returned CANONICAL. collect_scan canonicalizes its roots (real
+    /// reasons: absolute paths for URIs, overlapping-root dedup), the macOS
+    /// temp dir resolves through the /var -> /private/var symlink, and the
+    /// Windows temp dir is an 8.3 short path (C:\Users\RUNNER~1) whose
+    /// canonical form spells runneradmin. Comparing a raw temp path against
+    /// scanned URIs therefore only works where temp is already canonical
+    /// (Linux) — that silently red-flagged every macOS/Windows CI run.
+    /// The Windows verbatim prefix is dropped because Url::to_file_path()
+    /// spells plain drive paths (C:\...), and Url::from_file_path() accepts
+    /// both spellings.
     fn temp_ws(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -677,7 +687,21 @@ mod tests {
             std::env::temp_dir().join(format!("mqsc-lsp-ws-{tag}-{}-{nanos}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        // Url::to_file_path() spells plain drive paths (C:\...), never the
+        // \\?\ verbatim form std's canonicalize returns on Windows
+        #[cfg(not(windows))]
+        {
+            std::fs::canonicalize(&dir).unwrap()
+        }
+        #[cfg(windows)]
+        {
+            let canonical = std::fs::canonicalize(&dir).unwrap();
+            let spelled = canonical.as_os_str().to_string_lossy();
+            match spelled.strip_prefix(r"\\?\") {
+                Some(plain) => PathBuf::from(plain),
+                None => canonical,
+            }
+        }
     }
 
     fn queue_key(name: &str) -> SymbolKey {
