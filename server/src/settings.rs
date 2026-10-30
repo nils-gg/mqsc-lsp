@@ -158,6 +158,36 @@ impl WorkspaceScan {
     }
 }
 
+/// Which files `definition` and `rename` may touch, read from
+/// `mqsc.crossFileNavigation` (nested or flat, like every other shape).
+/// **Default false**: navigation resolves a name inside the file being
+/// edited only — go-to-definition jumps to DEFINEs in that document and a
+/// rename edits that document alone. Set true to restore the workspace-
+/// wide behavior (both reach every indexed document, scanned closed files
+/// included). References, hover, completion and the cross-file code-12
+/// hint are deliberately NOT affected: they answer "what exists in this
+/// project", not "what should this edit touch". Read live per request
+/// (like the severity settings), no restart contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Navigation {
+    pub cross_file: bool,
+}
+
+impl Navigation {
+    /// Same lookup convention as `WorkspaceScan::from_settings`: nested
+    /// under `mqsc` or flat at the root; unreadable keys keep the default.
+    pub fn from_settings(root: &Value) -> Navigation {
+        Navigation {
+            cross_file: root
+                .get("mqsc")
+                .and_then(|m| m.get("crossFileNavigation"))
+                .or_else(|| root.get("crossFileNavigation"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }
+    }
+}
+
 /// How a parameter use falls outside the configured target.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AvailViolation {
@@ -509,6 +539,22 @@ mod tests {
             WorkspaceScan::from_settings(&mixed).exclude,
             vec![".svn".to_string(), "out".to_string()]
         );
+    }
+
+    #[test]
+    fn navigation_scope_defaults_to_same_file() {
+        // the default IS the feature: definition/rename stay in the edited file
+        assert!(!Navigation::from_settings(&json!({})).cross_file);
+        assert!(!Navigation::from_settings(&json!({"mqsc": {}})).cross_file);
+        // an unreadable value keeps the default, like every other key here
+        assert!(
+            !Navigation::from_settings(&json!({"mqsc": {"crossFileNavigation": "yes"}})).cross_file
+        );
+        // true restores the old workspace-wide behavior, nested or flat
+        assert!(
+            Navigation::from_settings(&json!({"mqsc": {"crossFileNavigation": true}})).cross_file
+        );
+        assert!(Navigation::from_settings(&json!({"crossFileNavigation": true})).cross_file);
     }
 
     #[test]

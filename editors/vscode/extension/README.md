@@ -28,7 +28,9 @@ in CI, but nothing here has been executed inside a real VS Code window.
 - Settings UI for the binary path, the server log file (writes
   `MQSC_LSP_LOG`), the MQ target (`mqsc.targetVersion` / `mqsc.platform`,
   which enable diagnostic 15 NOT_IN_TARGET; empty by default = no
-  availability checks), the workspace index
+  availability checks), the navigation scope (`mqsc.crossFileNavigation`,
+  off by default: definition and rename stay inside the edited file; read
+  live, no reload), the workspace index
   (`mqsc.workspaceIndex.enabled` / `maxFiles` / `exclude` — read once at
   startup, so a change needs a window reload) and a severity override per
   diagnostic code (`default|error|warning|information|hint|off`), applied live via

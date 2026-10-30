@@ -148,7 +148,7 @@ page when it finds nothing instead of failing silently.
 | Hover | verb/object → command card (description, synonyms, attribute list); parameter → kind, values, default, reference text (every parameter and attribute has one — reference prose, curated `param_docs`, or an honest "no explanation" note); a value inside a parameter group → that parameter's card plus the curated meaning of the hovered value: parameter-scoped `value_docs` first, then the `generic_values` vocabulary for enum slots (`AUTO` → "the queue manager decides…"), then a plain integer note — and for z/OS-style spellings the attribute itself (`PORT` in `STOP LISTENER(... PORT(...))` is matched despite the reference's `PORT ( port-number )` notation); object name → its `DEFINE` (line, object type — also in another open document or an indexed workspace file), use count, "this is the definition" |
 | Completion | logical next words by command slot: verbs on fresh lines, object types the verb accepts after a verb (also while typing it — `DEFINE Q` → QALIAS/QLOCAL/QMODEL/…), object names `DEFINE`d in the script **or any other open document / indexed workspace file** in the positional name slot (`DEFINE QLOCAL ␣`), then parameter names (used ones dropped; snippet clients get `NAME(${1:…})` with the cursor inside the group); enum/flag values inside groups, `*` patterns where MQSC accepts them, prefix filtering, docs in the detail pane |
 | codeAction | one-click "Change to `X`" quickfix for every typed suggestion (codes 2/3/4/5/12), preferred flag per diagnostic |
-| definition / references / rename | object names: jump to the `DEFINE` (across open documents and indexed workspace files), list all sites, rename every site in every indexed document — open or closed — keeping quoted/bare style (closed files are watched, so the mass edit rests on current content — see "Object knowledge") |
+| definition / references / rename | object names: jump to the `DEFINE`, list all sites, rename every site keeping quoted/bare style. References always span the whole workspace; definition and rename by default stay inside the edited file — `mqsc.crossFileNavigation` extends both to every indexed document, closed files included (they are watched, so the mass edit rests on current content — see "Object knowledge") |
 | documentSymbol | one entry per command, labelled `DEFINE QLOCAL (NAME)` |
 | workspace/symbol | every object `DEFINE`d in an open document or an indexed workspace file, grouped by object type |
 | foldingRange | multi-line continuation chains + comment blocks |
@@ -237,6 +237,22 @@ takes effect on the next server start, and outcomes are always in the log
 (`workspace scan: found=… indexed=… merged=…`,
 `watched reindex: applied=… capped=…`).
 
+Navigation scope is one more key, read **live on every request** (unlike
+the workspaceIndex trio, no restart needed):
+
+```json
+{ "mqsc": { "crossFileNavigation": false } }
+```
+
+Default `false`: **go to definition** jumps only to `DEFINE`s inside the
+edited document, and **rename** edits that document alone — a rename never
+mass-rewrites workspace files you have not opened. `true` restores the
+workspace-wide reach: the jump enters any indexed document and the mass
+edit rewrites every site, closed scanned files included. References,
+hover, completion and hint 12 are deliberately unaffected in both modes:
+they answer "what exists in this project", not "what should this edit
+touch". An unreadable value keeps the default.
+
 ### Object knowledge (open documents + the workspace)
 
 The server knows what the open documents define and uses it three ways:
@@ -244,7 +260,10 @@ completion inside object-name groups, positional name slots and reference
 parameters offers the
 names `DEFINE`d anywhere among the open documents (order-independent),
 hint 12 marks references that **no open document** defines, and
-definition/references/rename/hover navigate between them. That hint is a
+definition/references/rename/hover navigate between them — references and
+hover always report the whole workspace, while definition and rename stay
+in the edited file unless `mqsc.crossFileNavigation` is on (see
+Configuration). That hint is a
 deliberate heuristic: `SYSTEM.*` names are never flagged, a set of scripts
 without any `DEFINE` is never flagged, and only the curated
 object-reference parameters (queue aliases' `TARGET`, channels' `XMITQ`,
@@ -268,8 +287,9 @@ corpus costs ~8 s of *background* time and ~95 MB peak RSS of retained
 name-site data (`cargo run --release --example ws_scan` re-measures both;
 the index itself sits around 77 MB of that). Every read
 feature then resolves names against them exactly as against open documents
-(hint 12 stays silent, hover names the file, goto-definition jumps into it,
-workspace/symbol lists it, completion offers the name), and files opened
+(hint 12 stays silent, hover names the file, workspace/symbol lists it,
+completion offers the name — and with `mqsc.crossFileNavigation` on, so
+does goto-definition), and files opened
 later override their on-disk entry — an unsaved buffer is the truth while
 it is open, and closing falls back to the file on disk. The entries stay
 current after the scan, too: the server registers a `**/*.mqsc` watcher
@@ -278,11 +298,12 @@ server-side file watching), and every create/change/delete event reindexes
 exactly the file it names — never a rescan. An event for an open document
 never touches the buffer (saving a file fires one anyway), events below
 excluded directories are filtered out, and affected diagnostics are
-republished. Because watched entries are as fresh as the disk, rename
-covers closed files too. A client that cannot or will not register the
+republished. When `mqsc.crossFileNavigation` is on, watched entries are as
+fresh as the disk, so rename's mass edit covers closed files too. A client
+that cannot or will not register the
 watcher keeps closed entries as scanned until the server restarts — the
 server logs that, and read features keep working on the scanned content.
-See the `mqsc.workspaceIndex.*` settings.
+See the `mqsc.workspaceIndex.*` and `mqsc.crossFileNavigation` settings.
 
 Names resolve inside object namespaces, and that rule is shared by every
 feature. All queue types (QLOCAL/QMODEL/QALIAS/QREMOTE/QCLUSTER and the

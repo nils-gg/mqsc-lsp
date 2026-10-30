@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """End-to-end test for the workspace index (PR 7 closed files + PR 8 watching).
 
-Runs the server twice against a throwaway workspace directory:
+Runs the server against a throwaway workspace directory:
   A. default settings — the startup scan indexes the closed files, every
-     read feature (diagnostics, hover, definition, references, completion,
+     read feature (diagnostics, hover, references, completion,
      workspace/symbol) sees their DEFINES, the server registers a
      **/*.mqsc watcher with the client, and simulated didChangeWatchedFiles
      events reindex single files (create/change/delete), while open buffers
      keep overriding the disk. The open-buffer override / close-fallback
-     rules and rename's full-workspace coverage are asserted too.
+     rules are asserted too. Navigation (definition + rename) by default
+     stays inside the edited document: it must NOT reach the closed files.
+  A2. crossFileNavigation=true — definition and rename regain their
+     workspace-wide reach (jumps into defs.mqsc, mass edits the closed file).
   B. workspaceIndex.enabled=false — the scan is skipped, no watcher is
      registered even though the client accepts dynamic registration, and
      the same references are unresolvable again (the gate really gates).
@@ -73,7 +76,7 @@ def file_uri(p):
 class Session:
     """One server process over stdio, with a buffered LSP framer."""
 
-    def __init__(self, tag, scan_enabled):
+    def __init__(self, tag, scan_enabled, cross_file=None):
         self.tag = tag
         self.log = os.path.join(tempfile.gettempdir(), f"mqsc-wssmoke-{tag}-{os.getpid()}.log")
         if os.path.exists(self.log):
@@ -92,8 +95,13 @@ class Session:
                     "didChangeWatchedFiles": {"dynamicRegistration": True}}},
                 "rootUri": None,
                 "workspaceFolders": [{"uri": file_uri(WS), "name": os.path.basename(WS)}]}
+        mqsc = {}
         if scan_enabled is not None:
-            init["initializationOptions"] = {"mqsc": {"workspaceIndex": {"enabled": scan_enabled}}}
+            mqsc["workspaceIndex"] = {"enabled": scan_enabled}
+        if cross_file is not None:
+            mqsc["crossFileNavigation"] = cross_file
+        if mqsc:
+            init["initializationOptions"] = {"mqsc": mqsc}
         r = self.request("initialize", init)
         assert r and "result" in r, "initialize failed"
         self.notify("initialized", {})
@@ -292,17 +300,25 @@ if "WS.SHARED" in by_name:
           by_name["WS.SHARED"]["location"]["uri"] == DEFS_URI,
           by_name["WS.SHARED"]["location"]["uri"])
 
-print("\n== navigation into a closed file ==")
-# L0 COL20: the name inside ALTER QLOCAL(WS.SHARED)
+print("\n== navigation defaults to the edited document ==")
+# L2 COL28: the name inside TARGET(WS.SHARED). WS.SHARED is DEFINEd only in
+# the closed defs.mqsc, so with crossFileNavigation off (the default) the
+# jump must NOT leave the buffer — even though the index knows the DEFINE.
 m = A.request("textDocument/definition", {"textDocument": {"uri": OPEN_URI},
                                           "position": {"line": 2, "character": NAME_CH}})
 res = (m or {}).get("result")
-if isinstance(res, list):
-    res = res[0] if res else {}
-one = res or {}
-check("definition jumps to the closed file's DEFINE",
-      bool(one) and one.get("uri") == DEFS_URI
-      and one["range"]["start"]["line"] == 0, str(one)[:120])
+check("definition does not jump to the closed file by default",
+      res is None, str(res)[:120])
+# but the buffer's OWN DEFINE still resolves (HERE, defined on L0)
+m = A.request("textDocument/definition", {"textDocument": {"uri": OPEN_URI},
+                                          "position": {"line": 0, "character": 14}})
+res = (m or {}).get("result")
+one = (res[0] if isinstance(res, list) and res else res) or {}
+check("definition resolves names DEFINEd in the edited file itself",
+      one.get("uri") == OPEN_URI and one["range"]["start"]["line"] == 0,
+      str(one)[:120])
+
+print("\n== references/hover stay cross-file (they answer 'what exists') ==")
 
 m = A.request("textDocument/references", {"textDocument": {"uri": OPEN_URI},
                                           "position": {"line": 2, "character": NAME_CH},
@@ -332,20 +348,17 @@ print("   names:", sorted(l for l in labels if l.startswith("WS.")))
 check("closed-file queue offered in completion", "WS.SHARED" in labels)
 check("excluded file's queue not offered", "WS.SKIPPED" not in labels)
 
-print("\n== rename covers the whole workspace now that files are watched ==")
+print("\n== rename defaults to the edited document ==")
 m = A.request("textDocument/rename", {"textDocument": {"uri": OPEN_URI},
                                       "position": {"line": 2, "character": NAME_CH},
                                       "newName": "WS.RENAMED"})
 ch = (((m or {}).get("result") or {}).get("changes") or {})
 check("rename rewrites the use in the open buffer", OPEN_URI in ch, str(sorted(ch)))
-check("rename also rewrites the closed file (PR 8 graduation)", DEFS_URI in ch,
-      "watched entries are as fresh as the disk, so the mass edit may rest on them")
+check("rename leaves the closed file alone by default", DEFS_URI not in ch,
+      "same-file is the default scope; session A2 proves the opt-in restores the mass edit")
 check("the open-buffer edit is the TARGET use",
       [e["range"]["start"]["line"] for e in ch.get(OPEN_URI, [])] == [2],
       str(ch.get(OPEN_URI, []))[:100])
-check("the closed-file edits hit its DEFINE and its TARGET use",
-      sorted(e["range"]["start"]["line"] for e in ch.get(DEFS_URI, [])) == [0, 1],
-      str(ch.get(DEFS_URI, []))[:120])
 
 print("\n== open buffer overrides disk; close falls back to disk ==")
 # open defs.mqsc with UNSAVED extra content: the buffer is the truth
@@ -425,6 +438,30 @@ d3 = A.settled_diags(OPEN_URI)
 check("after close the disk version is the truth again",
       d3 is not None and any("WS.BUFONLY" in d2["message"] for d2 in A.codes(d3, 12)))
 A.shutdown()
+
+print("\n== session A2: crossFileNavigation=true restores workspace-wide navigation ==")
+A2 = Session("A2", None, cross_file=True)
+A2.did_open(OPEN_URI, OPEN_TEXT)
+check("scan ran and reported", A2.wait_log("workspace scan:"))
+A2.settled_diags(OPEN_URI)  # barrier: wait for the post-scan republish
+m = A2.request("textDocument/definition", {"textDocument": {"uri": OPEN_URI},
+                                          "position": {"line": 2, "character": NAME_CH}})
+res = (m or {}).get("result")
+one = (res[0] if isinstance(res, list) and res else res) or {}
+check("opt-in: definition jumps to the closed file's DEFINE",
+      bool(one) and one.get("uri") == DEFS_URI
+      and one["range"]["start"]["line"] == 0, str(one)[:120])
+m = A2.request("textDocument/rename", {"textDocument": {"uri": OPEN_URI},
+                                       "position": {"line": 2, "character": NAME_CH},
+                                       "newName": "WS.RENAMED"})
+ch = (((m or {}).get("result") or {}).get("changes") or {})
+check("opt-in: rename rewrites the open buffer", OPEN_URI in ch, str(sorted(ch)))
+check("opt-in: rename also rewrites the closed file (PR 8 graduation)", DEFS_URI in ch,
+      "watched entries are as fresh as the disk, so the mass edit may rest on them")
+check("opt-in: the closed-file edits hit its DEFINE and its TARGET use",
+      sorted(e["range"]["start"]["line"] for e in ch.get(DEFS_URI, [])) == [0, 1],
+      str(ch.get(DEFS_URI, []))[:120])
+A2.shutdown()
 
 print("\n== session B: workspaceIndex.enabled=false ==")
 B = Session("B", False)

@@ -14,7 +14,9 @@ use tower_lsp::{async_trait, Client, LanguageServer};
 
 use crate::analysis;
 use crate::model::Model;
-use crate::settings::{apply_diagnostic_settings, diagnostic_settings, Target, WorkspaceScan};
+use crate::settings::{
+    apply_diagnostic_settings, diagnostic_settings, Navigation, Target, WorkspaceScan,
+};
 use crate::workspace::{self, rd, wr, WorkspaceIndex};
 
 pub struct MqscServer {
@@ -140,6 +142,17 @@ impl MqscServer {
                 "watched files: client refused registration ({e}) \
                  — closed files stay as scanned until the server restarts"
             ),
+        }
+    }
+
+    /// `mqsc.crossFileNavigation` (see `settings::Navigation`): whether
+    /// `definition` and `rename` may touch other documents. Read live on
+    /// every request like the severities — the scope of an edit is exactly
+    /// what the user is configuring, so it must react immediately.
+    fn nav_cross_file(&self) -> bool {
+        match rd(&self.settings).as_ref() {
+            Some(cfg) => Navigation::from_settings(cfg).cross_file,
+            None => false,
         }
     }
 
@@ -662,11 +675,13 @@ impl LanguageServer for MqscServer {
         })
     }
 
-    /// T-16/T-17: jump from any use of an object name to its DEFINE — across
-    /// ALL open documents, inside the object's namespace (a QUEUE and a
-    /// same-named CHANNEL never share a definition list). Duplicate names
-    /// inside one namespace (a queue defined both here and in a sibling)
-    /// all come back as locations, sorted for a stable pick list.
+    /// T-16/T-17: jump from any use of an object name to its DEFINE, inside
+    /// the object's namespace (a QUEUE and a same-named CHANNEL never share
+    /// a definition list). Duplicate names inside one namespace (a queue
+    /// defined both here and in a sibling) all come back as locations,
+    /// sorted for a stable pick list. Scope: by default the jump stays in
+    /// the edited document (`mqsc.crossFileNavigation=false` — the DEFINE
+    /// must live in this file); the setting restores workspace-wide jumps.
     async fn goto_definition(
         &self,
         p: GotoDefinitionParams,
@@ -678,7 +693,11 @@ impl LanguageServer for MqscServer {
             Ok(idx.symbol_at(pos))
         })?;
         let Some(key) = key else { return Ok(None) };
-        let mut locs = self.index.sites(&key, Some(true));
+        let mut locs = if self.nav_cross_file() {
+            self.index.sites(&key, Some(true))
+        } else {
+            self.index.sites_in_file(&key, Some(true), &uri)
+        };
         if locs.is_empty() {
             return Ok(None);
         }
@@ -742,15 +761,19 @@ impl LanguageServer for MqscServer {
 
     /// Rename every occurrence of the object under the cursor — name AND
     /// namespace, so a QUEUE and a same-named CHANNEL are separate rename
-    /// targets — in every open document, keeping each site's quoting style
-    /// (quoted sites stay quoted; a name that no longer fits the bare-word
-    /// syntax is quoted everywhere).
+    /// targets — keeping each site's quoting style (quoted sites stay
+    /// quoted; a name that no longer fits the bare-word syntax is quoted
+    /// everywhere). Scope: by default only the edited document is touched
+    /// (`mqsc.crossFileNavigation=false`); the setting restores the
+    /// all-documents mass edit.
     ///
     /// Safety gate: the target object must resolve uniquely. If the name is
     /// DEFINEd under more than one object type inside the namespace (a
     /// QLOCAL and a QALIAS of the same name — which real MQ rejects, but a
     /// broken script can contain), a rename cannot tell which object every
     /// reference means, and refuses rather than rewriting every spelling.
+    /// The gate sees exactly the scoped sites: same-file mode judges the
+    /// current document, cross-file mode the whole index.
     async fn rename(&self, p: RenameParams) -> RpcResult<Option<WorkspaceEdit>> {
         let uri = p.text_document_position.text_document.uri;
         let pos = p.text_document_position.position;
@@ -776,7 +799,12 @@ impl LanguageServer for MqscServer {
         };
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut def_types: Vec<String> = Vec::new();
-        for site in self.index.rename_sites(&key) {
+        let sites = if self.nav_cross_file() {
+            self.index.rename_sites(&key)
+        } else {
+            self.index.rename_sites_in_file(&key, &uri)
+        };
+        for site in sites {
             if let Some(t) = &site.defines {
                 if !def_types.contains(t) {
                     def_types.push(t.clone());
@@ -792,7 +820,7 @@ impl LanguageServer for MqscServer {
         }
         if def_types.len() > 1 {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
-                "'{}' is DEFINEd as {} in the open documents — the rename \
+                "'{}' is DEFINEd as {} within the rename's scope — the rename \
                  cannot tell which object the shared name refers to; rename \
                  from a definition after disambiguating the spelling",
                 key.name,

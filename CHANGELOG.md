@@ -7,6 +7,20 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+### Changed
+- **Definition and rename now default to the edited file.** Go-to-definition
+  jumps only to `DEFINE`s inside the document under the cursor, and Rename
+  Symbol rewrites only that document — a rename can no longer mass-edit
+  workspace files you never opened. The new
+  `mqsc.crossFileNavigation` setting (boolean, default `false`, read live
+  per request) restores the previous workspace-wide behavior for both.
+  References, hover, completion and the undefined-object hint (12) are
+  unchanged: they still see every open and indexed workspace file — they
+  answer "what exists in this project", not "what should this edit touch".
+  The rename safety gate (a name `DEFINE`d under two types refuses) now
+  judges exactly the sites in scope: the current document by default, the
+  whole index with the setting on.
+
 ### Fixed
 - Fabricated parameter values removed: the 2011 reference renders a
   DISPLAY page's displayable attributes as a dump of bare `[ WORD ]`
