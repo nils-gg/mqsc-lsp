@@ -43,6 +43,24 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
   Completion now offers these words as bare keywords instead of `WORD(`
   groups with invented value snippets. Diagnostics are untouched —
   corpus probe byte-identical at 2653.
+- Hover texts no longer truncate. `DEFINE QLOCAL MAXDEPTH` showed "…but
+  your" and similar cards ended mid-word ("…does not limit the lis").
+  Three extractor causes, fixed at the source: the 2011 print flow wraps
+  footnote prose across blank lines and the collector stopped at the blank
+  (49 of 316 footnotes dangled; they now join across blanks-only gaps
+  while the sentence is unfinished, 7 source-page-break residue stays);
+  the long-description cap was a hard 500-char cut (now 1000 chars,
+  rewound to a sentence end); and the pages' platform-support tables
+  printed INTO the prose flow — including fake `## CR` headings that stole
+  the next paragraph — polluting descriptions with
+  "i5/OS® UNIX systems Windows z/OS® n m l k j" debris (now culled; the
+  genuine two-letter filter-operator docs `## GE`/`## LK`/`## CT` survive,
+  told apart by what follows them). 212 parameter descriptions recovered
+  lost sentences. Three guards pin it:
+  `hover_text_carries_no_platform_table_residue`,
+  `clamped_descriptions_end_at_a_sentence`,
+  `wrapped_footnote_continuations_are_joined`. Diagnostics are untouched
+  — corpus probe byte-identical at 2653.
 
 ### Added
 - Hover now has full documentation coverage: every parameter and every

@@ -330,7 +330,7 @@ diagnostics, since the change is visible to all of them.
 
 ```sh
 cd server
-cargo test                                       # 120 unit tests + 3 grammar-corpus tests
+cargo test                                       # 145 unit tests + 3 grammar-corpus tests
                                                  # (corpus runs through the committed
                                                  # parser.c — no tree-sitter CLI needed)
 cd ..
