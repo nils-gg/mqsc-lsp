@@ -15,7 +15,7 @@ reference, context-aware completion, symbols, folding, and semantic tokens.
 
 ![asciicast](docs/demo.gif)
 
-The ~70-second recording drives real Neovim against the real server
+The ~75-second recording drives real Neovim against the real server
 ([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
 of deliberate mistakes): diagnostics appear inline on open — each message
 naming the offending token, what was expected, and the concrete fix — a code
@@ -106,8 +106,8 @@ covering everything. The tag, `server/Cargo.toml` and the extension's
 `package.json` must declare the same version — `tools/check_versions.py`
 guards that in CI and again in the release workflow. Extract a binary
 somewhere on your `PATH` (or into `~/.local/bin`) and the VS Code
-extension finds it on its own. Until the first tag exists, build from
-source as shown above.
+extension finds it on its own. Releases start at
+`v0.1.0`, whose assets carry these artifacts.
 
 **MSRV pinning:** the toolchain pinned here is rustc 1.75 (installed per-user
 via rustup, `~/.cargo/bin`). If
@@ -259,7 +259,8 @@ The server knows what the open documents define and uses it three ways:
 completion inside object-name groups, positional name slots and reference
 parameters offers the
 names `DEFINE`d anywhere among the open documents (order-independent),
-hint 12 marks references that **no open document** defines, and
+hint 12 marks references that **no open document or indexed workspace
+file** defines, and
 definition/references/rename/hover navigate between them — references and
 hover always report the whole workspace, while definition and rename stay
 in the edited file unless `mqsc.crossFileNavigation` is on (see
@@ -277,7 +278,7 @@ hint 12 flags every topic-publishing alias), and documented special values
 (`BOQNAME(NO)`, `DEADQ(NONE)`) are never flagged. Renaming a queue rewrites
 every one of
 these reference sites, so `ALTER QLOCAL(ORDERS) BOQNAME(OLD)` follows
-`DEFINE QLOCAL(OLD)` under a rename of `OLD`. Invalidation:
+`DEFINE QLOCAL(OLD)` under a rename of `OLD`.
 
 **Closed workspace files are indexed too.** At startup the server walks the
 workspace roots for `*.mqsc` (skipping `.git`, `target`, `node_modules`,
