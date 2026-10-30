@@ -1467,4 +1467,88 @@ mod tests {
         assert!(w.values.is_empty());
         assert!(w.unless_values.contains(&"MANAGED".to_string()));
     }
+
+    #[test]
+    fn hover_text_carries_no_platform_table_residue() {
+        // the 2011 pages interleave their platform-support tables
+        // ("i5/OS® UNIX systems Windows z/OS®" / "n m l k j n m l k j")
+        // INTO the prose flow; the extractor drops those lines
+        // (extract_model.py::_is_table_row / _is_cell_heading) before they
+        // can reach a card. These strings reappearing in a description or
+        // footnote means the cull regressed — the pre-fix model had 24 of
+        // these spills.
+        let m = model();
+        let junk = ["n m l k j", "UNIX systems Windows"];
+        let mut offenders = Vec::new();
+        let mut check = |what: String, text: &str| {
+            if junk.iter().any(|j| text.contains(j)) {
+                offenders.push(what);
+            }
+        };
+        for (obj, p) in m.all_params() {
+            check(format!("{obj} {}", p.name), &p.description);
+            for (n, f) in p.footnotes.iter().enumerate() {
+                check(format!("{obj} {} footnote{n}", p.name), f);
+            }
+        }
+        for objs in m.commands.values() {
+            for (object, &i) in objs {
+                for (n, f) in m.entry(i).footnotes.iter().enumerate() {
+                    check(format!("{object} entry footnote{n}"), f);
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "hover text with table residue: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn clamped_descriptions_end_at_a_sentence() {
+        // extract_model.py caps a parameter description at DOC_LIMIT and
+        // rewinds to the last sentence end inside the cap; the old hard
+        // [:500] cut produced hover cards ending mid-word ("…the lis").
+        // Anything at/near the cap is clamped by definition, so it must
+        // close on punctuation.
+        let m = model();
+        let mut offenders = Vec::new();
+        for (obj, p) in m.all_params() {
+            if p.description.chars().count() >= 990
+                && !p.description.ends_with(['.', '?', '!', ':'])
+            {
+                offenders.push(format!("{obj} {}", p.name));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "clamped descriptions cut mid-word: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn wrapped_footnote_continuations_are_joined() {
+        // the print flow wraps the recurring "This is the default supplied
+        // with WebSphere MQ (except on z/OS, where it is 999 999 999), but
+        // your / installation might have changed it." across a blank line;
+        // stopping at the blank is what made DEFINE QLOCAL MAXDEPTH's hover
+        // end at "…but your". The join must survive extractor edits.
+        let m = model();
+        let i = m.commands["DEFINE"]["QLOCAL"];
+        let p = m
+            .entry(i)
+            .params
+            .iter()
+            .find(|p| p.name == "MAXDEPTH")
+            .expect("DEFINE QLOCAL MAXDEPTH");
+        let f = p
+            .footnotes
+            .iter()
+            .find(|f| f.contains("999 999 999"))
+            .expect("MAXDEPTH default footnote");
+        assert!(
+            f.ends_with("installation might have changed it."),
+            "MAXDEPTH footnote dangles: {f:?}"
+        );
+    }
 }

@@ -200,7 +200,7 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 120 unit + 3 grammar-corpus tests (no CLI needed)
+cd server && cargo test                             # 145 unit + 3 grammar-corpus tests (no CLI needed)
 cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
@@ -256,7 +256,7 @@ node tools/extension_resolve_test.js                # extension server-lookup be
 ## Model regeneration quirks
 
 - The extractor is deterministic. A healthy run prints
-  `params: 1336 (undocumented: 64), docs: 690` with 128 commands. A large
+  `params: 1336 (undocumented: 64), docs: 689` with 128 commands. A large
   jump in either number is a parser regression, not progress.
 - The 64 remaining undocumented params (e.g. `LIKE`, z/OS `TOQLOCAL`) have
   genuinely missing text in the PDF→markdown conversion — the source has
@@ -265,6 +265,26 @@ node tools/extension_resolve_test.js                # extension server-lookup be
   appears **inside** doc regions and the content continues after it. Skip it
   (the junk filter does); never `break` on "Parent topic" — that truncates
   every parameter-description section at its first page boundary.
+- The conversion also splits wrapped prose across **blank lines** — footnote
+  text ("…where it is 999 999 999), but your" / blank / "installation might
+  have changed it.") and doc continuations alike. `extract_footnotes` joins
+  across blanks-only gaps while the text ends mid-sentence, and the doc loop
+  never breaks on junk lines at all. The join is deliberately conservative:
+  it never reassembles across a page break, so a handful of footnotes stay
+  dangling-but-clean ("STOP CMDSERV …enters the"). Never loosen that.
+- The pages' platform-support tables print **as prose-shaped lines** inside
+  doc regions and footnote regions (`i5/OS® UNIX systems Windows z/OS®`,
+  `n m l k j n m l k j`, and even fake headings `## CR` / `## X X X CR`
+  that steal the next paragraph). `_is_table_row`/`_is_cell_heading` cull
+  them; a comma marks a *real* platform list in prose ("Linux, Solaris, and
+  Windows"), and real two-letter filter-operator headings (`## GE`/`## LK`/
+  `## CT`) are told from table cells by what follows them (prose vs another
+  table row) — do not "fix" this by requiring ≥3-letter headings, that
+  deletes the operator docs.
+- Parameter descriptions are capped at `DOC_LIMIT = 1000` chars, rewinding
+  to the last sentence end inside the cap (`clamp_doc`). The old hard
+  `[:500]` cut hover mid-word. The cap lives only on `params[].description`
+  /attr hover text; the `param_docs` JSON section keeps the full text.
 
 ## Toolchain quirks (load-bearing)
 

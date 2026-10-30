@@ -422,6 +422,58 @@ def railroad_params(rail, cmd_obj=""):
 
 # ---------------------------------------------------------------- topics
 
+# Words that make up the 2011 pages' platform-support table rows
+# ("i5/OS® UNIX systems Windows z/OS®") — a line made only of these is a
+# table row, never footnote prose.
+_PLAT_WORDS = {"AIX", "HP", "HP-UX", "OpenVMS", "Linux", "i5/OS", "Solaris",
+               "Windows", "z/OS", "UNIX", "systems", "WebSphere", "MQ",
+               "CICS", "IMS", "CR", "and"}
+
+
+def _cellish(t):
+    """A platform-table cell: a lone ASCII letter (the 'n m l k j' column
+    dumps) or a punctuation/quote artifact run.
+    """
+    return (len(t) == 1 and t.isascii() and t.isalpha()) or (
+        t and all(ch in "‘’‛`'.," for ch in t))
+
+
+def _is_table_row(s):
+    """A platform-support table row — 'i5/OS® UNIX systems Windows z/OS®',
+    'n m l k j n m l k j', stray quote glyphs. Never prose: the reference's
+    real platform lists are comma-separated ('Linux, Solaris, and Windows'),
+    the tables are bare space-separated columns.
+    """
+    if "," in s:
+        return False
+    toks = [t.strip("®™") for t in re.split(r"\s+", s) if t]
+    if len(toks) < 2:
+        return False
+    return all(_cellish(t) or t in _PLAT_WORDS for t in toks)
+
+
+def _is_fn_stop(s):
+    """A line that ends footnote collection: new note, section title, real
+    heading, page junk, or a platform/column table row.
+    """
+    if not s:
+        return False
+    if re.match(r"^\d{1,2}\.\s", s):
+        return True
+    if s.startswith(("Parent topic", "Related", "**", "Syntax diagram", "Page ",
+                     "This topic", "This build", "Notices", "Copyright", "sc1",
+                     "Parameter descriptions", "Keyword and parameter",
+                     "Usage notes", "Synonym", "---", "<!--", "http")):
+        return True
+    if re.match(r"^\d\d/\d\d/\d{4}", s):
+        return True
+    if s.startswith("##"):
+        # real headings are "## SOMEWORD"; table dumps are "## X X X CR"
+        # or "## 12C" — no >=3-letter word right after the marker
+        return not re.match(r"^##\s*[A-Z][A-Z0-9_/-]{2,}", s)
+    return _is_table_row(s)
+
+
 def extract_footnotes(lines, lo, hi):
     notes = {}
     i = lo
@@ -433,10 +485,28 @@ def extract_footnotes(lines, lo, hi):
             j = i + 1
             while j < hi:
                 s = lines[j].strip()
-                if not s or re.match(r"^\d{1,2}\.\s", s) or s.startswith(
-                    ("Parent topic", "Related", "##", "**", "Syntax diagram")
-                ):
+                if _is_fn_stop(s):
                     break
+                if not s:
+                    # The PDF conversion splits a wrapped footnote across a
+                    # blank line ("...where it is 999 999 999), but your" /
+                    # "" / "installation might have changed it."). Join, but
+                    # ONLY across a blanks-only gap and only while the text
+                    # so far ends mid-sentence: the pages' platform tables
+                    # sit past the same gap (and are stops), so a table can
+                    # never be swallowed into a footnote.
+                    k = j
+                    while k < hi and not lines[k].strip():
+                        k += 1
+                    if k >= hi:
+                        break
+                    t = lines[k].strip()
+                    if (text.rstrip().endswith((".", ":", ";", "!", "?"))
+                            or _is_fn_stop(t)):
+                        break
+                    text += " " + t
+                    j = k + 1
+                    continue
                 text += " " + s
                 j += 1
             notes[n] = re.sub(r"\s+", " ", text).strip()
@@ -490,6 +560,40 @@ def extract_topic_diagrams(lines, lo, hi, notes, obj=""):
     return list(params.values()), sorted(attrs), positional, has_rail, box_tokens
 
 
+# Cap for a parameter's rendered hover description. The 2011 pages'
+# "Parameter descriptions" sections bleed into each other (table dumps run
+# to 6.5k chars), so some cap is needed — but a hard [:500] cut produced
+# hover cards ending mid-word ("…does not limit the lis"). The cap must
+# therefore land after real sentence punctuation.
+DOC_LIMIT = 1000
+
+
+def clamp_doc(d):
+    if len(d) <= DOC_LIMIT:
+        return d
+    cut = -1
+    for pat in (". ", "? ", "! ", ": "):
+        i = d.rfind(pat, 0, DOC_LIMIT)
+        if i != -1 and i + 1 > cut:
+            cut = i + 1
+    return d[:cut] if cut > 200 else d[:DOC_LIMIT]
+
+
+def _is_cell_heading(ln, lines, j, end):
+    """True when a '## WORD' line inside a parameter-descriptions region is
+    really a platform-table cell: the marker text itself is table junk
+    ('## X X X CR'), or the very next line is another table row ('## CR' /
+    'n m l k j n m l k j'). Real headings — including the genuine two-letter
+    filter operators '## GE'/'## LK'/'## CT' — are followed by prose.
+    """
+    if _is_table_row(ln.strip()[2:].strip()):
+        return True
+    k = j + 1
+    while k < end and not lines[k].strip():
+        k += 1
+    return k < end and _is_table_row(lines[k].strip())
+
+
 def main():
     if not DOC_PATH.exists():
         sys.exit(
@@ -541,9 +645,16 @@ def main():
         if title.startswith("Parameter descriptions") or title.startswith("Keyword and parameter"):
             context = title
             cur, buf = None, []
-            for j in range(lo + 1, min(hi if hi > lo else len(lines), lo + 8000)):
+            end = min(hi if hi > lo else len(lines), lo + 8000)
+            for j in range(lo + 1, end):
                 ln = lines[j]
                 m = HEADING_DOC_RE.match(ln)
+                if m and _is_cell_heading(ln, lines, j, end):
+                    # the platform tables print their cell column as fake
+                    # headings ('## CR', '## X X X CR') that would otherwise
+                    # steal the following page's continuation prose; skip the
+                    # line and keep the current parameter's doc open
+                    continue
                 if m:
                     if cur:
                         param_docs.setdefault(cur, []).append([context, " ".join(buf)])
@@ -554,10 +665,12 @@ def main():
                 # after them; they are dropped by the junk filter below.
                 s = ln.strip()
                 if s and cur is not None and not s.startswith(("*", "|", "+", "#", ">", "[")):
-                    if re.match(r"^\d{1,2}\.\s", s) or SYNTAX_ECHO_RE.match(s):
+                    if re.match(r"^\d{1,2}(?:\.\s|(?:\.\d+)+[.)]?\s)", s) or SYNTAX_ECHO_RE.match(s):
                         continue
                     if re.match(r"^(Page \d|\d\d/\d\d/\d{4}|http|<!--|---|This topic|sc1\d|"
                                 r"This build|Notices|Copyright|Related|Parent)", s):
+                        continue
+                    if _is_table_row(s):
                         continue
                     buf.append(s)
             if cur:
@@ -648,10 +761,10 @@ def main():
             docs = param_docs.get(cand, [])
             for ctx, d in docs:
                 if d and obj in ctx:
-                    return d[:500]
+                    return clamp_doc(d)
             for ctx, d in docs:
                 if d:
-                    return d[:500]
+                    return clamp_doc(d)
         return ""
 
     n_empty = 0
