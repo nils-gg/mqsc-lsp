@@ -181,6 +181,14 @@ struct CommandPatch {
     /// parameter name -> values to union into its enum
     #[serde(default)]
     extend_enum: HashMap<String, Vec<String>>,
+    /// parameters the extractor pooled garbage into: the 2011 pages render
+    /// a command's attribute dump as trailing "( NEXT ATTRS )" prose, and
+    /// the extractor read that run-on list as the parameter's enum values.
+    /// The live railroads show these words are bare attribute selectors, so
+    /// the operation keeps the (real) description but forces kind=flag and
+    /// drops the invented value list.
+    #[serde(default)]
+    flag_params: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,6 +262,18 @@ impl RawModel {
                 if slot.kind != "enum" {
                     slot.kind = "enum".into();
                 }
+            }
+            // applied last: a demoted parameter must end kind=flag with the
+            // pooled values gone (kind_of only honors "flag" when values are empty)
+            for pname in p.flag_params {
+                let Some(slot) = entry.params.iter_mut().find(|e| e.name == pname) else {
+                    eprintln!("mqsc-model overlay: flag_params target {key} {pname} not in model, skipped");
+                    continue;
+                };
+                slot.kind = "flag".into();
+                slot.values.clear();
+                slot.default = None;
+                slot.has_default = false;
             }
         }
         for (name, docs) in ov.param_docs {
@@ -1276,6 +1296,92 @@ mod tests {
                 "generic_values word {w:?} is no model enum value"
             );
         }
+    }
+
+    #[test]
+    fn no_parameter_enumerates_its_own_siblings() {
+        // fingerprint of the extractor's pooling artifact: it read a page's
+        // attribute dump ("the following attributes are displayable: …") as
+        // the trailing value list of whatever parameter preceded it, so the
+        // invented enums enumerate OTHER parameters of the same command.
+        // No genuine MQSC enum is mostly sibling parameter names — the
+        // overlay's flag_params table demotes every occurrence found against
+        // the live railroads; this guard makes regressions (or new pages
+        // added to the base model with the same artifact) fail loudly.
+        let m = model();
+        let mut pooled = Vec::new();
+        for objs in m.commands.values() {
+            for (object, &i) in objs {
+                let e = m.entry(i);
+                let names: std::collections::HashSet<String> =
+                    e.params.iter().map(|p| p.name.clone()).collect();
+                for p in &e.params {
+                    let vals = match &p.kind {
+                        ValueKind::Enum(v) => v,
+                        _ => continue,
+                    };
+                    // the extractor's pooled windows are runs of the page's
+                    // attribute dump and run 10-15 long; genuine short enums
+                    // routinely collide with same-named flag parameters
+                    // (TYPE(ALL|LOCAL|CLUSTER), PUTAUT(DEF|CTX|ONLYMCA|ALTMCA),
+                    // OPENTYPE(ALL|INPUT|OUTPUT)) and must stay untouched.
+                    if vals.len() < 6 {
+                        continue;
+                    }
+                    let sib = vals
+                        .iter()
+                        .filter(|v| **v != p.name && names.contains(*v))
+                        .count();
+                    if sib * 2 >= vals.len() {
+                        pooled.push(format!("{} {} {}", e.verb, object, p.name));
+                    }
+                }
+            }
+        }
+        pooled.sort();
+        assert!(
+            pooled.is_empty(),
+            "pooled-enum artifacts survived: {pooled:?}"
+        );
+    }
+
+    #[test]
+    fn pooled_attribute_words_load_as_flags() {
+        // the demoted parameters keep their (real) reference description but
+        // must end the merge as bare attribute selectors, per the MP 10.0.1
+        // railroads: DISPLAY QMGR SSLEV / CONN(*) PID / CHSTATUS(*) COMPMSG
+        // / QSTATUS(q) IPPROCS / CHANNEL(x) PROPCTL are all bare [ WORD ]
+        for (verb, obj, name) in [
+            ("DISPLAY", "QMGR", "SSLEV"),
+            ("DISPLAY", "QMGR", "ADOPTCHK"),
+            ("DISPLAY", "QMGR", "RCVTTYPE"),
+            ("DISPLAY", "CONN", "PID"),
+            ("DISPLAY", "CONN", "APPLTYPE"),
+            ("DISPLAY", "CHSTATUS", "COMPMSG"),
+            ("DISPLAY", "QSTATUS", "IPPROCS"),
+            ("DISPLAY", "CHANNEL", "PROPCTL"),
+        ] {
+            let p = param(verb, obj, name);
+            assert!(
+                matches!(p.kind, ValueKind::Flag),
+                "{verb} {obj} {name}: {:?}",
+                p.kind
+            );
+            assert!(
+                !p.description.trim().is_empty(),
+                "{verb} {obj} {name} lost its description in the demotion"
+            );
+        }
+        // the real enums on the same pages are untouched (same-name siblings
+        // on ALTER QMGR still carry their genuine values)
+        let alter_sslev = enum_values(param("ALTER", "QMGR", "SSLEV"));
+        assert!(alter_sslev.contains(&"DISABLED".to_string()));
+        let alter_rcvt = enum_values(param("ALTER", "QMGR", "RCVTTYPE"));
+        assert!(
+            alter_rcvt.contains(&"MULTIPLY".to_string())
+                && alter_rcvt.contains(&"EQUAL".to_string()),
+            "ALTER QMGR RCVTTYPE: {alter_rcvt:?}"
+        );
     }
 
     #[test]

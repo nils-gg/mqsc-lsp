@@ -17,7 +17,10 @@
     "with confidence. Merge semantics: 'commands' upsert whole command",
     "entries; 'patch' keys are 'VERB OBJECT' of an existing entry.",
     "Patch ops: add_params (upsert by name), replace_params (full list",
-    "wins), extend_enum (union value lists).",
+    "wins), extend_enum (union value lists), flag_params (force kind=flag:",
+    "for parameters whose enum the extractor invented by reading a page's",
+    "attribute dump as trailing value prose — the live railroads show the",
+    "word is a bare attribute selector).",
     "'name_max': curated maximum positional object-name length (characters)",
     "per object type, driving diagnostic 13 NAME_TOO_LONG. The IBM",
     "reference states name limits in prose the extractor never captured,",
@@ -3637,6 +3640,14 @@
           "optional": true,
           "description": "Restrict the display to this client identifier (oracle MQ 10.0.1)"
         }
+      ],
+      "flag_params": [
+        "COMPMSG",
+        "COMPRATE",
+        "CURSHCNV",
+        "EXITTIME",
+        "HBINT",
+        "JOBNAME"
       ]
     },
     "DISPLAY LISTENER": {
@@ -3790,14 +3801,66 @@
           "AMQP",
           "MQTT"
         ]
-      }
+      },
+      "flag_params": [
+        "PROPCTL"
+      ]
     },
     "DISPLAY CONN": {
       "extend_enum": {
         "TYPE": [
           "*"
         ]
-      }
+      },
+      "flag_params": [
+        "APPLTYPE",
+        "ASTATE",
+        "CHANNEL",
+        "EXTURID",
+        "NID",
+        "PID"
+      ]
+    },
+    "DISPLAY QMGR": {
+      "_why": "the 2011 page renders every displayable attribute as bare [ WORD ] (live railroad); the extractor read each following run of attribute names as the parameter's enum — 36 fabricated value lists, gone",
+      "flag_params": [
+        "ACCTQ",
+        "ACTIVREC",
+        "ALTDATE",
+        "COMMANDQ",
+        "DESCR",
+        "DISTL",
+        "EXPRYINT",
+        "MAXUMSGS",
+        "ADOPTCHK",
+        "ADOPTMCA",
+        "CHAD",
+        "CHADEV",
+        "CHADEXIT",
+        "CHIADAPS",
+        "CHIDISPS",
+        "DEFXMITQ",
+        "DNSGROUP",
+        "DNSWLM",
+        "IGQ",
+        "IGQAUT",
+        "IPADDRV",
+        "LSTRTMR",
+        "LUGROUP",
+        "LUNAME",
+        "LU62ARM",
+        "LU62CHL",
+        "MONCHL",
+        "OPORTMAX",
+        "OPORTMIN",
+        "QMID",
+        "RCVTIME",
+        "RCVTMIN",
+        "RCVTTYPE",
+        "SCHINIT",
+        "SSLCRLNL",
+        "SSLEV"
+      ]
     },
     "REFRESH QMGR": {
       "extend_enum": {
@@ -3849,6 +3912,12 @@
           "optional": true,
           "description": "Restricts the queues selected to those that have handles with the specified type of access:"
         }
+      ],
+      "flag_params": [
+        "IPPROCS",
+        "APPLTYPE",
+        "BROWSE",
+        "CHANNEL"
       ]
     },
     "ALTER SERVICE": {
