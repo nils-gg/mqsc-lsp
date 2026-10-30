@@ -1,5 +1,9 @@
 # mqsc-lsp — a language server for IBM MQ MQSC scripts
 
+[![CI](https://github.com/nils-gg/mqsc-lsp/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/nils-gg/mqsc-lsp)](https://github.com/nils-gg/mqsc-lsp/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 An LSP server for the IBM MQ Script (MQSC) command language, built on a
 purpose-written **tree-sitter grammar** plus a **semantic model extracted
 from the IBM MQSC Command Reference** (the 2011 "Script (MQSC) Command

@@ -1,0 +1,49 @@
+name: Bug report
+description: Something crashes, hangs, or behaves oddly
+title: ""
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >-
+        A minimal *.mqsc file plus the exact command line, or the editor
+        steps. `mqsc-lsp --check yourfile.mqsc` reproduces most issues
+        without an editor — paste its output.
+      render: console
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: mqsc-lsp version
+      description: Output of `mqsc-lsp --version` (or the Release you downloaded).
+    validations:
+      required: true
+  - type: input
+    id: editor
+    attributes:
+      label: Editor and OS
+      description: e.g. VS Code 1.95 on Windows 11, Neovim 0.11 on Fedora 41, Helix, or plain --check.
+  - type: textarea
+    id: settings
+    attributes:
+      label: Relevant settings
+      description: diagnostics map / targetVersion / platform / workspaceIndex settings, if changed.
+      render: json
+  - type: textarea
+    id: log
+    attributes:
+      label: Server log, if you have one
+      description: >-
+        Reproducing with `--log-file /tmp/mqsc-lsp.log` (or `MQSC_LSP_LOG`)
+        and attaching the tail makes diagnosis much faster.
+      render: txt
