@@ -32,6 +32,11 @@ fi
 
 WORK="$(mktemp -d)"
 cp "$DEMO_DIR/fixture.mqsc" "$WORK/demo.mqsc"
+# Stage config and a binary link inside the work dir: whatever gets typed is
+# captured in the cast/gif, so the tour must only ever type work-relative
+# paths — no home paths, no usernames.
+cp "$DEMO_DIR/init.lua" "$WORK/init.lua"
+ln -s "$BIN" "$WORK/mqsc-lsp"
 cleanup() { tmux kill-session -t "$SESS" 2>/dev/null || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 
@@ -56,6 +61,10 @@ wait_file() { grep -qF -- "$1" "$WORK/demo.mqsc" \
 
 tmux -f "$DEMO_DIR/tmux.demo.conf" new-session -d -s "$SESS" -x "$W" -y "$H"
 
+# Neutral prompt before capture starts: the default PS1 carries
+# user@host and the shell echoes it into the first frames.
+L "PS1='demo$ '; clear"; S Enter; sleep 1
+
 REC_PID=""
 if [ "$RECORD" = 1 ]; then
   # `script` gives asciinema a tty whose size we fix, so the cast header and
@@ -68,7 +77,7 @@ if [ "$RECORD" = 1 ]; then
   sleep 1
 fi
 
-S "cd '$WORK' && MQSC_LSP_BIN='$BIN' exec nvim -u '$DEMO_DIR/init.lua' -i NONE demo.mqsc" Enter
+S "cd '$WORK' && MQSC_LSP_BIN=./mqsc-lsp exec nvim -u init.lua -i NONE demo.mqsc" Enter
 
 echo "[1] open file; server attaches and publishes diagnostics"
 wait_pane "diagnostics published" "is not a parameter" "not DEFINEd"
