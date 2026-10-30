@@ -22,3 +22,7 @@ __pycache__/
 REVIEW.md
 TASKS.md
 server/patch.md
+
+# Issue scratch notes with local paths / IBM transcripts (the fix they
+described shipped as 6b9d07f; keep out of the public repo)
+issue.txt
