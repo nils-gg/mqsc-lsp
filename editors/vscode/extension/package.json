@@ -2,7 +2,7 @@
   "name": "mqsc-lsp-vscode",
   "displayName": "MQSC",
   "description": "IBM MQ MQSC script support — diagnostics, completion, navigation and quickfixes via the mqsc-lsp server (tree-sitter based). Requires the mqsc-lsp binary.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "license": "MIT",
   "publisher": "nils-gg",
   "repository": {

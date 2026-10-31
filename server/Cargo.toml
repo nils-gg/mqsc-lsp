@@ -1,6 +1,6 @@
 [package]
 name = "mqsc-lsp"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 # MSRV, deliberately rustc 1.75 (the `=` pins below only resolve there; the
 # CI release matrix builds exactly this toolchain on every platform).
