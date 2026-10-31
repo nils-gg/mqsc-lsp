@@ -34,6 +34,9 @@ jobs:
       - name: extension server-resolution behavior (stubbed vscode host)
         run: node tools/extension_resolve_test.js
 
+      - name: extension settings plumbing behavior (stubbed vscode host)
+        run: node tools/extension_config_test.js
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.75.0

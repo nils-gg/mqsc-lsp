@@ -10,6 +10,7 @@ python3 tools/workspace_index_smoke.py             # workspace scan/watch sessio
 python3 tools/check_model.py                       # model byte-reproducibility
 python3 tools/check_versions.py                    # version agreement
 node tools/extension_resolve_test.js               # extension server lookup
+node tools/extension_config_test.js                # extension settings plumbing
 ```
 
 Notes that save time:
