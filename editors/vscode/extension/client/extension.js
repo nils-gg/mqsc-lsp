@@ -30,7 +30,9 @@ const DIAG_CODES = [
 function diagnosticsSettings(cfg) {
 	const out = {};
 	for (const code of DIAG_CODES) {
-		const sev = cfg.get(['diagnostics', code]);
+		// section is a dotted STRING — VS Code parses it with String.split,
+		// and an array key throws a TypeError that kills activate()
+		const sev = cfg.get(`diagnostics.${code}`);
 		if (sev && sev !== 'default') {
 			out[code] = sev;
 		}
@@ -45,7 +47,7 @@ function diagnosticsSettings(cfg) {
 function workspaceIndexSettings(cfg) {
 	const out = {};
 	for (const key of ['enabled', 'maxFiles', 'exclude']) {
-		const v = cfg.get(['workspaceIndex', key]);
+		const v = cfg.get(`workspaceIndex.${key}`);
 		if (v !== undefined && v !== null) {
 			out[key] = v;
 		}

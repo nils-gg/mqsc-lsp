@@ -208,6 +208,7 @@ python3 tools/workspace_index_smoke.py              # repo root; assertive works
 python3 tools/check_model.py                        # model byte-reproducibility guard
 python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json (= tag) guard
 node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
+node tools/extension_config_test.js                 # extension settings plumbing (faithful stub: get() THROWS on non-string sections — array keys once killed activation; the resolve test's permissive stub cannot catch that, this one can)
 tools/record_demo.sh                     # repo root; 10-step tmux/nvim tour, asserts every beat (e2e UI test)
 DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: agg docs/demo.cast docs/demo.gif)
 ```

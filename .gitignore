@@ -26,3 +26,7 @@ server/patch.md
 # Issue scratch notes with local paths / IBM transcripts (the fix they
 described shipped as 6b9d07f; keep out of the public repo)
 issue.txt
+
+# ChatGPT diagnosis scratch note (contains local Windows paths; the
+# fix it describes ships in this release — keep out of the public repo)
+chatGPT_output.md
