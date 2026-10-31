@@ -7,6 +7,8 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-31
+
 - Fixed: an unclosed argument group — e.g. a dump line truncated to
   `DEFINE QLOCAL(` — produced no diagnostic and `--check` exited 0, while
   `runmqsc` rejects it (AMQ8405I). The parser repairs the tree with an
