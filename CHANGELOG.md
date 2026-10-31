@@ -7,6 +7,8 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-31
+
 - Fixed: object names written without quotes — `DEFINE QLOCAL(123)
   BOQNAME(1234)` — were invisible to rename, references, hover, completion
   and hint 12: the index treated only words and quoted strings as names,
