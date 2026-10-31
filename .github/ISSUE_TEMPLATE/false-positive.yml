@@ -1,7 +1,7 @@
 name: False positive
 description: The server flagged something your queue manager accepts
 title: "FP: "
-# labels: [false-positive]  # uncomment once: gh label create false-positive --repo nils-gg/mqsc-lsp --color d93f0b --description "Correct MQSC flagged as wrong"
+labels: [false-positive]
 body:
   - type: markdown
     attributes:
