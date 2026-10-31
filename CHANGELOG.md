@@ -7,6 +7,16 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-31
+
+- Fixed: the VS Code extension offered nothing but syntax highlighting —
+  reading `mqsc.diagnostics.*` / `mqsc.workspaceIndex.*` passed array
+  keys to `WorkspaceConfiguration.get()`, which takes a dotted string
+  section, so VS Code threw a TypeError during activation and the
+  language server was never started. Activation now completes, and the
+  settings genuinely reach the server; a stubbed-host behavior test
+  pins both (`tools/extension_config_test.js`, now in CI).
+
 ## [0.1.1] - 2026-10-31
 
 - Fixed: an unclosed argument group — e.g. a dump line truncated to
