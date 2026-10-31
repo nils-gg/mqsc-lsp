@@ -7,6 +7,21 @@ and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
 
 ## [Unreleased]
 
+- Fixed: object names written without quotes — `DEFINE QLOCAL(123)
+  BOQNAME(1234)` — were invisible to rename, references, hover, completion
+  and hint 12: the index treated only words and quoted strings as names,
+  but runmqsc parses a bare integer as a plain `q_name` (railroad-proven).
+  Renaming a bare site now also rewrites bare (an all-digit new name is
+  itself the integer name token; digit-initial mixed names are written
+  `'quoted'`).
+- Fixed: empty argument groups in the object-name slot — `DEFINE QLOCAL()`
+  — and blank quoted names — `QLOCAL('')`, `QLOCAL(' ')` — passed with no
+  diagnostic at all; runmqsc answers them with AMQ8405I and AMQ8424E, so
+  they are now reported as MISSING_NAME errors (a stray empty group on an
+  object type that takes no name, e.g. `ALTER QMGR()`, reports the
+  unexpected-group error). The never-typed name stays the familiar
+  warning, and legal blank values like `DESCR('')` are untouched.
+
 ## [0.1.2] - 2026-10-31
 
 - Fixed: the VS Code extension offered nothing but syntax highlighting —

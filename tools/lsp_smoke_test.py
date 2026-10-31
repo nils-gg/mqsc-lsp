@@ -608,6 +608,47 @@ m = request(33, "textDocument/rename", {"textDocument": {"uri": uri},
                                        "newName": "  "})
 check("blank newName rejected", m is not None and "error" in m, str(m))
 
+# The reported bug: names written WITHOUT quotes. runmqsc parses
+# `DEFINE QLOCAL(123)` as a plain q_name (only the token class differs), so
+# these digits must rename like any other name — and, being bare at every
+# site, they must be rewritten bare.
+print("\n== unquoted numeric names: the reported script renames ==")
+DOC3 = "DEFINE QLOCAL(123) BOQNAME(1234)\nDEFINE QLOCAL(1234)\n"
+uri3 = "file:///tmp/numeric.mqsc"
+send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+    "textDocument": {"uri": uri3, "languageId": "mqsc", "version": 1, "text": DOC3}}})
+m = request(80, "textDocument/prepareRename", {"textDocument": {"uri": uri3},
+                                               "position": {"line": 0, "character": 27}})
+r0 = (m or {}).get("result") or {}
+check("prepareRename on bare 1234 (BOQNAME) reports the digits + placeholder",
+      r0.get("range", {}).get("start") == {"line": 0, "character": 27}
+      and r0.get("range", {}).get("end") == {"line": 0, "character": 31}
+      and r0.get("placeholder") == "1234", str(r0))
+m = request(81, "textDocument/rename", {"textDocument": {"uri": uri3},
+                                        "position": {"line": 1, "character": 15},
+                                        "newName": "5678"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri3, [])
+ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"]) for e in ch)
+print("  ", ed)
+check("rename from the DEFINE rewrites the BOQNAME reference too, bare",
+      ed == [(0, 27, "5678"), (1, 14, "5678")], str(ed))
+m = request(82, "textDocument/rename", {"textDocument": {"uri": uri3},
+                                        "position": {"line": 0, "character": 14},
+                                        "newName": "99"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri3, [])
+ed = sorted((e["range"]["start"]["line"], e["range"]["start"]["character"], e["newText"]) for e in ch)
+check("renaming 123 edits exactly its one site, bare",
+      ed == [(0, 14, "99")], str(ed))
+m = request(83, "textDocument/rename", {"textDocument": {"uri": uri3},
+                                        "position": {"line": 1, "character": 15},
+                                        "newName": "1BAD"})
+ch = (((m or {}).get("result") or {}).get("changes") or {}).get(uri3, [])
+ed = sorted(e["newText"] for e in ch)
+check("a digit-initial MIXED name cannot stay bare: it is written 'quoted'",
+      ed == ["'1BAD'", "'1BAD'"], str(ed))
+send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
+    "textDocument": {"uri": uri3}}})
+
 print("\n== log file (T-14, via MQSC_LSP_LOG) ==")
 try:
     with open(LOGPATH) as f:

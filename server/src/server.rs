@@ -181,10 +181,14 @@ fn display_file(uri: &Url) -> String {
 }
 
 /// Replacement text for one rename site: quoted sites stay quoted; a name
-/// that no longer fits the grammar's bare-word token syntax
-/// (`[A-Za-z_#$@%/.][-A-Za-z0-9_#$@%/.]*`) must be written as a 'string'.
+/// that no longer fits the grammar's bare token syntax must be written as a
+/// 'string'. Bare forms: the word token `[A-Za-z_#$@%/.][-A-Za-z0-9_#$@%/.]*`
+/// or a pure integer (`QLOCAL(123)` names a queue — runmqsc proves it), so
+/// digit-initial MIXED names like `1BAD` still take quotes while a numeric
+/// site renamed to `456` stays bare.
 fn rename_text(new_name: &str, site_quoted: bool) -> String {
     let bare_ok = match new_name.chars().next() {
+        Some(c) if c.is_ascii_digit() => new_name.chars().all(|c| c.is_ascii_digit()),
         Some(c) if c.is_ascii_alphabetic() || "_#$@%/.".contains(c) => new_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "_#$@%/.-".contains(c)),
@@ -923,7 +927,8 @@ mod tests {
     fn bare_sites_follow_grammar_syntax() {
         assert_eq!(rename_text("NEW1", false), "NEW1");
         assert_eq!(rename_text("NEW NAME", false), "'NEW NAME'"); // spaces need quotes
-        assert_eq!(rename_text("1BAD", false), "'1BAD'"); // conservative: quote digit start
+        assert_eq!(rename_text("1BAD", false), "'1BAD'"); // digit+letter is no bare token
+        assert_eq!(rename_text("456", false), "456"); // all digits = the integer name token
         assert_eq!(rename_text("IT'S", false), "'IT''S'"); // MQSC doubles embedded quotes
         assert_eq!(rename_text("", true), "''"); // degenerate but never bare
     }

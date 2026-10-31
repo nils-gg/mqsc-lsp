@@ -573,8 +573,10 @@ pub fn collect_definitions(tree: &Tree, src: &[u8], m: &Model) -> Definitions {
     defs
 }
 
-/// Plain-name text of a value node: exactly one word or quoted string and no
-/// wildcard/integer parts (a generic pattern is not one concrete name).
+/// Plain-name text of a value node: exactly one bare token (word or integer
+/// — `DEFINE QLOCAL(123)` names a queue, as the runmqsc railroad proves:
+/// only the *token class* differs, `(123)` parses as a `q_name`) and no
+/// wildcard parts (a generic pattern is not one concrete name).
 fn value_name_words(v: Node<'_>, src: &[u8]) -> Vec<String> {
     let mut has_wildcard = false;
     let mut name: Option<String> = None;
@@ -583,8 +585,7 @@ fn value_name_words(v: Node<'_>, src: &[u8]) -> Vec<String> {
     for c in v.named_children(&mut vc) {
         match c.kind() {
             "wildcard" => has_wildcard = true,
-            "integer" => multi = true,
-            "word" => {
+            "word" | "integer" => {
                 if name.is_some() {
                     multi = true;
                 } else {
@@ -1099,17 +1100,18 @@ impl ObjectIndex {
 }
 
 /// The name token of a value node: `(UPPERCASE, as-written, node)` or None
-/// when the value is not exactly one name (wildcard patterns, integers,
-/// multi-token values). Mirrors `value_name_words`, but keeps the node so
-/// callers get a range.
+/// when the value is not exactly one name (wildcard patterns, multi-token
+/// values). A bare integer counts: runmqsc parses `QLOCAL(123)` and
+/// `BOQNAME(1234)` as plain names — only the token class differs. Mirrors
+/// `value_name_words`, but keeps the node so callers get a range.
 fn name_value_node<'t>(v: Node<'t>, src: &[u8]) -> Option<(String, String, Node<'t>)> {
     let mut out: Option<(String, String, Node<'_>)> = None;
     let mut multi = false;
     let mut vc = v.walk();
     for c in v.named_children(&mut vc) {
         match c.kind() {
-            "wildcard" | "integer" => multi = true,
-            "word" => {
+            "wildcard" => multi = true,
+            "word" | "integer" => {
                 if out.is_some() {
                     multi = true;
                 } else {
@@ -1531,9 +1533,61 @@ fn check_command(
                 }
                 if !seen_name {
                     seen_name = true; // argument right after the object word = object name
-                                      // The name is the first value inside this group; keep it
-                                      // for the code-13 length check below.
-                    name_node = values.first().copied();
+                    if let Some(first) = values.first().copied() {
+                        // The name is the first value inside this group; keep it
+                        // for the code-13 length check below.
+                        name_node = Some(first);
+                        // Oracle: a blank name in a name position is AMQ8424E
+                        // ("Error detected in a name keyword") — QLOCAL('')
+                        // and QLOCAL(' ') name nothing. Only the name slot:
+                        // DESCR('') and SHORTUSR(' ') are legal resets.
+                        if e.positional.is_some()
+                            && unquote_name(node_text(first, src).trim()).trim().is_empty()
+                        {
+                            d.push(
+                                lines.range(first.start_byte(), first.end_byte()),
+                                DiagnosticSeverity::ERROR,
+                                CODE_MISSING_NAME,
+                                format!(
+                                    "The object name of {} {} is blank — runmqsc rejects an \
+                                     empty name (AMQ8424E). Write {} {}(NAME).",
+                                    e.verb, e.object, e.verb, e.object
+                                ),
+                            );
+                        }
+                    } else if e.positional.is_some() {
+                        // Oracle: `DEFINE QLOCAL()` is AMQ8405I. The never-
+                        // typed case below reports `has no object name yet`
+                        // as a warning (file in progress); a typed () group
+                        // is a mistake, so it earns the error.
+                        d.push(
+                            lines.range(n.start_byte(), n.end_byte()),
+                            DiagnosticSeverity::ERROR,
+                            CODE_MISSING_NAME,
+                            format!(
+                                "{} {} has an empty object-name group — runmqsc rejects it \
+                                 (AMQ8405I). Write {} {}(NAME), or {} {}('NAME.*') for a \
+                                 pattern.",
+                                e.verb, e.object, e.verb, e.object, e.verb, e.object
+                            ),
+                        );
+                    } else {
+                        // Oracle: `ALTER QMGR()` is AMQ8405I too — this object
+                        // type carries no positional name at all, so the
+                        // group is stray: the same shape the trailing
+                        // `QLOCAL(A) ()` group below reports.
+                        d.push(
+                            lines.range(n.start_byte(), n.end_byte()),
+                            DiagnosticSeverity::ERROR,
+                            CODE_UNKNOWN_PARAM,
+                            format!(
+                                "{} {} takes no name group — and this one is empty besides \
+                                 (runmqsc: AMQ8405I). Remove the ( ) or give every value its \
+                                 own PARAM(value) group.",
+                                e.verb, e.object
+                            ),
+                        );
+                    }
                     continue;
                 }
                 d.push(
@@ -3663,6 +3717,55 @@ mod tests {
     }
 
     #[test]
+    fn code10_empty_object_name_group() {
+        // Oracle: runmqsc rejects an empty group as AMQ8405I and a blank
+        // quoted name as AMQ8424E — both were silent here. Unlike the
+        // never-typed case (warning, file in progress), a typed `()` is a
+        // mistake and lands at ERROR so --check fails on it.
+        for src in [
+            "DEFINE QLOCAL()\n",
+            "DEFINE QLOCAL( )\n",
+            "DISPLAY QLOCAL()\n",
+            "DEFINE QLOCAL('')\n",
+            "ALTER QLOCAL(' ')\n",
+        ] {
+            assert!(has(src, CODE_MISSING_NAME), "{src:?} -> {:?}", codes(src));
+        }
+        let d = analyze(
+            "DEFINE QLOCAL()\n",
+            &parse("DEFINE QLOCAL()\n"),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        )
+        .into_iter()
+        .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_NAME)))
+        .expect("CODE_MISSING_NAME missing");
+        assert_eq!(d.severity, Some(lsp::DiagnosticSeverity::ERROR));
+        assert!(d.message.contains("AMQ8405I"), "{}", d.message);
+        // an object type without a name slot gets the stray-group code:
+        // `ALTER QMGR()` is AMQ8405I as well
+        assert!(has("ALTER QMGR()\n", CODE_UNKNOWN_PARAM));
+        // the never-typed warning stays a warning, and legal blank VALUES
+        // (the dumps' reset sentinel) stay untouched
+        assert_eq!(
+            analyze(
+                "DEFINE QLOCAL\n",
+                &parse("DEFINE QLOCAL\n"),
+                Model::load(),
+                &Url::parse("file:///t.mqsc").unwrap(),
+                &Definitions::default(),
+            )
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_NAME)))
+            .expect("warning missing")
+            .severity,
+            Some(lsp::DiagnosticSeverity::WARNING)
+        );
+        assert!(!has("ALTER QMGR DESCR('')\n", CODE_MISSING_NAME));
+    }
+
+    #[test]
     fn code11_wildcard_outside_display() {
         assert!(has("ALTER QLOCAL(A?B)\n", CODE_WILDCARD));
         assert!(!has("DISPLAY QLOCAL(A?)\n", CODE_WILDCARD));
@@ -4076,6 +4179,33 @@ mod tests {
         assert_eq!(b.len(), 2, "{b:?}");
         assert_eq!(b[0].defines.as_deref(), Some("QALIAS"));
         assert_eq!(b[1].range.start.line, 3);
+    }
+
+    #[test]
+    fn object_index_accepts_bare_numeric_names() {
+        // runmqsc parses `QLOCAL(123)` as a plain q_name (the railroad
+        // accepts it; only the token class differs from a word) — so these
+        // digits must index as names or rename/references skip them.
+        // The reported script, verbatim.
+        let text = "DEFINE QLOCAL(123) BOQNAME(1234)\nDEFINE QLOCAL(1234)\n";
+        let idx = index_of(text);
+        let d: Vec<_> = idx.sites_of("123").collect();
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].defines.as_deref(), Some("QLOCAL"));
+        assert!(!d[0].quoted);
+        assert_eq!(d[0].word, "123");
+        let d: Vec<_> = idx.sites_of("1234").collect();
+        assert_eq!(d.len(), 2, "{d:?}"); // BOQNAME ref, then the DEFINE
+        assert!(d[0].defines.is_none());
+        assert_eq!(d[0].range.start.line, 0);
+        assert_eq!(d[1].defines.as_deref(), Some("QLOCAL"));
+        // …and hint 12 resolves them like any other name: silent here,
+        // because every referenced number is DEFINEd in the script
+        assert!(!has(text, CODE_UNDEFINED_OBJECT), "{:?}", codes(text));
+        assert!(has(
+            "DEFINE QLOCAL(X)\nDEFINE QALIAS(Q) TARGET(999)\n",
+            CODE_UNDEFINED_OBJECT
+        ));
     }
 
     #[test]
