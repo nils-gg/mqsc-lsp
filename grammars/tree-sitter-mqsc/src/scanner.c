@@ -48,7 +48,9 @@ enum TokenType {
 
 void *tree_sitter_mqsc_external_scanner_create(void) { return NULL; }
 
-void tree_sitter_mqsc_external_scanner_destroy(void *payload) {}
+void tree_sitter_mqsc_external_scanner_destroy(void *payload) {
+  (void)payload;
+}
 
 unsigned tree_sitter_mqsc_external_scanner_serialize(void *payload,
                                                      char *buffer) {

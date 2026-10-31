@@ -411,7 +411,7 @@ m = request(24, "textDocument/hover", {"textDocument": {"uri": uri},
 v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
 print("   cross hover:", v.replace("\n", " ")[:120])
 check("hover names the sibling file and line",
-      "another open document" in v and "other.mqsc" in v and "line 1" in v, v[:80])
+      "another workspace document" in v and "other.mqsc" in v and "line 1" in v, v[:80])
 
 m = request(25, "textDocument/completion", {"textDocument": {"uri": uri},
                                            "position": {"line": 7, "character": 25},

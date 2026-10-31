@@ -97,6 +97,23 @@ jobs:
         working-directory: server
         run: cargo build --release
 
+      # build.rs replays a cc warning as `cargo:warning=` lines that used to
+      # scroll by unnoticed (REVIEW F9). rust-cache can skip the compile
+      # entirely, so touch the C inputs first — this asserts the warning
+      # stays fixed, not merely absent from a cache hit.
+      - name: grammar C sources compile warning-free
+        working-directory: server
+        shell: bash
+        run: |
+          touch build.rs ../grammars/tree-sitter-mqsc/src/parser.c \
+                ../grammars/tree-sitter-mqsc/src/scanner.c
+          out=$(cargo build --release 2>&1)
+          if printf '%s\n' "$out" | grep -q 'cargo:warning'; then
+            echo "build.rs reported C warnings:"
+            printf '%s\n' "$out" | grep 'cargo:warning'
+            exit 1
+          fi
+
       - name: LSP smoke session against the release binary
         run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
 
