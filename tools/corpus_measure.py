@@ -16,8 +16,11 @@ Usage:
 --dump writes one "<file>\t<line>\t<code>\t<message>" record per diagnostic
 for later triage (tabs/newlines in messages are flattened to keep the TSV
 column contract). Exit code is 0 after a successful measurement; missing
-corpus dirs, empty corpora and missing producer binaries are configuration
-errors and exit non-zero. This is a measurement tool, not a gate (see
+corpus dirs, empty corpora, missing producer binaries AND producer
+failures (a probe that died on some file, a --check that came back with
+a code outside its 0/1 contract) exit non-zero — measuring the survivors
+and exiting 0 would hide exactly the crashes this tool exists to find
+(REVIEW T2). This is a measurement tool, not a gate (see
 tools/check_model.py for the model gate).
 """
 import argparse
@@ -32,6 +35,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def run_probe(binary, files):
     diags = []  # (file, line, code, message)
+    failures = 0
     for f in files:
         with open(f, "rb") as fh:
             p = subprocess.run([binary], stdin=fh,
@@ -39,13 +43,14 @@ def run_probe(binary, files):
                                stderr=subprocess.PIPE, text=True,
                                errors="replace")
         if p.returncode != 0:
+            failures += 1
             print(f"probe failed on {f}: rc={p.returncode}", file=sys.stderr)
         for ln in p.stderr.splitlines():
             m = re.match(r"  L(\d+) sev\S+ \[(\d+)\] (.*)", ln)
             if m:
                 diags.append((os.path.basename(f), int(m.group(1)),
                               int(m.group(2)), m.group(3)))
-    return diags
+    return diags, failures
 
 
 RE_CHECK = re.compile(r"^(.*?):(\d+):(\d+): (\w+)\[(\d+)\]: (.*)$")
@@ -57,9 +62,12 @@ def run_check(binary, files):
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, errors="replace")
     # 0 = clean, 1 = error findings: normal. 2 = usage/IO problem, 101 = a
-    # panic in the analyzer: say so loudly instead of measuring the
-    # truncated stdout as if the run had succeeded (REVIEW.md minor).
+    # panic in the analyzer: say so loudly AND count it as a failure (see
+    # main) — measuring the truncated stdout as if the run had succeeded
+    # is how a crashing analyzer goes unnoticed (REVIEW T2).
+    failures = 0
     if p.returncode not in (0, 1):
+        failures += 1
         print(f"check failed: rc={p.returncode}\n{p.stderr[:2000]}",
               file=sys.stderr)
     for ln in p.stdout.splitlines():
@@ -67,7 +75,7 @@ def run_check(binary, files):
         if m:
             diags.append((os.path.basename(m.group(1)), int(m.group(2)),
                           int(m.group(5)), m.group(6)))
-    return diags
+    return diags, failures
 
 
 def main():
@@ -87,9 +95,9 @@ def main():
         sys.exit(f"no .mqsc files under {args.dir}")
 
     if args.check:
-        diags = run_check(args.check, files)
+        diags, failures = run_check(args.check, files)
     else:
-        diags = run_probe(args.probe, files)
+        diags, failures = run_probe(args.probe, files)
 
     by_code = collections.Counter(c for _, _, c, _ in diags)
     msg_by_code = collections.defaultdict(collections.Counter)
@@ -111,6 +119,13 @@ def main():
                 msg = msg.replace("\t", " ").replace("\n", " ")
                 fh.write(f"{f}\t{ln}\t{c}\t{msg}\n")
         print(f"\ndumped {len(diags)} records to {args.dump}")
+
+    # the measurement above stays printable even when some producer died —
+    # but the exit code must tell that apart from a clean run (REVIEW T2)
+    if failures:
+        print(f"\n{failures} producer failure(s): the counts above are TRUNCATED",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

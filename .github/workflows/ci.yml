@@ -58,6 +58,41 @@ jobs:
         working-directory: server
         run: cargo test
 
+      # "probe must never panic" is a documented contract (AGENTS.md); this
+      # is its mechanical guard — probe always exits 0 unless it panicked
+      # (101) or could not read stdin (2), so rc==0 IS the assertion.
+      - name: probe never panics (fixtures + torture shapes, REVIEW T2)
+        working-directory: server
+        shell: bash
+        run: |
+          cargo build --examples
+          rc=0
+          for f in ../examples/sample.mqsc ../tools/demo/fixture.mqsc; do
+            ./target/debug/examples/probe < "$f" > /dev/null 2> probe.err
+            st=$?
+            if [ $st -ne 0 ]; then
+              echo "probe failed on $f (rc=$st):"; cat probe.err; rc=1
+            fi
+          done
+          # torture shapes: unterminated string, stray ')', CRLF endings,
+          # non-UTF-8 bytes, empty input — the lossy-decode promise means
+          # every one of these must parse-and-report, never crash
+          i=0
+          for t in "DEFINE QLOCAL(A) DESCR('unterminated" \
+                   "ALTER QLOCAL(A)) MAXDEPTH(9" \
+                   "ALTER QLOCAL(A\r\nMAXDEPTH(9)\r\n" \
+                   "DEFINE QLOCAL(\xff\xfe) DESCR('x')" \
+                   ""; do
+            i=$((i+1))
+            printf "$t" | ./target/debug/examples/probe > /dev/null 2> probe.err
+            st=$?
+            if [ $st -ne 0 ]; then
+              echo "probe failed on torture input $i (rc=$st):"; cat probe.err; rc=1
+            fi
+          done
+          rm -f probe.err
+          exit $rc
+
       - name: cargo build --release
         working-directory: server
         run: cargo build --release

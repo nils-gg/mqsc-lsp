@@ -132,10 +132,20 @@ fn assert_clean(n: Node<'_>, title: &str, src: &str) {
     }
 }
 
+/// Cases committed in `test/corpus/*.txt` as of the 2026-10-31 review.
+/// Discovery once floor-asserted `>= 20`, so a moved/emptied corpus dir
+/// (0 cases found) still "passed" 2/3 of the contract; a bare `>= N` with
+/// no relation to reality also let cases silently disappear (REVIEW T5).
+/// Bump this WHEN adding cases; the parse test below walks every one.
+const CORPUS_CASES: usize = 30;
+
 #[test]
 fn corpus_cases_are_discovered() {
     let n = cases().len();
-    assert!(n >= 20, "expected the full corpus (>=20 cases), found {n}");
+    assert!(
+        n >= CORPUS_CASES,
+        "expected the full corpus (>={CORPUS_CASES} cases), found {n}"
+    );
     // the stray-mid-line-plus case from T-9 must be among them
     assert!(cases().iter().any(|(t, _, _)| t.contains("mid-line plus")));
 }
@@ -160,7 +170,10 @@ fn corpus_parses_match_expected_trees() {
         );
         count += 1;
     }
-    assert!(count >= 20);
+    assert!(
+        count >= CORPUS_CASES,
+        "only {count} of the corpus's {CORPUS_CASES}+ cases were parsed"
+    );
 }
 
 #[test]

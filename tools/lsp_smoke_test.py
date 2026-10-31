@@ -87,6 +87,38 @@ def check(name, ok, extra=""):
     if not ok:
         fails.append(name)
 
+
+def drain_publishes(uris, timeout):
+    """Collect EVERY publishDiagnostics in one quiet window as
+    {uri: [diagnostics, ...]} in arrival order. The server's republish
+    policy is exact (T-17/PR7/PR8 rules): didOpen publishes to the opened
+    doc + a republish for every sibling, didChange publishes once to the
+    changed doc, didChangeConfiguration republishes every open doc,
+    didClose republishes the remaining ones. Every scenario below pins
+    its expected per-uri count — a zero-publish run must FAIL instead of
+    silently satisfying the negative checks (REVIEW T1: `diags = []` + a
+    pump timeout was a vacuous pass)."""
+    out = {u: [] for u in uris}
+    while True:
+        m = pump(timeout)
+        if m is None:
+            break
+        if m.get("method") == "textDocument/publishDiagnostics":
+            u = m["params"]["uri"]
+            if u in out:
+                out[u].append(m["params"]["diagnostics"])
+    return out
+
+
+def published(label, pubs, uri, count):
+    """Assert the scenario's exact publish count, then return the LAST
+    publish's diagnostics ([] when nothing arrived — the count check has
+    already failed the run in that case)."""
+    got = pubs.get(uri, [])
+    check(f"{label}: exactly {count} publish(es) for {uri.rsplit('/', 1)[-1]}",
+          len(got) == count, f"got {len(got)}")
+    return got[-1] if got else []
+
 r = request(1, "initialize", {"processId": None, "capabilities": {}, "rootUri": None})
 caps = r["result"]["capabilities"]
 print("== initialize: hover", bool(caps.get("hoverProvider")),
@@ -105,13 +137,8 @@ send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri, "languageId": "mqsc", "version": 1, "text": DOC}}})
 
-diags = []
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        diags = m["params"]["diagnostics"]
+pubs = drain_publishes([uri], 2)
+diags = published("didOpen", pubs, uri, 1)
 print("== diagnostics ==")
 for d in diags:
     print(f"  L{d['range']['start']['line']}:{d['range']['start']['character']}-{d['range']['end']['character']}"
@@ -353,16 +380,10 @@ DOC2 = "DEFINE QLOCAL(NO.SUCH.Q) DESCR('defined in sibling')\nDEFINE QALIAS(A9) 
 uri2 = "file:///tmp/other.mqsc"
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri2, "languageId": "mqsc", "version": 1, "text": DOC2}}})
-d_other = d_sample = None
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        if m["params"]["uri"] == uri2:
-            d_other = m["params"]["diagnostics"]
-        elif m["params"]["uri"] == uri:
-            d_sample = m["params"]["diagnostics"]
+pubs = drain_publishes([uri, uri2], 2)
+# did_open refreshes the opened document AND every sibling (T-17 rule)
+d_sample = published("didOpen sibling", pubs, uri, 1)
+d_other = published("didOpen sibling", pubs, uri2, 1)
 check("sibling's defines silence the code-12 hint in the first doc (republished)",
       d_sample is not None and not any(d.get("code") == 12 for d in d_sample),
       str([(d.get("code"), d["message"][:40]) for d in (d_sample or [])]))
@@ -436,13 +457,10 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
 print("\n== cross-file teardown: close the sibling ==")
 send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
     "textDocument": {"uri": uri2}}})
-d_sample = None
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        d_sample = m["params"]["diagnostics"]
+# two publishes for the surviving doc: the didChangeConfiguration(mqsc:{})
+# above republished every open doc, the didClose republishes the siblings
+pubs = drain_publishes([uri], 2)
+d_sample = published("didClose teardown", pubs, uri, 2)
 check("closing the sibling republishes the hint in the first doc",
       d_sample is not None and any(d.get("code") == 12 and "NO.SUCH.Q" in d["message"] for d in d_sample),
       str([(d.get("code"), d["message"][:40]) for d in (d_sample or []) if d.get("code") == 12]))
@@ -460,19 +478,15 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
       "params": {"settings": {"mqsc": {"diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": DOC}]}})
-diags2 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        diags2 = m["params"]["diagnostics"]
+# two publishes: the didChangeConfiguration republish + the didChange republish
+pubs = drain_publishes([uri], 3)
+diags2 = published("UNDEFINED_OBJECT off", pubs, uri, 2)
 after = sum(1 for d in diags2 if d.get("code") == 12)
 print("   code-12 hints after:", after, "| total diags:", len(diags2))
 check("hint 12 present before config", before > 0)
-check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+check("hint 12 gone after UNDEFINED_OBJECT=off", bool(pubs[uri]) and after == 0)
 check("no code 15 anywhere while no target is configured",
-      not any(d.get("code") == 15 for d in diags2),
+      bool(pubs[uri]) and not any(d.get("code") == 15 for d in diags2),
       str([d for d in diags2 if d.get("code") == 15]))
 
 print("\n== target availability (code 15, T-19 phase 4) ==")
@@ -490,19 +504,14 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
                                         "diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": DOC}]}})
-diags3 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        diags3 = m["params"]["diagnostics"]
+pubs = drain_publishes([uri], 3)
+diags3 = published("target 9.0/distributed", pubs, uri, 2)
 d15 = [(d["range"]["start"]["line"], d["message"]) for d in diags3 if d.get("code") == 15]
 print("   code 15 under target 9.0/distributed:", [(l, m[:60]) for l, m in d15])
 check("code 15: QSGDISP is z/OS-only vs distributed platform (line 14)",
       any(l == 14 and "z/OS" in msg for l, msg in d15), str(d15))
 check("code 15: BOQNAME stays clean under a distributed target (line 13)",
-      not any(l == 13 for l, _ in d15), str(d15))
+      bool(pubs[uri]) and not any(l == 13 for l, _ in d15), str(d15))
 
 print("\n== command availability (code 15 on VERB OBJECT, T-19 phase 5) ==")
 # the overlay's command_availability table (live-oracle evidence): the
@@ -514,19 +523,14 @@ send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
                      "text": "DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n"
                              "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST('x')\n"
                              "ALTER QMGR CCSID(1208)\n"}}})
-diags_cmd = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == CMD_URI:
-        diags_cmd = m["params"]["diagnostics"]
+pubs = drain_publishes([CMD_URI], 3)
+diags_cmd = published("didOpen cmdavail", pubs, CMD_URI, 1)
 d15c = [(d["range"]["start"]["line"], d["message"]) for d in diags_cmd if d.get("code") == 15]
 print("   command-level code 15:", [(l, mm[:60]) for l, mm in d15c])
 check("code 15: DEFINE CFSTRUCT is z/OS-only vs distributed platform (line 0)",
       any(l == 0 and "z/OS" in msg for l, msg in d15c), str(d15c))
 check("code 15: SET CHLAUTH is in-target at exactly 9.0 (line 1 clean)",
-      not any(l == 1 for l, _ in d15c), str(d15c))
+      bool(pubs[CMD_URI]) and not any(l == 1 for l, _ in d15c), str(d15c))
 m = request(61, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
                                        "position": {"line": 0, "character": 2}})
 v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
@@ -551,15 +555,12 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
       "params": {"settings": {"mqsc": {}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 4}, "contentChanges": [{"text": DOC}]}})
-diags4 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        diags4 = m["params"]["diagnostics"]
+# three publishes: didClose(cmdavail) republished the sibling, the
+# didChangeConfiguration republished every open doc, didChange republished itself
+pubs = drain_publishes([uri], 3)
+diags4 = published("target cleared", pubs, uri, 3)
 check("clearing the target makes every code 15 disappear",
-      not any(d.get("code") == 15 for d in diags4),
+      bool(pubs[uri]) and not any(d.get("code") == 15 for d in diags4),
       str([d for d in diags4 if d.get("code") == 15]))
 
 print("\n== prepareRename: verbs refuse; a quoted name selects WITHOUT quotes ==")
