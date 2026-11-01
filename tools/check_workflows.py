@@ -15,6 +15,14 @@
    workflow invalid and every trigger produces a 0-second, job-less
    failure (the PR #1 release-blocking incident: a prose comment
    illustrating "no ${{ }} interpolation" broke it by existing).
+4. The release job's asset verification reads the live list with
+   `--json assets --jq '.assets[].name'` — guarded by `if !` (no pipe,
+   which would swallow gh's exit code: bash steps run `bash -e`
+   WITHOUT pipefail) and followed by a zero-asset refusal. `assetNames`
+   is not a gh JSON field, and the run that used it published all 8
+   assets correctly, then watched the verifier read an empty list and
+   flag every one of them as "missing from the release" (v0.2.0
+   incident: green release, red self-check).
 
 Stdlib-only (the CI runner's python has no guaranteed PyYAML): this is a
 line scanner over files the repo controls, not a YAML parser — it reads
@@ -107,6 +115,32 @@ def check(path: str) -> int:
                         f"{path}:{i + 1}: dtolnay/rust-toolchain pin names "
                         f"no explicit toolchain — the @stable ref-name "
                         f"shorthand does not survive a SHA pin (PR #1)")
+    if path.endswith("release.yml"):
+        # Contract 4 (v0.2.0 incident): the asset-list read must be the
+        # known-good gh invocation, guarded without a pipe, and refuse an
+        # empty list. Text-pinned because CI only exercises this code
+        # once per release — far too slow to catch a phantom field.
+        # Comments are stripped first: the step's own prose EXPLAINS the
+        # bad field name, and only the command lines are load-bearing.
+        raw = "\n".join(l for l in lines if not l.strip().startswith("#"))
+        if "assetNames" in raw:
+            problems.append(f"{path}: gh has no `assetNames` JSON field — "
+                            f"read the asset list with `--json assets "
+                            f"--jq '.assets[].name'` (v0.2.0 incident: the "
+                            f"dead call's exit code was swallowed by a "
+                            f"`| sort` pipe and every asset looked missing)")
+        if "--json assets --jq '.assets[].name'" not in raw:
+            problems.append(f"{path}: the release job must read the live "
+                            f"asset list with the exact invocation "
+                            f"`--json assets --jq '.assets[].name'`")
+        if "if ! gh release view" not in raw:
+            problems.append(f"{path}: the gh asset-list read must check gh's "
+                            f"exit status with `if !` — a pipeline would "
+                            f"mask it (bash steps have no pipefail)")
+        if "! -s /tmp/actual" not in raw:
+            problems.append(f"{path}: the verifier must refuse a zero-asset "
+                            f"response — an empty live list must fail loudly, "
+                            f"never as a wrong diff")
     for p in problems:
         print("FAIL:", p)
     return 1 if problems else 0
@@ -118,9 +152,10 @@ def main() -> int:
         rc |= check(path)
     if rc == 0:
         total = sum(len(open(p, encoding="utf-8").readlines()) for p in FILES)
-        print(f"PASS: every action is SHA-pinned with a ref comment and "
-              f"every toolchain step names its toolchain explicitly "
-              f"({total} lines scanned)")
+        print(f"PASS: every action is SHA-pinned with a ref comment, every "
+              f"toolchain step names its toolchain, no empty expression, and "
+              f"the release verifier reads gh's asset list the known-good "
+              f"way ({total} lines scanned)")
     return rc
 
 
