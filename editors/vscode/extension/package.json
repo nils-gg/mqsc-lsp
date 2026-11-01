@@ -48,7 +48,7 @@
         "mqsc.server.path": {
           "type": "string",
           "default": "mqsc-lsp",
-          "markdownDescription": "Command or absolute path of the `mqsc-lsp` binary. Left at the default `mqsc-lsp`, the extension finds the binary on `PATH` first, then in the common release install directories (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `%LOCALAPPDATA%\\Programs\\mqsc-lsp`); if nothing is found it links to the GitHub Releases page instead of failing silently. Set it to a build (`cargo build --release` in the `server` directory) or an extracted release download to override the search."
+          "markdownDescription": "Command or absolute path of the `mqsc-lsp` binary. Left at the default `mqsc-lsp`, the extension finds the binary on `PATH` first, then in the common release install directories (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin` on unix; `%LOCALAPPDATA%\\Programs\\mqsc-lsp` and `%USERPROFILE%\\.local\\bin` on Windows); if nothing is found it links to the GitHub Releases page instead of failing silently. Set it to a build (`cargo build --release` in the `server` directory) or an extracted release download to override the search."
         },
         "mqsc.server.logFile": {
           "type": "string",

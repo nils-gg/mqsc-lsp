@@ -54,7 +54,10 @@ const vscodeStub = {
         }),
         onDidChangeConfiguration: () => ({ dispose() {} }),
     },
-    window: { showWarningMessage: () => Promise.resolve(undefined) },
+    window: {
+        showWarningMessage: () => Promise.resolve(undefined),
+        showErrorMessage: () => Promise.resolve(undefined),
+    },
     env: { openExternal: () => Promise.resolve(true) },
     commands: { executeCommand: () => Promise.resolve() },
     Uri: { parse: (s) => s },

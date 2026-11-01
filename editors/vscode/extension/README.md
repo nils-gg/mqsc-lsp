@@ -23,8 +23,9 @@ in CI, but nothing here has been executed inside a real VS Code window.
   and workspace symbols, folding, semantic tokens
 - Server lookup without configuration: `mqsc.server.path` when set to a
   real command/path is honored exactly; the default auto mode searches
-  `PATH`, then `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`
-  (or `%LOCALAPPDATA%\Programs\mqsc-lsp` on Windows), and shows a link to
+  `PATH`, then `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`,
+  `/usr/bin` (on Windows: `%LOCALAPPDATA%\Programs\mqsc-lsp` and
+  `%USERPROFILE%\.local\bin`), and shows a link to
   the GitHub Releases when nothing is found instead of failing silently
 - Settings UI for the binary path, the server log file (writes
   `MQSC_LSP_LOG`), the MQ target (`mqsc.targetVersion` / `mqsc.platform`,
