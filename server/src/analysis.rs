@@ -134,6 +134,17 @@ fn value_example(p: &Param) -> String {
     }
 }
 
+/// The full expected shape `NAME(example)`: a flag is a bare keyword with
+/// no value group, so it renders as `NAME` — `NAME()` would advertise a
+/// group that must not be there (M-1 polish on the code-9 message).
+fn example_shape(p: &Param) -> String {
+    if matches!(p.kind, ValueKind::Flag) {
+        p.name.clone()
+    } else {
+        format!("{}({})", p.name, value_example(p))
+    }
+}
+
 /// Join candidates for a message, honestly ellipsizing when cut off.
 fn join_capped<'a, I: IntoIterator<Item = &'a str>>(items: I, max: usize) -> String {
     let all: Vec<&str> = items.into_iter().collect();
@@ -1810,12 +1821,11 @@ fn check_command(
                 CODE_MISSING_REQUIRED,
                 format!(
                     "{} {} is usually given parameter {} — expected something like \
-                     {}({})",
+                     {}",
                     e.verb,
                     e.object,
                     p.name,
-                    p.name,
-                    value_example(p)
+                    example_shape(p)
                 ),
             );
         }
@@ -5290,5 +5300,44 @@ mod tests {
             cs.contains(&CODE_PARSE) && cs.contains(&CODE_BAD_VALUE),
             "{cs:?}"
         );
+    }
+
+    #[test]
+    fn m1_set_params_silence_the_extractor_optional_artifacts() {
+        // DISPLAY SBSTATUS(*) and RESET CLUSTER(CL1) are complete, valid
+        // MQSC — but the extractor read the dotted diagrams' unbracketed
+        // SUBTYPE/QMID rows as must-give, so each drew a code 9 "usually
+        // given parameter" warning with an empty `X()` example. The
+        // overlay's set_params optional fixes make them silent, and the
+        // one true positive keeps its exact message (flag kinds render
+        // bare `X`, never `X()` — example_shape).
+        assert_eq!(codes("DISPLAY SBSTATUS(*)\n"), Vec::<i32>::new());
+        assert_eq!(codes("RESET CLUSTER(CL1)\n"), Vec::<i32>::new());
+        let d = diags("MOVE QLOCAL(A)\n")
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_REQUIRED)))
+            .expect("MOVE QLOCAL must keep its code 9");
+        assert_eq!(
+            d.message,
+            "MOVE QLOCAL is usually given parameter TOQLOCAL — expected something like \
+             TOQLOCAL(NAME)"
+        );
+    }
+
+    #[test]
+    fn m2_trace_diagram_values_are_accepted() {
+        // CLASS/IFCID carried railroad placeholder words ('integer',
+        // 'integer:integer', 'ifcid') as enum members, so the diagrams'
+        // own spellings warned. The set_params kind fixes accept the real
+        // shapes — class numbers, m:n ranges, IFCID numbers, and the
+        // ALTER TRACE diagram's IFCID(*) — while junk still speaks:
+        // CLASS(BOGUS) keeps its code 5.
+        assert_eq!(codes("START TRACE(2) IFCID(18)\n"), Vec::<i32>::new());
+        assert_eq!(codes("START TRACE CLASS(01)\n"), Vec::<i32>::new());
+        assert_eq!(codes("START TRACE CLASS(01:03)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE IFCID(*)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE IFCID(12345)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE CLASS(02)\n"), Vec::<i32>::new());
+        assert!(codes("START TRACE CLASS(BOGUS)\n").contains(&CODE_BAD_VALUE));
     }
 }
