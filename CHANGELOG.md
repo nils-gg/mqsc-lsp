@@ -2,10 +2,87 @@
 
 All notable changes to mqsc-lsp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version is
-tracked in `server/Cargo.toml` and `editors/vscode/extension/package.json`
-and is released by pushing a `vX.Y.Z` tag (see `.github/workflows/release.yml`).
+tracked in `server/Cargo.toml`, `editors/vscode/extension/package.json`
+and its `package-lock.json`, and is released by pushing a `vX.Y.Z` tag
+(see `.github/workflows/release.yml`).
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-11-01
+
+The full sweep of the 2026-10-31 review (47 findings). Every behavior fix
+was verified against a live MQ 10.0.1 queue manager where the railroad
+decided it, and each ships with a guard test that fails against the old
+code.
+
+- Fixed: `CMDSCOPE(*)` / `CMDSCOPE(SYSTEM)` — the only spellings the real
+  world uses — got a bogus "Unexpected ( … ) group" error: the star
+  value kind never accepted its argument group (`ValueKind::Star`).
+- Fixed: the z/OS `NAME=word` form degraded into two loose words — two
+  false errors, the value invisible to object-reference checks. The
+  grammar now binds the value list mandatorily, so `TARGET=NOPE` flows
+  into hint 12 like the group form, and a bare `NAME=` with no value is
+  a syntax error, which is what runmqsc answers (AMQ8405I).
+- Fixed: a superseded pending parameter lost the diagnostic it exists to
+  give — `ALTER QLOCAL(A) DESCR MAXDEPTH(9)` now reports `DESCR` without
+  a value, matching the AMQ8405 the oracle rejects it with.
+- Fixed: the tab warning (code 8) fired on tabs inside `' … '` strings
+  and `*` comments; those are data (oracle-proven). Two corpus false
+  positives gone.
+- Fixed: hint 12 could name a z/OS `NAME=value` reference that definition
+  lookup then refused to navigate — both now join the same index.
+- Fixed: a parameter word landing in the VERB slot — the classic
+  forgotten `+`, e.g. a line starting `DESCR xyz` — gets the same
+  code-7 continuation hint the object slot always gave.
+- Fixed: code 9 false positives — `DISPLAY SBSTATUS` and `RESET CLUSTER`
+  were flagged for a missing parameter the extractor invented from
+  dotted-diagram debris; the one true positive (`MOVE QLOCAL` without
+  `TOQLOCAL`) remains.
+- Fixed: TRACE parameters rejected their own documented spellings —
+  `CLASS(01)`, `CLASS(01:03)`, `IFCID(18)` — the model had carried
+  railroad placeholder words as enum members; CLASS/IFCID are numeric
+  now (ranges included).
+- Fixed: hover cards capped again — one 6547-char card streamed the whole
+  reference page; the loader now applies the extractor's own 1000-char
+  sentence-aware clamp.
+- Fixed: fabricated model data removed after an oracle differential —
+  `AUTHTYPE(NONE)` and the phantom DEFINE SUB parameters
+  PERSIST/PSCLRSYS/PSCTLCASE/PSMSGID appear in no IBM page and the
+  queue manager rejects them; the anti-fabrication guard that let the
+  first one through is closed. Hover prose can no longer attach to
+  parameters it never described (whole-word context matching; `DESCR`
+  on `ALTER QMGR` had been borrowing the DISPLAY CLUSQMGR card).
+- Fixed: 22 overlay parameters had silently lost (or truncated) their
+  reference descriptions; the LOG name-length limit (44) is enforced;
+  extraction-debris enum tokens (`"! "`-prefixed) are cleaned at the
+  extractor.
+- Fixed (VS Code): three silent-rejection paths — a refused
+  `client.start()`, a failed settings-change restart, a refused guidance
+  link — now show the reason and the next step instead of doing nothing.
+- Changed: hover and hint 12 say "another workspace document", not
+  "open document" — true ever since the disk scan made closed files
+  resolve (and honest about what an unsaved buffer does to that).
+- Changed: the documented server-candidate list is complete and identical
+  in all four places (setting description, README, resolver error, code)
+  — a parse-and-compare guard fails the moment one site drifts, and every
+  candidate is now exercised behaviorally, including the Windows pair.
+- Changed: the Helix example leads with the recipe that actually works
+  (the grammar registry has no mqsc entry); `settings.example.json`
+  speaks all 15 diagnostic codes.
+- Changed: release integrity — `SHA256SUMS` now genuinely covers every
+  published asset (`demo.gif` ships from the tagged tree, and a
+  post-publish step fails the release if the live asset set and the
+  checksums disagree in either direction); every GitHub Action is pinned
+  to a full commit SHA; `package-lock.json` joined the version triangle;
+  a job that dies before its log exists still publishes a meaningful
+  public annotation.
+- Internal: the test harness hardened across the board — the LSP smoke
+  session grew from 73 to 95 checks (hover/completion/symbols/folding/
+  semantic-tokens sections converted from print-only to pinned
+  assertions), the demo recorder asserts real fold markers, exact rename
+  counts and negative post-conditions, all harnesses clean up every
+  process/temp dir on every exit path, and the extension stubs now honor
+  their sections so a wrong section name fails the test.
 
 ## [0.1.3] - 2026-10-31
 

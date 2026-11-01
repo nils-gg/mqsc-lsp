@@ -200,13 +200,13 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 145 unit + 3 grammar-corpus tests (no CLI needed)
-cd grammars/tree-sitter-mqsc && tree-sitter test    # 30 corpus tests (works with CLI 0.27.x)
+cd server && cargo test                             # 168 unit + 3 grammar-corpus tests (no CLI needed)
+cd grammars/tree-sitter-mqsc && tree-sitter test    # 36 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
-python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session
-python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session
+python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session (95 checks)
+python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session (52)
 python3 tools/check_model.py                        # model byte-reproducibility guard
-python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json (= tag) guard
+python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json = package-lock (= tag) guard
 node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
 node tools/extension_config_test.js                 # extension settings plumbing (faithful stub: get() THROWS on non-string sections — array keys once killed activation; the resolve test's permissive stub cannot catch that, this one can)
 tools/record_demo.sh                     # repo root; 10-step tmux/nvim tour, asserts every beat (e2e UI test)

@@ -4,9 +4,10 @@ name: Release
 # the server binaries for every platform the extension can use (patch.md
 # Phase 5): linux x86_64/aarch64, windows msvc x86_64, macos x86_64/aarch64,
 # plus the packaged VSIX. The version check is the first job: the tag,
-# server/Cargo.toml and editors/vscode/extension/package.json must agree,
-# so a release can never advertise artifacts it did not build (CHANGELOG.md
-# is updated in the same commit as the version bumps).
+# server/Cargo.toml, editors/vscode/extension/package.json and the
+# package-lock.json root entry must agree, so a release can never
+# advertise artifacts it did not build (CHANGELOG.md is updated in the
+# same commit as the version bumps).
 # Every platform builds on its own hosted runner with the pinned MSRV
 # (1.75) — the `=` dependency pins make the release exactly reproducible
 # with what CI's full gates ran; no cross-linkers to bit-rot.
@@ -21,7 +22,7 @@ env:
 
 jobs:
   check-version:
-    name: tag / Cargo.toml / package.json agree
+    name: tag / Cargo.toml / package.json / lock agree
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
