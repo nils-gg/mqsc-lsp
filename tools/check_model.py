@@ -26,6 +26,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# (N4) importing extract_model writes tools/__pycache__/ beside the gate,
+# polluting the checkout the repo guards — never leave .pyc behind.
+sys.dont_write_bytecode = True
+
 REPO = Path(__file__).resolve().parent.parent
 COMMITTED = REPO / "model" / "mqsc-model.json"
 
@@ -40,17 +44,19 @@ def load_extractor():
 
 
 def param_index(model):
-    """(verb, object, param) -> param dict, for a structural diff.
+    """(verb, object, #occurrence, param) -> param dict, for a structural diff.
 
     Names are stringified: a nameless param (None) must stay sortable
     against str keys instead of crashing the diff (py3 compares None
-    against str).
+    against str). The occurrence index (N4) is part of the key: two
+    same-named (or both-nameless) params in one command used to collapse
+    last-wins, so a change confined to the earlier twin was invisible.
     """
     out = {}
     for verb, objs in model.get("commands", {}).items():
         for obj, entry in objs.items():
-            for p in entry.get("params", []):
-                out[(verb, obj, str(p.get("name") or "<unnamed>"))] = p
+            for i, p in enumerate(entry.get("params", [])):
+                out[(verb, obj, f"#{i}", str(p.get("name") or "<unnamed>"))] = p
     return out
 
 

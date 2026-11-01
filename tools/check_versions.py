@@ -6,7 +6,7 @@ versions must match; a git tag additionally must name exactly that version,
 otherwise a GitHub Release would advertise artifacts it did not build.
 
 Usage:
-    python3 tools/check_versions.py            # Cargo.toml vs package.json
+    python3 tools/check_versions.py            # Cargo.toml vs package.json (+ lock)
     python3 tools/check_versions.py v0.1.0     # ... and the tag (release job)
 
 Exits non-zero on any divergence and prints what each source says.
@@ -19,6 +19,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARGO = os.path.join(ROOT, "server", "Cargo.toml")
 PKGJSON = os.path.join(ROOT, "editors", "vscode", "extension", "package.json")
+LOCKJSON = os.path.join(ROOT, "editors", "vscode", "extension",
+                        "package-lock.json")
 
 
 def cargo_version():
@@ -46,9 +48,22 @@ def package_version():
             raise SystemExit(f"no usable version in {PKGJSON}: {e}")
 
 
+def lock_version():
+    """The lockfile's root package entry (npm key ""). R1 (REVIEW
+    2026-10-31): it sat at 0.1.0 while package.json said 0.1.3 — inert
+    for `npm ci`, but the version triangle is the release story, so a
+    stale lock now fails the gate instead of quietly lying."""
+    with open(LOCKJSON, encoding="utf-8") as f:
+        try:
+            return json.load(f)["packages"][""]["version"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise SystemExit(f"no usable root version in {LOCKJSON}: {e}")
+
+
 def main():
     cargo = cargo_version()
     pkg = package_version()
+    lock = lock_version()
     tag = None
     if len(sys.argv) > 1:
         tag = sys.argv[1]
@@ -60,10 +75,11 @@ def main():
 
     print(f"  server/Cargo.toml:   {cargo}")
     print(f"  extension package.json: {pkg}")
+    print(f"  extension package-lock: {lock}")
     if tag is not None:
         print(f"  git tag:             {sys.argv[1]} -> {tag}")
 
-    versions = {"Cargo.toml": cargo, "package.json": pkg}
+    versions = {"Cargo.toml": cargo, "package.json": pkg, "package-lock.json": lock}
     if tag is not None:
         versions["tag"] = tag
     if len(set(versions.values())) != 1:

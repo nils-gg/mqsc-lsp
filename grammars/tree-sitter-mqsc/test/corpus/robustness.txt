@@ -1,0 +1,118 @@
+================================================================================
+Unclosed group: the repair inserts a MISSING )
+================================================================================
+
+DEFINE QLOCAL(A
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word))
+      (MISSING ")"))))
+
+================================================================================
+Unterminated string is bounded by the newline; the next command parses clean
+================================================================================
+
+DEFINE QLOCAL(A) DESCR('oops
+ALTER QLOCAL(B) MAXDEPTH(9)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (argument
+      (value
+        (string))
+      (MISSING ")")))
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (argument
+      (value
+        (integer)))))
+
+================================================================================
+Stray close paren is a local ERROR; the rest of the command survives
+================================================================================
+
+ALTER QLOCAL(A)) MAXDEPTH(9)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (ERROR)
+    (word)
+    (argument
+      (value
+        (integer)))))
+
+================================================================================
+CRLF line endings
+================================================================================
+
+DEFINE QLOCAL(A)
+ALTER QLOCAL(B) MAXDEPTH(9)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word))))
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (argument
+      (value
+        (integer)))))
+
+================================================================================
+Multibyte UTF-8 inside strings and comments is data
+================================================================================
+
+* comment with Ünïcødé ✓
+DEFINE QLOCAL(A) DESCR('Ünïcødé ✓')
+
+--------------------------------------------------------------------------------
+
+(program
+  (comment)
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (argument
+      (value
+        (string)))))

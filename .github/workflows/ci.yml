@@ -26,10 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - name: release versions agree (Cargo.toml vs extension package.json)
+      - name: release versions agree (Cargo.toml / package.json / lock)
         run: python3 tools/check_versions.py
+
+      - name: workflow pin contracts (SHA pins + explicit toolchain inputs)
+        run: python3 tools/check_workflows.py
 
       - name: extension server-resolution behavior (stubbed vscode host)
         run: node tools/extension_resolve_test.js
@@ -37,12 +40,12 @@ jobs:
       - name: extension settings plumbing behavior (stubbed vscode host)
         run: node tools/extension_config_test.js
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -58,9 +61,61 @@ jobs:
         working-directory: server
         run: cargo test
 
+      # "probe must never panic" is a documented contract (AGENTS.md); this
+      # is its mechanical guard — probe always exits 0 unless it panicked
+      # (101) or could not read stdin (2), so rc==0 IS the assertion.
+      - name: probe never panics (fixtures + torture shapes, REVIEW T2)
+        working-directory: server
+        shell: bash
+        run: |
+          cargo build --examples
+          rc=0
+          for f in ../examples/sample.mqsc ../tools/demo/fixture.mqsc; do
+            ./target/debug/examples/probe < "$f" > /dev/null 2> probe.err
+            st=$?
+            if [ $st -ne 0 ]; then
+              echo "probe failed on $f (rc=$st):"; cat probe.err; rc=1
+            fi
+          done
+          # torture shapes: unterminated string, stray ')', CRLF endings,
+          # non-UTF-8 bytes, empty input — the lossy-decode promise means
+          # every one of these must parse-and-report, never crash
+          i=0
+          for t in "DEFINE QLOCAL(A) DESCR('unterminated" \
+                   "ALTER QLOCAL(A)) MAXDEPTH(9" \
+                   "ALTER QLOCAL(A\r\nMAXDEPTH(9)\r\n" \
+                   "DEFINE QLOCAL(\xff\xfe) DESCR('x')" \
+                   ""; do
+            i=$((i+1))
+            printf "$t" | ./target/debug/examples/probe > /dev/null 2> probe.err
+            st=$?
+            if [ $st -ne 0 ]; then
+              echo "probe failed on torture input $i (rc=$st):"; cat probe.err; rc=1
+            fi
+          done
+          rm -f probe.err
+          exit $rc
+
       - name: cargo build --release
         working-directory: server
         run: cargo build --release
+
+      # build.rs replays a cc warning as `cargo:warning=` lines that used to
+      # scroll by unnoticed (REVIEW F9). rust-cache can skip the compile
+      # entirely, so touch the C inputs first — this asserts the warning
+      # stays fixed, not merely absent from a cache hit.
+      - name: grammar C sources compile warning-free
+        working-directory: server
+        shell: bash
+        run: |
+          touch build.rs ../grammars/tree-sitter-mqsc/src/parser.c \
+                ../grammars/tree-sitter-mqsc/src/scanner.c
+          out=$(cargo build --release 2>&1)
+          if printf '%s\n' "$out" | grep -q 'cargo:warning'; then
+            echo "build.rs reported C warnings:"
+            printf '%s\n' "$out" | grep 'cargo:warning'
+            exit 1
+          fi
 
       - name: LSP smoke session against the release binary
         run: python3 tools/lsp_smoke_test.py server/target/release/mqsc-lsp
@@ -69,7 +124,15 @@ jobs:
         run: python3 tools/workspace_index_smoke.py server/target/release/mqsc-lsp
 
       - name: model regeneration guard (skips without the IBM reference)
-        run: python3 tools/check_model.py
+        run: |
+          # C4 (REVIEW 2026-10-31): the byte-comparison can NEVER run here —
+          # the IBM reference is copyrighted and gitignored, so this step
+          # always SKIPs on CI. Say it as an annotation instead of letting
+          # the skip scroll by unnoticed: the guard is a local guarantee.
+          if [ ! -f MQSC_ScriptCommandReference.md ]; then
+            echo "::notice title=Model guard is local-only::the IBM reference is absent on CI runners; byte-reproducibility is verified by local runs, not by this job"
+          fi
+          python3 tools/check_model.py
 
       - name: --check CLI end-to-end
         run: |
@@ -93,11 +156,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -117,11 +184,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -142,7 +213,14 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # C3 (REVIEW 2026-10-31): under bash -e, a `tail` on a log that
+          # was never written (failure BEFORE the cargo step — precisely
+          # when the annotation matters most) aborted this script and the
+          # public ::error:: never shipped. Stay tolerant; the publisher
+          # handles the missing file itself.
+          { echo "## cargo test --locked (tail)"; echo '```'
+            tail -c 20000 test-output.log 2>/dev/null \
+              || echo '(no test-output.log: the job failed before cargo test ran)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"
 
   macos:
@@ -150,11 +228,15 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -167,5 +249,12 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # C3 (REVIEW 2026-10-31): under bash -e, a `tail` on a log that
+          # was never written (failure BEFORE the cargo step — precisely
+          # when the annotation matters most) aborted this script and the
+          # public ::error:: never shipped. Stay tolerant; the publisher
+          # handles the missing file itself.
+          { echo "## cargo test --locked (tail)"; echo '```'
+            tail -c 20000 test-output.log 2>/dev/null \
+              || echo '(no test-output.log: the job failed before cargo test ran)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"

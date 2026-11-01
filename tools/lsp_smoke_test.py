@@ -12,6 +12,24 @@ if os.path.exists(LOGPATH):
 proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         env={**os.environ, "MQSC_LSP_LOG": LOGPATH})
+
+
+def _cleanup():
+    """T9 (REVIEW 2026-10-31): on an assertion blowing up mid-session the
+    server process and the log file used to leak. atexit handlers run on
+    exception exits too, so every exit path now reaps both."""
+    try:
+        proc.kill()
+    except OSError:
+        pass  # already dead (the happy path) or never started
+    try:
+        os.remove(LOGPATH)
+    except OSError:
+        pass
+
+
+import atexit
+atexit.register(_cleanup)
 buf = b""
 fd = proc.stdout.fileno()
 os.set_blocking(fd, False)
@@ -30,10 +48,16 @@ def pump(timeout):
         header_end = buf.find(b"\r\n\r\n")
         if header_end != -1:
             head = buf[:header_end].decode(errors="replace")
-            n = 0
+            n = None
             for l in head.split("\r\n"):
                 if l.lower().startswith("content-length"):
                     n = int(l.split(":")[1])
+            if n is None:
+                # T10 (REVIEW 2026-10-31): a frame without Content-Length
+                # used to fall through as n=0 and surface as a confusing
+                # json.loads(b"") crash. A header the server wrote without
+                # a length is a protocol breakdown — name it.
+                raise RuntimeError(f"frame without Content-Length: {head!r}")
             if len(buf) >= header_end + 4 + n:
                 body = buf[header_end + 4: header_end + 4 + n]
                 buf = buf[header_end + 4 + n:]
@@ -87,6 +111,54 @@ def check(name, ok, extra=""):
     if not ok:
         fails.append(name)
 
+
+def drain_publishes(uris, timeout):
+    """Collect EVERY publishDiagnostics in one quiet window as
+    {uri: [diagnostics, ...]} in arrival order. The server's republish
+    policy is exact (T-17/PR7/PR8 rules): didOpen publishes to the opened
+    doc + a republish for every sibling, didChange publishes once to the
+    changed doc, didChangeConfiguration republishes every open doc,
+    didClose republishes the remaining ones. Every scenario below pins
+    its expected per-uri count — a zero-publish run must FAIL instead of
+    silently satisfying the negative checks (REVIEW T1: `diags = []` + a
+    pump timeout was a vacuous pass)."""
+    out = {u: [] for u in uris}
+    while True:
+        m = pump(timeout)
+        if m is None:
+            break
+        if m.get("method") == "textDocument/publishDiagnostics":
+            u = m["params"]["uri"]
+            if u in out:
+                out[u].append(m["params"]["diagnostics"])
+    return out
+
+
+def published(label, pubs, uri, count):
+    """Assert the scenario's exact publish count, then return the LAST
+    publish's diagnostics ([] when nothing arrived — the count check has
+    already failed the run in that case)."""
+    got = pubs.get(uri, [])
+    check(f"{label}: exactly {count} publish(es) for {uri.rsplit('/', 1)[-1]}",
+          len(got) == count, f"got {len(got)}")
+    return got[-1] if got else []
+
+
+def hover_value(m):
+    """The hover card text — '' on TIMEOUT or no hover, so a pinned
+    assertion fails visibly instead of printing TIMEOUT in a PASSed run
+    (T3)."""
+    return (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
+
+
+def completion_labels(m):
+    """Completion item labels from a response (list or CompletionList)."""
+    res = ((m or {}).get("result"))
+    if not res:
+        return []
+    items = res["items"] if isinstance(res, dict) else res
+    return [i["label"] for i in items]
+
 r = request(1, "initialize", {"processId": None, "capabilities": {}, "rootUri": None})
 caps = r["result"]["capabilities"]
 print("== initialize: hover", bool(caps.get("hoverProvider")),
@@ -98,6 +170,19 @@ print("== initialize: hover", bool(caps.get("hoverProvider")),
       "| references", bool(caps.get("referencesProvider")),
       "| rename", bool(caps.get("renameProvider")),
       "| workspace/symbol", bool(caps.get("workspaceSymbolProvider")))
+# T3 (REVIEW 2026-10-31): the flag line used to be print-only — a server
+# dropping a capability still passed the session. Assert them all.
+missing_caps = [k for k in ("hoverProvider", "completionProvider",
+                            "documentSymbolProvider", "foldingRangeProvider",
+                            "semanticTokensProvider", "definitionProvider",
+                            "referencesProvider", "renameProvider",
+                            "workspaceSymbolProvider")
+                if not caps.get(k)]
+check("all nine advertised capabilities are on", missing_caps == [], str(missing_caps))
+check("completion advertises a trigger set",
+      bool((caps.get("completionProvider") or {}).get("triggerCharacters")))
+_leg = ((caps.get("semanticTokensProvider") or {}).get("legend") or {}).get("tokenTypes") or []
+check("semantic token legend is non-empty", len(_leg) > 0, str(_leg))
 _rp = caps.get("renameProvider")
 check("rename advertises prepareProvider",
       isinstance(_rp, dict) and _rp.get("prepareProvider") is True, str(_rp))
@@ -105,13 +190,8 @@ send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri, "languageId": "mqsc", "version": 1, "text": DOC}}})
 
-diags = []
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        diags = m["params"]["diagnostics"]
+pubs = drain_publishes([uri], 2)
+diags = published("didOpen", pubs, uri, 1)
 print("== diagnostics ==")
 for d in diags:
     print(f"  L{d['range']['start']['line']}:{d['range']['start']['character']}-{d['range']['end']['character']}"
@@ -129,38 +209,66 @@ check("code 14 exempts SYSTEM.* (SDR channel SYSTEM.DEF.SDR has no XMITQ)",
 
 print("\n== hover DEFINE ==")
 m = request(2, "textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 2}})
-print(((m.get("result") or {}).get("contents") or {}).get("value", "")[:160] if m else "TIMEOUT")
+v = hover_value(m)
+print(v[:160].replace("\n", " "))
+check("hover on the DEFINE verb is the command card",
+      v.startswith("**MQSC: DEFINE QLOCAL**")
+      and "Use DEFINE QLOCAL to define a new local queue" in v,
+      v.replace("\n", " ")[:100])
 
 print("\n== hover QLOCAL ==")
 m = request(3, "textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 10}})
-print(((m.get("result") or {}).get("contents") or {}).get("value", "")[:280] if m else "TIMEOUT")
+v2 = hover_value(m)
+print(v2[:160].replace("\n", " "))
+check("hover on the object word is the same command card (with the synonym line)",
+      v2 == v and "_Synonym:_ `DEF QL`" in v2,
+      v2.replace("\n", " ")[:100])
 
 print("\n== hover REPLACE (param) ==")
 m = request(4, "textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 28}})
-print(((m.get("result") or {}).get("contents") or {}).get("value", "")[:400] if m else "TIMEOUT")
+v = hover_value(m)
+print(v[:200].replace("\n", " "))
+check("hover on REPLACE is the parameter card: keyword kind + reference prose",
+      v.startswith("**DEFINE QLOCAL — `REPLACE`**")
+      and "_Keyword; no value._" in v
+      and "replaces any existing definition of the same name" in v,
+      v.replace("\n", " ")[:120])
 
 print("\n== completion verb position (line 4 'DEF QL(X)' col 0) ==")
 m = request(5, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 0},
                                           "context": {"triggerKind": 1}})
-if m and m.get("result"):
-    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
-    print(f"  {len(items)} items:", ", ".join(i["label"] for i in items[:12]))
+labels = completion_labels(m)
+print(f"  {len(labels)} items:", ", ".join(labels[:12]))
+check("verb position completes the verb list (sorted, no object words)",
+      len(labels) == 22 and labels == sorted(labels)
+      and {"ADD", "DEFINE", "DISPLAY"} <= set(labels) and "QLOCAL" not in labels,
+      f"{len(labels)} items")
 
 print("\n== completion after DEFINE QLOCAL( ==")
 m = request(6, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 5, "character": 18},
                                           "context": {"triggerKind": 2}})
-if m and m.get("result"):
-    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
-    print(f"  {len(items)} items:", ", ".join(i["label"] for i in items[:12]))
+labels = completion_labels(m)
+print(f"  {len(labels)} items:", ", ".join(labels[:12]))
+check("after the name group, ALTER/DEFINE QLOCAL parameters are offered",
+      len(labels) > 50 and {"DESCR", "REPLACE", "LIKE", "BOQNAME"} <= set(labels),
+      f"{len(labels)} items")
 
 print("\n== completion params for ALTER QLOCAL ==")
 m = request(7, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 19},
                                           "context": {"triggerKind": 1}})
-if m and m.get("result"):
-    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
-    print(f"  {len(items)} items:", ", ".join(i["label"] for i in items[:15]))
-    for i in items[:5]:
-        print(f"   {i['label']:18} kind={i.get('kind')} detail={(i.get('detail') or '')[:70]!r}")
+items = ((m or {}).get("result") or {})
+items = items["items"] if isinstance(items, dict) else items
+labels = [i["label"] for i in items]
+print(f"  {len(labels)} items:", ", ".join(labels[:15]))
+for i in items[:5]:
+    print(f"   {i['label']:18} kind={i.get('kind')} detail={(i.get('detail') or '')[:70]!r}")
+check("ALTER QLOCAL params: the real MAXMSGL in, the typo MAXMSGS out",
+      "MAXMSGL" in labels and "MAXMSGS" not in labels and "DESCR" in labels,
+      f"{len(labels)} items")
+check("param items carry value-kind detail lines",
+      any(i["label"] == "DESCR" and i.get("detail") == "string" for i in items)
+      and any(i["label"] == "DEFPSIST" and i.get("detail") == "keyword" for i in items),
+      str([(i["label"], i.get("detail")) for i in items[:5]]))
 
 print("\n== logical next words ==")
 check("completion triggers on the blank",
@@ -187,33 +295,93 @@ check("DEF (synonym verb) offers DEFINE's object types",
 
 print("\n== documentSymbol ==")
 m = request(8, "textDocument/documentSymbol", {"textDocument": {"uri": uri}})
-if m:
-    for sy in m["result"]:
-        print(f"   {sy['name']!r} kind={sy['kind']} L{sy['range']['start']['line']}")
-    names = [sy["name"] for sy in m["result"]]
-    check("documentSymbol labels carry object type + name",
-          any(n == "DEFINE QLOCAL (DEAD.QUEUE)" for n in names), str(names[:2]))
+syms = (m or {}).get("result")
+check("documentSymbol answered with a list", isinstance(syms, list), str(type(syms)))
+syms = syms or []
+for sy in syms:
+    print(f"   {sy['name']!r} kind={sy['kind']} L{sy['range']['start']['line']}")
+names = [sy["name"] for sy in syms]
+check("documentSymbol labels carry object type + name",
+      any(n == "DEFINE QLOCAL (DEAD.QUEUE)" for n in names), str(names[:2]))
+# every command becomes exactly one symbol, in document order, with the
+# synonym line spelled as typed (T3: was print-only)
+check("documentSymbol lists all 16 commands in order",
+      names == ["DEFINE QLOCAL (DEAD.QUEUE)", "DEFINE CHANNEL (SYSTEM.DEF.SDR)",
+                "DISPLAY QLOCAL (*)", "ALTER QLOCAL (NEW1)", "DEF QL (X)",
+                "DEFINE QLOCAL (Q1)", "DEFINE QALIAS (A2)", "DEFINE QALIAS (A3)",
+                "ALTER QLOCAL ('DEAD.QUEUE')", "DEFINE QALIAS (A4)",
+                "DEFINE QLOCAL (SHOP.FRONT)", "DEFINE CHANNEL (SHOP.FRONT)",
+                "DEFINE QALIAS (A5)", "ALTER QLOCAL (C6)", "DEFINE QLOCAL (C7)",
+                "DEFINE QLOCAL (C6)"], str(names))
+check("documentSymbol kinds are all SymbolKind.Variable(6)",
+      all(s["kind"] == 6 for s in syms), str(sorted({s['kind'] for s in syms})))
 
 print("\n== foldingRange ==")
+# The session doc is all one-line commands, so folding must be EXACTLY
+# empty — any fabricated range fails here. (T3: print-only, showed [] in a
+# passing run without pinning it.)
 m = request(9, "textDocument/foldingRange", {"textDocument": {"uri": uri}})
-if m:
-    print("  ", [(f['startLine'], f['endLine'], f.get('kind')) for f in m["result"]])
+folds = ((m or {}).get("result"))
+check("single-line-command document folds to nothing", folds == [], str(folds))
+# A dedicated doc exercises the two real fold kinds: a `*` comment block
+# and a '+' continuation command (fixture shapes from analysis::folding).
+FOLD_URI = "file:///tmp/fold.mqsc"
+send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
+    "textDocument": {"uri": FOLD_URI, "languageId": "mqsc", "version": 1,
+                     "text": "* fold block line one\n* fold block line two\n"
+                             "DEFINE QLOCAL(F1) DESCR('multi') +\n  PUT(ENABLED)\n"}}})
+pubs = drain_publishes([FOLD_URI, uri], 2)
+published("didOpen fold doc", pubs, FOLD_URI, 1)
+published("didOpen fold doc republishes the sibling", pubs, uri, 1)
+m = request(65, "textDocument/foldingRange", {"textDocument": {"uri": FOLD_URI}})
+got = [(f["startLine"], f["endLine"], f.get("kind"))
+       for f in ((m or {}).get("result") or [])]
+print("  ", got)
+check("comment block + continuation command fold exactly",
+      got == [(0, 1, "comment"), (2, 3, "region")], str(got))
+send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
+    "textDocument": {"uri": FOLD_URI}}})
+# didClose republishes the surviving siblings; drain it here so no stray
+# publish lands in a later section's counted window.
+pubs = drain_publishes([uri], 2)
+published("didClose fold doc", pubs, uri, 1)
 
 print("\n== semanticTokens/full ==")
 m = request(10, "textDocument/semanticTokens/full", {"textDocument": {"uri": uri}})
-if m:
-    d = m["result"]["data"]
-    print("   total:", len(d), "first quintets:", [d[i:i+5] for i in range(0, min(20, len(d)), 5)])
+d = (((m or {}).get("result") or {}).get("data")) or []
+print("   total:", len(d), "first quintets:", [d[i:i+5] for i in range(0, min(20, len(d)), 5)])
+check("token data is a whole number of quintets", bool(d) and len(d) % 5 == 0, f"{len(d)} ints")
+# Decode the relative encoding against DOC: positions must be monotonic,
+# indices must stay in the legend, and no token may span a line break —
+# a length running past end-of-line would corrupt every client highlight.
+lines = DOC.split("\n")
+lt, ln, line, start, bad = len(_leg), len(lines), 0, 0, []
+for i in range(0, len(d), 5):
+    dl, ds, length, ttype, _mods = d[i:i+5]
+    if dl > 0:
+        line, start = line + dl, ds
+    else:
+        start += ds
+    if not (0 <= line < ln and 0 <= start <= len(lines[line])
+            and start + length <= len(lines[line]) and 0 <= ttype < lt):
+        bad.append((i // 5, line, start, length, ttype))
+check(f"all {len(d)//5} tokens decode inside the document, no line-crossing",
+      bad == [], str(bad[:3]))
+check("first token is the DEFINE keyword", d[0:5] == [0, 0, 6, 0, 0], str(d[0:5]))
 
 print("\n== completion inside TARGET( on line 6: script-defined names ==")
 m = request(11, "textDocument/completion", {"textDocument": {"uri": uri}, "position": {"line": 6, "character": 25},
                                            "context": {"triggerKind": 2}})
-labels = []
-if m and m.get("result"):
-    items = (m["result"]["items"] if isinstance(m["result"], dict) else m["result"])
-    labels = [i["label"] for i in items]
-    print("  ", labels)
+labels = completion_labels(m)
+print("  ", labels)
 check("completion offers Q1 DEFINEd earlier in script", "Q1" in labels)
+# the whole list is deterministic: '*' first, then the queue-namespace
+# names in DEFINE order — Q1's TARGET slot resolves in the queue scope,
+# so every queue-typed name shows (SHOP.FRONT names a queue too, once)
+# and the undefined NO.SUCH.Q does not
+check("TARGET( completion lists exactly the queue-namespace names",
+      labels == ["*", "A2", "A3", "A4", "A5", "DEAD.QUEUE", "X", "Q1",
+                 "SHOP.FRONT", "C7", "C6"], str(labels))
 
 print("\n== codeAction quickfix on the MAXMSGS diagnostic ==")
 d4 = next((d for d in diags if d.get("code") == 4 and "MAXMSGS" in d["message"]), None)
@@ -353,16 +521,10 @@ DOC2 = "DEFINE QLOCAL(NO.SUCH.Q) DESCR('defined in sibling')\nDEFINE QALIAS(A9) 
 uri2 = "file:///tmp/other.mqsc"
 send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
     "textDocument": {"uri": uri2, "languageId": "mqsc", "version": 1, "text": DOC2}}})
-d_other = d_sample = None
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        if m["params"]["uri"] == uri2:
-            d_other = m["params"]["diagnostics"]
-        elif m["params"]["uri"] == uri:
-            d_sample = m["params"]["diagnostics"]
+pubs = drain_publishes([uri, uri2], 2)
+# did_open refreshes the opened document AND every sibling (T-17 rule)
+d_sample = published("didOpen sibling", pubs, uri, 1)
+d_other = published("didOpen sibling", pubs, uri2, 1)
 check("sibling's defines silence the code-12 hint in the first doc (republished)",
       d_sample is not None and not any(d.get("code") == 12 for d in d_sample),
       str([(d.get("code"), d["message"][:40]) for d in (d_sample or [])]))
@@ -390,7 +552,7 @@ m = request(24, "textDocument/hover", {"textDocument": {"uri": uri},
 v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
 print("   cross hover:", v.replace("\n", " ")[:120])
 check("hover names the sibling file and line",
-      "another open document" in v and "other.mqsc" in v and "line 1" in v, v[:80])
+      "another workspace document" in v and "other.mqsc" in v and "line 1" in v, v[:80])
 
 m = request(25, "textDocument/completion", {"textDocument": {"uri": uri},
                                            "position": {"line": 7, "character": 25},
@@ -436,13 +598,10 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
 print("\n== cross-file teardown: close the sibling ==")
 send({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {
     "textDocument": {"uri": uri2}}})
-d_sample = None
-while True:
-    m = pump(2)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        d_sample = m["params"]["diagnostics"]
+# two publishes for the surviving doc: the didChangeConfiguration(mqsc:{})
+# above republished every open doc, the didClose republishes the siblings
+pubs = drain_publishes([uri], 2)
+d_sample = published("didClose teardown", pubs, uri, 2)
 check("closing the sibling republishes the hint in the first doc",
       d_sample is not None and any(d.get("code") == 12 and "NO.SUCH.Q" in d["message"] for d in d_sample),
       str([(d.get("code"), d["message"][:40]) for d in (d_sample or []) if d.get("code") == 12]))
@@ -460,19 +619,15 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
       "params": {"settings": {"mqsc": {"diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": DOC}]}})
-diags2 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics":
-        diags2 = m["params"]["diagnostics"]
+# two publishes: the didChangeConfiguration republish + the didChange republish
+pubs = drain_publishes([uri], 3)
+diags2 = published("UNDEFINED_OBJECT off", pubs, uri, 2)
 after = sum(1 for d in diags2 if d.get("code") == 12)
 print("   code-12 hints after:", after, "| total diags:", len(diags2))
 check("hint 12 present before config", before > 0)
-check("hint 12 gone after UNDEFINED_OBJECT=off", after == 0)
+check("hint 12 gone after UNDEFINED_OBJECT=off", bool(pubs[uri]) and after == 0)
 check("no code 15 anywhere while no target is configured",
-      not any(d.get("code") == 15 for d in diags2),
+      bool(pubs[uri]) and not any(d.get("code") == 15 for d in diags2),
       str([d for d in diags2 if d.get("code") == 15]))
 
 print("\n== target availability (code 15, T-19 phase 4) ==")
@@ -490,19 +645,14 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
                                         "diagnostics": {"UNDEFINED_OBJECT": "off"}}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": DOC}]}})
-diags3 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        diags3 = m["params"]["diagnostics"]
+pubs = drain_publishes([uri], 3)
+diags3 = published("target 9.0/distributed", pubs, uri, 2)
 d15 = [(d["range"]["start"]["line"], d["message"]) for d in diags3 if d.get("code") == 15]
 print("   code 15 under target 9.0/distributed:", [(l, m[:60]) for l, m in d15])
 check("code 15: QSGDISP is z/OS-only vs distributed platform (line 14)",
       any(l == 14 and "z/OS" in msg for l, msg in d15), str(d15))
 check("code 15: BOQNAME stays clean under a distributed target (line 13)",
-      not any(l == 13 for l, _ in d15), str(d15))
+      bool(pubs[uri]) and not any(l == 13 for l, _ in d15), str(d15))
 
 print("\n== command availability (code 15 on VERB OBJECT, T-19 phase 5) ==")
 # the overlay's command_availability table (live-oracle evidence): the
@@ -514,20 +664,15 @@ send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
                      "text": "DEFINE CFSTRUCT(SCI) CF_TYPE(S)\n"
                              "SET CHLAUTH(*) TYPE(BLOCKUSER) USERLIST('x')\n"
                              "ALTER QMGR CCSID(1208)\n"}}})
-diags_cmd = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == CMD_URI:
-        diags_cmd = m["params"]["diagnostics"]
+pubs = drain_publishes([CMD_URI], 3)
+diags_cmd = published("didOpen cmdavail", pubs, CMD_URI, 1)
 d15c = [(d["range"]["start"]["line"], d["message"]) for d in diags_cmd if d.get("code") == 15]
 print("   command-level code 15:", [(l, mm[:60]) for l, mm in d15c])
 check("code 15: DEFINE CFSTRUCT is z/OS-only vs distributed platform (line 0)",
       any(l == 0 and "z/OS" in msg for l, msg in d15c), str(d15c))
 check("code 15: SET CHLAUTH is in-target at exactly 9.0 (line 1 clean)",
-      not any(l == 1 for l, _ in d15c), str(d15c))
-m = request(61, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
+      bool(pubs[CMD_URI]) and not any(l == 1 for l, _ in d15c), str(d15c))
+m = request(64, "textDocument/hover", {"textDocument": {"uri": CMD_URI},
                                        "position": {"line": 0, "character": 2}})
 v = (((m or {}).get("result") or {}).get("contents") or {}).get("value", "")
 check("hover command card shows the curated availability (z/OS only)",
@@ -551,15 +696,12 @@ send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
       "params": {"settings": {"mqsc": {}}}})
 send({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
     "textDocument": {"uri": uri, "version": 4}, "contentChanges": [{"text": DOC}]}})
-diags4 = []
-while True:
-    m = pump(3)
-    if m is None:
-        break
-    if m.get("method") == "textDocument/publishDiagnostics" and m["params"]["uri"] == uri:
-        diags4 = m["params"]["diagnostics"]
+# three publishes: didClose(cmdavail) republished the sibling, the
+# didChangeConfiguration republished every open doc, didChange republished itself
+pubs = drain_publishes([uri], 3)
+diags4 = published("target cleared", pubs, uri, 3)
 check("clearing the target makes every code 15 disappear",
-      not any(d.get("code") == 15 for d in diags4),
+      bool(pubs[uri]) and not any(d.get("code") == 15 for d in diags4),
       str([d for d in diags4 if d.get("code") == 15]))
 
 print("\n== prepareRename: verbs refuse; a quoted name selects WITHOUT quotes ==")
@@ -671,9 +813,8 @@ if logtext:
     for l in logtext.splitlines()[:4]:
         print("   ", l[:110])
 
-print("\n== summary ==")
-if fails:
-    print("  FAILED:", ", ".join(fails))
+# T10: the FAILED summary used to print BEFORE the shutdown/stderr/exit
+# checks — a failure there could not be listed anymore. It goes out last.
 
 request(99, "shutdown", {})
 send({"jsonrpc": "2.0", "method": "exit", "params": {}})
@@ -691,8 +832,10 @@ if err.strip():
 # A server that exits non-zero (e.g. 101 despite the exit handshake) must
 # fail this gate, not just print the number (REVIEW.md minor).
 check("server exits cleanly", proc.returncode == 0, f"rc={proc.returncode}")
-try:
-    os.remove(LOGPATH)  # verified above; don't litter the temp dir
-except OSError:
-    pass
+
+print("\n== summary ==")
+if fails:
+    print("  FAILED:", ", ".join(fails))
+# LOGPATH removal and any still-live server are the atexit handler's job
+# (T9): it runs here on the happy path and equally on a crash mid-session.
 sys.exit(1 if fails else 0)

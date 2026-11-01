@@ -134,6 +134,17 @@ fn value_example(p: &Param) -> String {
     }
 }
 
+/// The full expected shape `NAME(example)`: a flag is a bare keyword with
+/// no value group, so it renders as `NAME` — `NAME()` would advertise a
+/// group that must not be there (M-1 polish on the code-9 message).
+fn example_shape(p: &Param) -> String {
+    if matches!(p.kind, ValueKind::Flag) {
+        p.name.clone()
+    } else {
+        format!("{}({})", p.name, value_example(p))
+    }
+}
+
 /// Join candidates for a message, honestly ellipsizing when cut off.
 fn join_capped<'a, I: IntoIterator<Item = &'a str>>(items: I, max: usize) -> String {
     let all: Vec<&str> = items.into_iter().collect();
@@ -327,9 +338,29 @@ pub fn analyze_with_target(
     let mut d = Diags { items: Vec::new() };
 
     // ---- lexical checks over raw text
+    // Tabs inside a quoted string or a comment are DATA (`DESCR('a<TAB>b')`
+    // parses clean on the 10.0.1 oracle; a `*` comment may contain anything),
+    // so the raw scan below consults the parse tree before claiming a tab
+    // "becomes part of a word" (F6).
+    let mut quoted_ranges: Vec<(usize, usize)> = Vec::new();
+    {
+        let mut stack = vec![tree.root_node()];
+        while let Some(n) = stack.pop() {
+            if matches!(n.kind(), "string" | "comment") {
+                quoted_ranges.push((n.start_byte(), n.end_byte()));
+            }
+            let mut cur = n.walk();
+            for c in n.named_children(&mut cur) {
+                stack.push(c);
+            }
+        }
+    }
     for (i, line) in text.lines().enumerate() {
         for col in line.match_indices('\t').map(|(c, _)| c) {
             let s = lines.line_start(i) + line[..col].len();
+            if quoted_ranges.iter().any(|&(a, b)| s >= a && s < b) {
+                continue; // inside ' … ' or a comment: legal string data
+            }
             d.push(
                 lines.range(s, s + 1),
                 DiagnosticSeverity::WARNING,
@@ -482,7 +513,10 @@ fn first_word(n: Node<'_>, src: &[u8]) -> Option<String> {
         if x.kind() == "word" {
             return Some(node_text(x, src).to_string());
         }
-        for i in 0..x.named_child_count() {
+        // push right-to-left so the stack pops left-to-right: this must
+        // return the FIRST word in document order — an ERROR node's
+        // continuation hint quotes the word it finds here (F10)
+        for i in (0..x.named_child_count()).rev() {
             if let Some(c) = x.named_child(i) {
                 stack.push(c);
             }
@@ -754,7 +788,8 @@ fn names_for<'a>(defs: &'a Definitions, scope: &ObjectScope) -> Vec<(&'a str, &'
 }
 
 impl Definitions {
-    /// Merge the defined names of other open documents into this view
+    /// Merge the defined names of other indexed documents (open or closed)
+    /// into this view
     /// (T-17). A name defined in a sibling script stops the code-12 hint and
     /// appears in completions, exactly as if it were DEFINEd here — the
     /// gate (arming) widens the same way, which is the whole point for
@@ -976,7 +1011,7 @@ fn check_obj_ref(
             let pool = names_for(defs, &scope);
             let sugs = model::suggest(&name, pool.iter().map(|&(_, n)| n), 3);
             let scope = if defs.from_other_files {
-                "this script or the other open documents"
+                "this script or the other indexed documents"
             } else {
                 "this script"
             };
@@ -1201,11 +1236,71 @@ pub fn object_index(text: &str, tree: &Tree, m: &Model) -> ObjectIndex {
                         }
                     }
                 }
+                Item::Val(n) => {
+                    // z/OS NAME=value belongs to the owner word exactly like
+                    // the group form: same join, same sites — hint 12 may
+                    // speak about this name only if navigation can too (F7,
+                    // AGENTS.md's cannot-disagree invariant).
+                    let scope = match owner.as_deref().and_then(|w| {
+                        object_ref_param(w, e.object)
+                            .map(|r| ref_scope(w, r, e.object, targtype.as_deref()))
+                    }) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    let vs = if n.kind() == "value" {
+                        vec![*n]
+                    } else {
+                        value_nodes(*n)
+                    };
+                    for v in vs {
+                        if let Some((name, word, node)) = name_value_node(v, src) {
+                            if name.trim().is_empty() {
+                                continue; // same blank-name rule as the Arg arm
+                            }
+                            let quoted = node.kind() == "string";
+                            idx.sites.push(NameSite {
+                                name,
+                                word,
+                                range: lines.range(node.start_byte(), node.end_byte()),
+                                quoted,
+                                defines: None, // NAME= is always a reference, never a DEFINE
+                                scope: scope.clone(),
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }
     }
     idx
+}
+
+/// A known parameter word that never received its `( … )` group. Shared by
+/// the mid-command flush (the next known parameter word supersedes the
+/// pending one, F5) and the end-of-command report — both must speak with
+/// one voice. DISPLAY is exempt: there every known parameter word doubles
+/// as a selectable attribute (`DISPLAY QMGR DESCR` lists that column and is
+/// complete MQSC); only the group-form uses demand a value.
+fn report_pending(e: &model::Command, up: &str, n: Node<'_>, lines: &Lines, d: &mut Diags) {
+    if e.verb == "DISPLAY" {
+        return;
+    }
+    let example = e
+        .by_name
+        .get(up)
+        .map(|&pi| value_example(&e.params[pi]))
+        .unwrap_or_else(|| "value".to_string());
+    d.push(
+        lines.range(n.start_byte(), n.end_byte()),
+        DiagnosticSeverity::ERROR,
+        CODE_BAD_VALUE,
+        format!(
+            "Parameter {up} was given without its value — write {up}({example}); the value \
+             belongs between parentheses."
+        ),
+    );
 }
 
 fn check_command(
@@ -1304,6 +1399,28 @@ fn check_command(
                     ),
                 );
             } else {
+                // The classic forgotten-`+` shape with the PARAMETER word in the
+                // verb slot (`DESCR xyz` on a fresh line): the same evidence as
+                // the object-slot spelling above, so it earns the same
+                // continuation hint instead of "no command" (F11).
+                let up_v = verb_txt.to_ascii_uppercase();
+                if m.known_params.contains(&up_v) || m.known_attrs.contains(&up_v) {
+                    d.push(
+                        lines.range(verb_node.start_byte(), verb_node.end_byte()),
+                        DiagnosticSeverity::ERROR,
+                        CODE_MISSING_CONT,
+                        format!(
+                            "'{up_v}' is not a command; it is a {}. If this line continues \
+                             the command above, end the previous line with '+' or '-'",
+                            if m.known_params.contains(&up_v) {
+                                "parameter"
+                            } else {
+                                "attribute"
+                            }
+                        ),
+                    );
+                    return;
+                }
                 let sugs = model::suggest(verb_txt, m.all_verbs(), 3);
                 let msg = if sugs.is_empty() {
                     format!(
@@ -1406,9 +1523,20 @@ fn check_command(
 
                 if let Some(&pi) = e.by_name.get(&up) {
                     let p = &e.params[pi];
-                    let wants_group =
-                        !matches!(p.kind, ValueKind::Flag | ValueKind::Star | ValueKind::Free)
-                            || matches!(p.kind, ValueKind::Enum(_));
+                    // A live pending word is superseded by the next known
+                    // parameter word — flush the old one NOW through the
+                    // same report path, or a value-less parameter hides
+                    // behind its successor (`DESCR MAXDEPTH(9)` used to be
+                    // 0 diagnostics; runmqsc rejects it too).
+                    if let Some((old, w)) = pending.take() {
+                        report_pending(e, &old, w, lines, d);
+                    }
+                    // Star values ride in a group like every other kind:
+                    // the real-world spellings are `CMDSCOPE(SYSTEM)` and
+                    // `CMDSCOPE(*)`, and an ownerless group would error
+                    // (F1). Only true flags and free-form values stand
+                    // alone.
+                    let wants_group = !matches!(p.kind, ValueKind::Flag | ValueKind::Free);
                     if wants_group && !matches!(p.kind, ValueKind::Flag) {
                         pending = Some((up.clone(), *n));
                     }
@@ -1664,29 +1792,7 @@ fn check_command(
 
     // pending parameter word without its group
     if let Some((up, n)) = &pending {
-        // On DISPLAY every known parameter word doubles as a selectable
-        // attribute: `DISPLAY QMGR DESCR` lists that column and is complete
-        // MQSC (the 10.0.1 railroads print these words bare). Only the
-        // group-form uses (`WHERE(...)`) demand a value, so a bare word on
-        // DISPLAY is never a missing-value error.
-        if e.verb == "DISPLAY" {
-            // no diagnostic
-        } else {
-            let example = e
-                .by_name
-                .get(up)
-                .map(|&pi| value_example(&e.params[pi]))
-                .unwrap_or_else(|| "value".to_string());
-            d.push(
-                lines.range(n.start_byte(), n.end_byte()),
-                DiagnosticSeverity::ERROR,
-                CODE_BAD_VALUE,
-                format!(
-                    "Parameter {up} was given without its value — write {up}({example}); the \
-                     value belongs between parentheses."
-                ),
-            );
-        }
+        report_pending(e, up, *n, lines, d);
     }
 
     // missing required parameters. Only report when exactly one parameter is
@@ -1715,12 +1821,11 @@ fn check_command(
                 CODE_MISSING_REQUIRED,
                 format!(
                     "{} {} is usually given parameter {} — expected something like \
-                     {}({})",
+                     {}",
                     e.verb,
                     e.object,
                     p.name,
-                    p.name,
-                    value_example(p)
+                    example_shape(p)
                 ),
             );
         }
@@ -2176,7 +2281,7 @@ pub fn hover(
                 Some((file, line, _)) => {
                     let types: Vec<&str> = ext.iter().map(|(_, _, t)| t.as_str()).collect();
                     format!(
-                        "**{} `{}`** — DEFINEd at line {} of `{}` (another open document){}\n\n\
+                        "**{} `{}`** — DEFINEd at line {} of `{}` (another workspace document){}\n\n\
                          {} {} in this script.",
                         types.join("/"),
                         site.name,
@@ -2570,7 +2675,7 @@ pub fn completions(
 
     // object-name slot: a command with a positional name takes that bare
     // word next (`DEFINE QLOCAL <name>`), so offer the names this script
-    // (and the other open documents, T-17) already DEFINEd for a compatible
+    // (and the other indexed documents, T-17/PR 7) already DEFINEd for a compatible
     // object type — a parenthesised name is handled by the argument branch
     // above. The verbs whose analyzer enforces a real name (MISSING_NAME)
     // do not accept a '*' pattern here.
@@ -4433,7 +4538,7 @@ mod tests {
             .expect("GHOST must still be hinted");
         assert!(
             d.message
-                .contains("this script or the other open documents"),
+                .contains("this script or the other indexed documents"),
             "{}",
             d.message
         );
@@ -4458,7 +4563,7 @@ mod tests {
         assert!(
             md.contains("sibling.mqsc")
                 && md.contains("line 8")
-                && md.contains("another open document"),
+                && md.contains("another workspace document"),
             "{md}"
         );
         // without the sibling it falls back to the plain "not DEFINEd" text
@@ -5048,5 +5153,191 @@ mod tests {
         // a param without a rule carries no annotation
         let p = e.params.iter().find(|p| p.name == "DESCR").unwrap();
         assert!(!doc_for(m, p, "QLOCAL").contains("Availability"));
+    }
+
+    // ---------- review fix batch 1 (REVIEW_31-10-2026.md) ----------
+
+    fn diags(text: &str) -> Vec<Diagnostic> {
+        let m = Model::load();
+        let tree = parse(text);
+        let uri = Url::parse("file:///fixture.mqsc").unwrap();
+        analyze(text, &tree, m, &uri, &Definitions::default())
+    }
+
+    #[test]
+    fn f1_star_kind_params_take_their_group() {
+        // Every Star-kind parameter in the model is CMDSCOPE, and its real-world
+        // spellings are CMDSCOPE(SYSTEM) / CMDSCOPE(*). Before the fix the
+        // group had no owner and earned "Unexpected `( … )` group" (error[4]).
+        assert_eq!(
+            codes("ALTER QLOCAL(A) CMDSCOPE(SYSTEM)\n"),
+            Vec::<i32>::new()
+        );
+        assert_eq!(codes("ALTER QLOCAL(A) CMDSCOPE(*)\n"), Vec::<i32>::new());
+        assert_eq!(codes("DEFINE QLOCAL(B) CMDSCOPE(*)\n"), Vec::<i32>::new());
+        // the bare (ungrouped) form stays rejected — that is not valid MQSC:
+        // the '*' has no place, and CMDSCOPE itself is left value-less
+        assert!(has("ALTER QLOCAL(A) CMDSCOPE *\n", CODE_UNKNOWN_PARAM));
+        assert!(has("ALTER QLOCAL(A) CMDSCOPE *\n", CODE_BAD_VALUE));
+    }
+
+    #[test]
+    fn f5_superseded_pending_word_is_flushed() {
+        // DESCR never got its group, but MAXDEPTH(9) used to swallow the
+        // pending slot so silently that the command came out clean.
+        let want = "Parameter DESCR was given without its value — write \
+                    DESCR('some text'); the value belongs between parentheses.";
+        let ds = diags("ALTER QLOCAL(A) DESCR MAXDEPTH(9)\n");
+        let msgs: Vec<&str> = ds.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(msgs, vec![want], "{msgs:?}");
+        // the neighbor shape that already worked keeps its single, identical
+        // report (REPLACE is a DEFINE flag; ALTER QLOCAL has no REPLACE)
+        let ds = diags("DEFINE QLOCAL(Q1) DESCR REPLACE\n");
+        let msgs: Vec<&str> = ds.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(msgs, vec![want], "{msgs:?}");
+    }
+
+    #[test]
+    fn f6_tabs_inside_strings_and_comments_are_data() {
+        // live corpus proof: dmpmqcfg MC2P.mqsc:538 / MC3D.mqsc:291
+        assert!(!has("DEFINE QLOCAL(A) DESCR('a\tb')\n", CODE_LEXICAL));
+        assert!(!has("* comment\ttext\nDEFINE QLOCAL(A)\n", CODE_LEXICAL));
+        // word-position tabs keep the warning — there the message is true
+        assert!(has("DEFINE\tQLOCAL(A)\n", CODE_LEXICAL));
+        // and a tab before the closing quote (outside the string) too
+        assert!(has("DEFINE QLOCAL(A) DESCR('a')\t\n", CODE_LEXICAL));
+    }
+
+    #[test]
+    fn f7_val_form_values_are_name_sites() {
+        // hint 12 already saw TARGET='BOQ'; navigation must agree (the AGENTS
+        // invariant: all name-resolution paths join through the same sites).
+        let text = "DEFINE QALIAS(A) TARGET='BOQ'\n";
+        let tree = parse(text);
+        let m = Model::load();
+        let idx = object_index(text, &tree, m);
+        let site = idx
+            .sites
+            .iter()
+            .find(|s| s.name == "BOQ")
+            .unwrap_or_else(|| {
+                panic!(
+                    "sites: {:?}",
+                    idx.sites.iter().map(|s| &s.name).collect::<Vec<_>>()
+                )
+            });
+        assert!(
+            site.defines.is_none(),
+            "a NAME= value site is a reference, not a DEFINE"
+        );
+        assert!(site.quoted, "the site keeps its string quoting");
+    }
+
+    #[test]
+    fn f10_first_word_is_first_in_document_order() {
+        // the stack DFS used to push children left-to-right and pop from the
+        // top, returning the LAST word of a multi-word subtree
+        let text = "ALTER QLOCAL(A) MAXDEPTH(9)\n";
+        let tree = parse(text);
+        let cmd = tree.root_node().named_child(0).unwrap();
+        assert_eq!(
+            first_word(cmd, text.as_bytes()).as_deref(),
+            Some("QLOCAL"),
+            "must return the first word after the verb, not MAXDEPTH or A"
+        );
+    }
+
+    #[test]
+    fn f11_continuation_hint_covers_the_verb_slot() {
+        let want = "'DESCR' is not a command; it is a parameter. If this line \
+                    continues the command above, end the previous line with '+' or '-'";
+        // the classic forgotten-`+`: parameter word in the VERB slot
+        let d = diags("DEFINE QLOCAL(A) DESCR('x')\nDESCR xyz\n")
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)))
+            .expect("verb-slot spelling must earn the continuation hint");
+        assert_eq!(d.message, want);
+        // the object-slot spelling keeps the identical message
+        let d = diags("DEFINE QLOCAL(A) DESCR('x')\nxyz DESCR\n")
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_CONT)))
+            .expect("object-slot spelling must keep the continuation hint");
+        assert_eq!(d.message, want);
+    }
+
+    #[test]
+    fn f2_name_equals_word_binds_the_value() {
+        // The grammar used to reduce `NAME=` to a word with an EMPTY value
+        // list whenever a word followed, so `TARGET=NOPE` degraded to two
+        // loose words (bogus code 4 + code 5, value lost). Integer/string/
+        // wildcard values already bound — only the word form regressed; the
+        // mandatory value list fixes exactly that arm.
+        assert_eq!(codes("ALTER QLOCAL(A) DESCR=hello\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER QLOCAL(A) MAXDEPTH=9\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER QLOCAL(A) CMDSCOPE=*\n"), Vec::<i32>::new());
+        // a dangling word value now speaks through hint 12, not errors 4/5
+        assert_eq!(
+            codes("DEFINE QALIAS(A) TARGET=NOPE\n"),
+            vec![CODE_UNDEFINED_OBJECT]
+        );
+        // …and a DEFINEd sibling silences it (same join as the group form)
+        let text = "DEFINE QALIAS(A) TARGET=BOQ\n";
+        let tree = parse(text);
+        let uri = Url::parse("file:///fixture.mqsc").unwrap();
+        let ds = analyze(text, &tree, Model::load(), &uri, &sibling_defining("BOQ"));
+        assert!(ds.is_empty(), "{:?}", ds.iter().map(|d| &d.message));
+        // a bare `NAME=` with no value is AMQ8405I on the oracle (probed
+        // 10.0.1): the local syntax error plus the pending-word report.
+        let ds = diags("ALTER QLOCAL(A) DESCR=\n");
+        let cs: Vec<i32> = ds
+            .iter()
+            .filter_map(|d| match d.code {
+                Some(lsp::NumberOrString::Number(c)) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            cs.contains(&CODE_PARSE) && cs.contains(&CODE_BAD_VALUE),
+            "{cs:?}"
+        );
+    }
+
+    #[test]
+    fn m1_set_params_silence_the_extractor_optional_artifacts() {
+        // DISPLAY SBSTATUS(*) and RESET CLUSTER(CL1) are complete, valid
+        // MQSC — but the extractor read the dotted diagrams' unbracketed
+        // SUBTYPE/QMID rows as must-give, so each drew a code 9 "usually
+        // given parameter" warning with an empty `X()` example. The
+        // overlay's set_params optional fixes make them silent, and the
+        // one true positive keeps its exact message (flag kinds render
+        // bare `X`, never `X()` — example_shape).
+        assert_eq!(codes("DISPLAY SBSTATUS(*)\n"), Vec::<i32>::new());
+        assert_eq!(codes("RESET CLUSTER(CL1)\n"), Vec::<i32>::new());
+        let d = diags("MOVE QLOCAL(A)\n")
+            .into_iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_MISSING_REQUIRED)))
+            .expect("MOVE QLOCAL must keep its code 9");
+        assert_eq!(
+            d.message,
+            "MOVE QLOCAL is usually given parameter TOQLOCAL — expected something like \
+             TOQLOCAL(NAME)"
+        );
+    }
+
+    #[test]
+    fn m2_trace_diagram_values_are_accepted() {
+        // CLASS/IFCID carried railroad placeholder words ('integer',
+        // 'integer:integer', 'ifcid') as enum members, so the diagrams'
+        // own spellings warned. The set_params kind fixes accept the real
+        // shapes — class numbers, m:n ranges, IFCID numbers, and the
+        // ALTER TRACE diagram's IFCID(*) — while junk still speaks:
+        // CLASS(BOGUS) keeps its code 5.
+        assert_eq!(codes("START TRACE(2) IFCID(18)\n"), Vec::<i32>::new());
+        assert_eq!(codes("START TRACE CLASS(01)\n"), Vec::<i32>::new());
+        assert_eq!(codes("START TRACE CLASS(01:03)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE IFCID(*)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE IFCID(12345)\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER TRACE CLASS(02)\n"), Vec::<i32>::new());
+        assert!(codes("START TRACE CLASS(BOGUS)\n").contains(&CODE_BAD_VALUE));
     }
 }

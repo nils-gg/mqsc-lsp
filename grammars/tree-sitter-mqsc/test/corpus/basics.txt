@@ -602,3 +602,21 @@ DEFINE QLOCAL(A) DESCR('x') -
       (value
         (string)))
     (word)))
+================================================================================
+z/OS NAME=value binds the value like the group form (F2)
+================================================================================
+
+DEFINE QALIAS(X) TARGET=NOPE
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (value
+      (word))))

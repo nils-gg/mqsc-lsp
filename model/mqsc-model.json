@@ -3995,7 +3995,7 @@
       "name": "DEFPRESP",
       "kind": "enum",
       "values": [
-       "! SYNC",
+       "SYNC",
        "ASYNC"
       ],
       "default": null,
@@ -4511,7 +4511,7 @@
       "values": [
        "ENABLED",
        "DISABLED",
-       "! SYNC",
+       "SYNC",
        "ASYNC"
       ],
       "default": null,
@@ -5040,7 +5040,7 @@
       "name": "DEFPRESP",
       "kind": "enum",
       "values": [
-       "! SYNC",
+       "SYNC",
        "ASYNC"
       ],
       "default": null,
@@ -15945,7 +15945,7 @@
       "values": [
        "QUEUE",
        "HANDLE",
-       "! OPENTYPE(ALL)",
+       "OPENTYPE(ALL)",
        "OPENTYPE ( INPUT )",
        "OPENTYPE ( OUTPUT )"
       ],
@@ -16045,7 +16045,7 @@
       "values": [
        "QUEUE",
        "HANDLE",
-       "! OPENTYPE(ALL)",
+       "OPENTYPE(ALL)",
        "OPENTYPE ( INPUT )",
        "OPENTYPE ( OUTPUT )"
       ],
@@ -16692,7 +16692,7 @@
       "name": "DURABLE",
       "kind": "enum",
       "values": [
-       "! ALL",
+       "ALL",
        "NO",
        "YES"
       ],

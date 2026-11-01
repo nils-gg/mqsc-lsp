@@ -73,11 +73,42 @@ def file_uri(p):
     return "file://" + p
 
 
+SESSIONS = []
+
+import atexit
+
+
+def _cleanup():
+    """T9: every exit path — including a raised assertion mid-session —
+    kills any still-live server, removes its log, and deletes the temp
+    workspace."""
+    for s in SESSIONS:
+        try:
+            if s.proc.poll() is None:
+                s.proc.kill()
+                s.proc.wait(timeout=5)
+        except Exception:
+            pass  # already reaped by shutdown(), or wedged beyond killing
+        try:
+            os.remove(s.log)
+        except OSError:
+            pass
+    shutil.rmtree(WS, ignore_errors=True)
+
+
+atexit.register(_cleanup)
+
+
 class Session:
     """One server process over stdio, with a buffered LSP framer."""
 
     def __init__(self, tag, scan_enabled, cross_file=None):
         self.tag = tag
+        # T9 (REVIEW 2026-10-31): registered for atexit cleanup the moment
+        # it exists — a mid-script crash used to leave the server process
+        # and the temp workspace behind (shutdown() only runs on the
+        # happy path).
+        SESSIONS.append(self)
         self.log = os.path.join(tempfile.gettempdir(), f"mqsc-wssmoke-{tag}-{os.getpid()}.log")
         if os.path.exists(self.log):
             os.remove(self.log)
@@ -170,6 +201,18 @@ class Session:
                 return None
             if m.get("id") == rid:
                 return m
+
+    def must_result(self, method, params, label):
+        """(arrived, result). A timed-out request FAILS loudly: the None
+        it would otherwise return is indistinguishable from a legitimate
+        null/empty result, and silently satisfies every negative check
+        (REVIEW T1/T4 gate). Callers AND the arrival flag into their
+        condition."""
+        m = self.request(method, params)
+        if m is None:
+            check(f"{label}: response for {method}", False, "request timed out")
+            return False, None
+        return True, m.get("result")
 
     def notify(self, method, params):
         self._send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -304,11 +347,12 @@ print("\n== navigation defaults to the edited document ==")
 # L2 COL28: the name inside TARGET(WS.SHARED). WS.SHARED is DEFINEd only in
 # the closed defs.mqsc, so with crossFileNavigation off (the default) the
 # jump must NOT leave the buffer — even though the index knows the DEFINE.
-m = A.request("textDocument/definition", {"textDocument": {"uri": OPEN_URI},
-                                          "position": {"line": 2, "character": NAME_CH}})
-res = (m or {}).get("result")
+arrived, res = A.must_result("textDocument/definition",
+                             {"textDocument": {"uri": OPEN_URI},
+                              "position": {"line": 2, "character": NAME_CH}},
+                             "definition default scope")
 check("definition does not jump to the closed file by default",
-      res is None, str(res)[:120])
+      arrived and res is None, str(res)[:120])
 # but the buffer's OWN DEFINE still resolves (HERE, defined on L0)
 m = A.request("textDocument/definition", {"textDocument": {"uri": OPEN_URI},
                                           "position": {"line": 0, "character": 14}})
@@ -407,9 +451,11 @@ check("changed file: the new name replaced it in the index",
 os.remove(late)
 A.did_change_watched_files([(late, 3)])  # deleted
 check("deleted file: settled (republish observed)", A.settled_diags(OPEN_URI) is not None)
-names = {s["name"] for s in ((A.request("workspace/symbol", {"query": "WS.LATER"}) or {})
-                            .get("result") or [])}
-check("deleted file: its DEFINE is gone from the index", not names, str(sorted(names)))
+arrived, res = A.must_result("workspace/symbol", {"query": "WS.LATER"},
+                             "deleted file symbol lookup")
+names = {s["name"] for s in (res or [])}
+check("deleted file: its DEFINE is gone from the index", arrived and not names,
+      str(sorted(names)))
 
 # an event below an excluded directory must not smuggle the file in
 os.makedirs(os.path.join(WS, "target"), exist_ok=True)
@@ -418,9 +464,11 @@ with open(sneak, "w") as f:
     f.write("DEFINE QLOCAL(WS.FROMTARGET)\n")
 A.did_change_watched_files([(sneak, 1)])
 A.settled_diags(OPEN_URI)  # nothing changes, so this is only a quiet-window barrier
-names = {s["name"] for s in ((A.request("workspace/symbol", {"query": "WS.FROMTARGET"}) or {})
-                            .get("result") or [])}
-check("watched events honour the exclude list", not names, str(sorted(names)))
+arrived, res = A.must_result("workspace/symbol", {"query": "WS.FROMTARGET"},
+                             "exclude-list symbol lookup")
+names = {s["name"] for s in (res or [])}
+check("watched events honour the exclude list", arrived and not names,
+      str(sorted(names)))
 
 print("\n== PR 8: a save event for an OPEN buffer does not evict the buffer ==")
 A.did_open(DEFS_URI, BUF_TEXT)
@@ -475,9 +523,11 @@ check("no watcher registration when the index is off (even with the cap on)",
       not B.registrations, str(B.registrations)[:120])
 check("without the scan the closed DEFINE is invisible again",
       any("WS.SHARED" in m2 for m2 in flagged_b))
-m = B.request("workspace/symbol", {"query": "WS."})
-names_b = {s["name"] for s in ((m or {}).get("result") or [])}
-check("workspace/symbol sees only the open buffer", not names_b, str(sorted(names_b)))
+arrived, res = B.must_result("workspace/symbol", {"query": "WS."},
+                             "session B symbol lookup")
+names_b = {s["name"] for s in (res or [])}
+check("workspace/symbol sees only the open buffer", arrived and not names_b,
+      str(sorted(names_b)))
 B.shutdown()
 
 shutil.rmtree(WS, ignore_errors=True)

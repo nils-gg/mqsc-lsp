@@ -75,8 +75,19 @@ module.exports = grammar({
           repeat(
             choice(
               // z/OS console / CSQUTIL form: NAME=value, the value running to
-              // a blank or comma separator.
-              seq(optional($._gap), $.word, '=', optional($._value_list)),
+              // a blank or comma separator. The value list is MANDATORY
+              // (F2): with `optional(...)` here, the LR conflict between
+              // shifting a following word into the list and reducing the
+              // empty list resolved in favour of the reduce, so `TARGET=NOPE`
+              // degraded to two loose words and the `=` vanished — every
+              // value-less `=` shape parsed, every real NAME=word shape
+              // silently lost its value binding. With the list required, a
+              // word/integer/string/wildcard value after `=` is forced into
+              // a `value` node exactly like the group form (the server's
+              // Item::Val paths already consume it), and a bare `NAME=` with
+              // nothing after it becomes an ERROR — which is what real MQ
+              // does with it (AMQ8405I, checked on the 10.0.1 oracle).
+              seq(optional($._gap), $.word, '=', $._value_list),
               seq(optional($._gap), $.word),
               seq(optional($._gap), $.argument),
               // bare wildcard as a "parameter": DISPLAY QLOCAL (*) *

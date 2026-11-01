@@ -133,7 +133,7 @@ function resolveServer(cfg) {
 		error:
 			'The mqsc-lsp server binary was not found on PATH or in its usual ' +
 			'install directories (~/.local/bin, /usr/local/bin, /opt/homebrew/bin, ' +
-			'%LOCALAPPDATA%\\Programs\\mqsc-lsp).',
+			'/usr/bin; on Windows also %LOCALAPPDATA%\\Programs\\mqsc-lsp).',
 	};
 }
 
@@ -148,13 +148,21 @@ function showServerHelp(reason) {
 		)
 		.then((choice) => {
 			if (choice === 'Open Release Page') {
-				vscode.env.openExternal(vscode.Uri.parse(RELEASES_URL));
+				return vscode.env.openExternal(vscode.Uri.parse(RELEASES_URL));
 			} else if (choice === 'Open Settings') {
-				vscode.commands.executeCommand(
+				return vscode.commands.executeCommand(
 					'workbench.action.openSettings',
 					'mqsc.server.path'
 				);
 			}
+			return undefined;
+		})
+		// V3: a refused openExternal/executeCommand must not die as an
+		// unhandled rejection — the guidance flow stays loud to the end.
+		.catch((err) => {
+			vscode.window.showErrorMessage(
+				`mqsc-lsp: ${reason} (${err && err.message ? err.message : err})`
+			);
 		});
 }
 
@@ -256,7 +264,16 @@ function activate(context) {
 						client = buildClient(next.command, nextCfg);
 						return client.start();
 					})
-					.catch(() => {});
+					// V3: the old catch(() => {}) swallowed every restart
+					// failure — the user had flipped a setting and got
+					// silence instead of the failing reason.
+					.catch((err) => {
+						vscode.window.showErrorMessage(
+							'mqsc-lsp: restarting the server after a settings change ' +
+								`failed (${err && err.message ? err.message : err}). ` +
+								'Check mqsc.server.path, then reload the window.'
+						);
+					});
 				return;
 			}
 			// Severity changes need no manual push: the `synchronize` block
@@ -265,7 +282,17 @@ function activate(context) {
 		})
 	);
 
-	return client.start();
+	// V3: a failed start surfaces as the resolver-style guidance this
+	// extension is built around, not as an unhandled rejection (VS Code's
+	// own activation-error is a devtools toast most users never see).
+	return client.start().catch((err) => {
+		vscode.window.showErrorMessage(
+			'mqsc-lsp: the language server failed to start ' +
+				`(${err && err.message ? err.message : err}). Check ` +
+				'mqsc.server.path or download a prebuilt release binary.'
+		);
+		return undefined;
+	});
 }
 
 function deactivate() {

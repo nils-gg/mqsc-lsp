@@ -189,6 +189,35 @@ struct CommandPatch {
     /// drops the invented value list.
     #[serde(default)]
     flag_params: Vec<String>,
+    /// parameters the extraction gets WRONG in a way `flag_params` cannot
+    /// express: per-field corrections merged into the existing parameter
+    /// (M-1: `optional` flipped for extractor `optional:false` artifacts;
+    /// M-2: kind/value replacements for debris enums). Only fields present
+    /// in the entry are touched — the (real) description survives a
+    /// kind-only fix. A kind change must say what the values become
+    /// (`"values": []` to clear an enum entirely), because `kind_of` reads
+    /// values for `flag` (`flag`+values ⇒ enum).
+    #[serde(default)]
+    set_params: Vec<ParamSet>,
+    /// (N2) any member not named above — the loader accepts `_`-prefixed
+    /// keys as documented metadata and complains about the rest, so a typo
+    /// in a patch can no longer sit silently unread.
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
+
+/// One `set_params` entry: name plus the fields to overwrite (all optional).
+#[derive(Debug, Deserialize)]
+struct ParamSet {
+    name: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    values: Option<Vec<String>>,
+    #[serde(default)]
+    optional: Option<bool>,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,6 +270,17 @@ impl RawModel {
                 eprintln!("mqsc-model overlay: patch target {key:?} not in base model, skipped");
                 continue;
             };
+            // (N2) `_`-prefixed members are documented metadata; anything
+            // else the structs did not name means a typo'd operation that
+            // would otherwise sit silently unread.
+            for k in p.extra.keys() {
+                if !k.starts_with('_') {
+                    eprintln!(
+                        "mqsc-model overlay: unknown patch member {k:?} in {key:?} \
+                         (only `_`-prefixed keys are metadata) — ignored"
+                    );
+                }
+            }
             if let Some(list) = p.replace_params {
                 entry.params = list;
             }
@@ -261,6 +301,29 @@ impl RawModel {
                 }
                 if slot.kind != "enum" {
                     slot.kind = "enum".into();
+                }
+            }
+            // per-field corrections (M-1/M-2) before the flag demotions, so
+            // a flag_params target can still have its last word be flag
+            for ps in p.set_params {
+                let Some(slot) = entry.params.iter_mut().find(|e| e.name == ps.name) else {
+                    eprintln!(
+                        "mqsc-model overlay: set_params target {key} {} not in model, skipped",
+                        ps.name
+                    );
+                    continue;
+                };
+                if let Some(k) = ps.kind {
+                    slot.kind = k;
+                }
+                if let Some(v) = ps.values {
+                    slot.values = v;
+                }
+                if let Some(o) = ps.optional {
+                    slot.optional = o;
+                }
+                if let Some(d) = ps.description {
+                    slot.description = d;
                 }
             }
             // applied last: a demoted parameter must end kind=flag with the
@@ -413,6 +476,39 @@ fn norm_syn(s: &str) -> String {
 fn norm_attr(a: &str) -> Option<&str> {
     let w = a.split('(').next().unwrap_or("").trim();
     (!w.is_empty() && !w.chars().any(|c| c.is_whitespace())).then_some(w)
+}
+
+/// (m-5) Load-time clamp of hover prose, mirroring `extract_model.py`'s
+/// `clamp_doc`/`DOC_LIMIT` exactly: cut after the last sentence end (or
+/// colon-led list break) inside the first 1000 chars, hard-cut when no
+/// break sits past 200. The JSON sections keep the full text — only the
+/// in-memory card is clamped — so the longest hover cards (a curated
+/// `param_docs` entry ran to 6547 chars, >6× every other hover budget)
+/// cannot blow up a tooltip.
+const PROSE_LIMIT: usize = 1000;
+
+fn clamp_prose(s: &str) -> String {
+    if s.chars().count() <= PROSE_LIMIT {
+        return s.to_string();
+    }
+    // char-cut position candidates, mirroring the python rfind(". ", 0, CAP)…
+    let mut cut = 0usize; // chars
+    let mut idx = 0usize;
+    let chars: Vec<char> = s.chars().collect();
+    while idx < chars.len().min(PROSE_LIMIT) {
+        if matches!(chars[idx], '.' | '?' | '!' | ':')
+            && chars.get(idx + 1) == Some(&' ')
+            && idx + 1 > cut
+        {
+            cut = idx + 1;
+        }
+        idx += 1;
+    }
+    if cut > 200 {
+        chars[..cut].iter().collect()
+    } else {
+        chars[..PROSE_LIMIT].iter().collect()
+    }
 }
 
 fn kind_of(p: &RawParam) -> (ValueKind, bool) {
@@ -579,7 +675,21 @@ impl Model {
                 known_params,
                 known_attrs,
                 verbs: VERBS,
-                param_docs: raw.param_docs,
+                // (m-5) hover prose is clamped at load, mirroring the
+                // extractor's clamp_doc: the JSON sections keep the full
+                // reference text, no card may exceed the prose budget.
+                param_docs: raw
+                    .param_docs
+                    .into_iter()
+                    .map(|(name, docs)| {
+                        (
+                            name,
+                            docs.into_iter()
+                                .map(|(ctx, text)| (ctx, clamp_prose(&text)))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
                 name_max: raw.name_max,
                 mandatory: raw.mandatory,
                 availability: raw.availability,
@@ -826,7 +936,14 @@ impl Model {
                 if d.is_empty() {
                     continue;
                 }
-                if ctx.contains(object) {
+                // (m-9) the section-header context must NAME the object as
+                // a word, not merely contain it as a substring: "Parameter
+                // descriptions for DISPLAY CLUSQMGR" used to scope-match
+                // object QMGR and hand ALTER QMGR DESCR the wrong card.
+                if ctx
+                    .split_whitespace()
+                    .any(|w| w.trim_end_matches(['.', ',']) == object)
+                {
                     return Some(d.as_str());
                 }
                 if any.is_none() {
@@ -1181,12 +1298,22 @@ mod tests {
         // the anti-fabrication guard for `value_docs`: every curated
         // meaning must key on a value the merged model actually accepts
         // on its scoped commands — an enum value in the union of the
-        // scoped enums, a number for a numeric parameter, or a value on
-        // a definition the model does not constrain at all (the 2011
-        // extraction left some parameter kinds as free strings)
+        // scoped enums, or a number for a numeric parameter. (m-6: there
+        // used to be a third lane for "definitions the model leaves
+        // unconstrained"; its single inhabitant, AUTHTYPE NONE, proved
+        // to be exactly the kind of fabrication the hatch could never
+        // see — AUTHTYPE(NONE) is documented nowhere (2011 reference and
+        // current 9.2–9.4 IBM docs list only CRLLDAP/OCSP/IDPWOS/
+        // IDPWLDAP) and the 10.0.1 oracle rejects it with AMQ8405I. The
+        // value was deleted and the hatch closed with it.)
         let m = model();
         let table = m.all_value_docs();
         assert_eq!(table.len(), 35, "value_docs rule count moved");
+        assert_eq!(
+            table.iter().map(|r| r.values.len()).sum::<usize>(),
+            128,
+            "value_docs value count moved"
+        );
         for r in table {
             let hits = m.scoped_params(&r.param, &r.obj);
             assert!(!hits.is_empty(), "{}: no scoped command", r.param);
@@ -1200,14 +1327,9 @@ mod tests {
                 matches!(p.kind, ValueKind::Integer)
                     || enum_of(p).iter().any(|x| x.eq_ignore_ascii_case("integer"))
             });
-            let unconstrained = hits
-                .iter()
-                .any(|(_, p)| matches!(p.kind, ValueKind::Str | ValueKind::Name | ValueKind::Free));
             for v in r.values.keys() {
                 assert!(
-                    union.contains(v)
-                        || (numeric && v.chars().all(|c| c.is_ascii_digit()))
-                        || unconstrained,
+                    union.contains(v) || (numeric && v.chars().all(|c| c.is_ascii_digit())),
                     "value_docs {}/{}: {v} is not a model value ({union:?})",
                     r.param,
                     r.obj.join(",")
@@ -1423,9 +1545,28 @@ mod tests {
 
     #[test]
     fn model_loaded_nontrivially() {
+        // N6: the old body proved the binary parsed *a* JSON, not *this*
+        // data — assert the merged model actually carries its substance.
         let m = model();
         assert!(m.all_verbs().contains(&"DEFINE"));
         assert!(m.all_verbs().len() >= 15);
+        // 128 reference commands + 20 curated modern ones, all resolved
+        assert_eq!(m.entries.len(), 148);
+        assert!(
+            m.resolve("SET", Some("AUTHREC")).is_some(),
+            "overlay command vanished"
+        );
+        assert!(m.resolve("START", Some("TRACE")).is_some());
+        // curated sections all reached the loaded model
+        assert_eq!(m.name_max_len("QLOCAL"), Some(48));
+        assert!(!m.mandatory_rules("qalias").is_empty());
+        assert_eq!(m.all_value_docs().len(), 35);
+        assert_eq!(m.generic_values.len(), 16);
+        assert!(
+            m.param_docs.contains_key("PROFILE"),
+            "overlay param_docs vanished"
+        );
+        assert!(m.value_doc("AUTHTYPE", "AUTHINFO", "IDPWOS").is_some());
     }
 
     #[test]
@@ -1550,5 +1691,387 @@ mod tests {
             f.ends_with("installation might have changed it."),
             "MAXDEPTH footnote dangles: {f:?}"
         );
+    }
+
+    // ------------------------------------------------ 2026-10-31 review, batch 3
+
+    #[test]
+    fn m1_code9_eligible_set_is_exactly_move_qlocal() {
+        // analysis.rs reports code 9 when exactly one parameter is
+        // required-and-missing (CMDSCOPE/QSGDISP excluded). Before the
+        // M-1 `set_params` fixes, DISPLAY SBSTATUS→SUBTYPE and
+        // RESET CLUSTER→QMID qualified from extractor `optional:false`
+        // artifacts on valid MQSC; the merged model now collapses onto
+        // the one true positive. A second member means some model change
+        // marked a parameter must-give — verify it is not an artifact.
+        let m = model();
+        let eligible: Vec<(&str, &str, &str)> = m
+            .entries
+            .iter()
+            .filter_map(|e| {
+                let req: Vec<&Param> = e
+                    .params
+                    .iter()
+                    .filter(|p| !p.optional && !matches!(p.name.as_str(), "CMDSCOPE" | "QSGDISP"))
+                    .collect();
+                (req.len() == 1).then(|| (e.verb, e.object, req[0].name.as_str()))
+            })
+            .collect();
+        assert_eq!(eligible, vec![("MOVE", "QLOCAL", "TOQLOCAL")]);
+    }
+
+    #[test]
+    fn m2_no_placeholder_debris_survives_as_enum_member() {
+        // M-2: the dotted-diagram parser captured railroad PLACEHOLDER
+        // words as enum members — CLASS ended up enumerating
+        // 'integer:integer', IFCID enumerating 'ifcid' — so the diagrams'
+        // own spelling (CLASS(18), IFCID(18)) was flagged. kind_of
+        // consumes a bare 'integer'/'string'/'name' member as
+        // alt_integer/Str fallback, so whatever reaches an Enum must be a
+        // keyword: MQ word characters only (a lone '*' is the one
+        // accepted non-word — DISPLAY CONN TYPE and PSID enumerate it),
+        // and never the parameter's own name.
+        let m = model();
+        for e in &m.entries {
+            for p in &e.params {
+                if let ValueKind::Enum(vs) = &p.kind {
+                    for v in vs {
+                        assert!(
+                            v == "*"
+                                || v.chars().all(|c| {
+                                    c.is_ascii_uppercase()
+                                        || c.is_ascii_digit()
+                                        || matches!(
+                                            c,
+                                            '_' | '/' | '$' | '#' | '%' | '.' | '@' | '-'
+                                        )
+                                }),
+                            "{} {}: enum member {v:?} of {} is placeholder debris",
+                            e.verb,
+                            e.object,
+                            p.name
+                        );
+                        assert!(
+                            !v.eq_ignore_ascii_case(&p.name),
+                            "{} {}: {} enumerates itself ({v:?})",
+                            e.verb,
+                            e.object,
+                            p.name
+                        );
+                    }
+                }
+            }
+        }
+        // the repaired parameters themselves (overlay set_params)
+        assert!(matches!(
+            param("START", "TRACE", "IFCID").kind,
+            ValueKind::Integer
+        ));
+        assert!(matches!(
+            param("START", "TRACE", "CLASS").kind,
+            ValueKind::Integer
+        ));
+        assert!(matches!(
+            param("STOP", "TRACE", "CLASS").kind,
+            ValueKind::Integer
+        ));
+        assert!(matches!(
+            param("DISPLAY", "TRACE", "CLASS").kind,
+            ValueKind::Integer
+        ));
+        assert!(matches!(
+            param("ALTER", "TRACE", "CLASS").kind,
+            ValueKind::Integer
+        ));
+        assert!(matches!(
+            param("ALTER", "TRACE", "IFCID").kind,
+            ValueKind::Star
+        ));
+    }
+
+    #[test]
+    fn m3_every_flag_params_target_lands_as_a_flag() {
+        // The loader only eprintlns when a flag_params name misses (m-3:
+        // a base regeneration could reintroduce an invented pooled enum
+        // under the ≥6-value guard threshold and nothing else notices).
+        // Strict pin: every one of the 53 demotion targets exists in the
+        // merged model and loads as kind=Flag with the values gone.
+        let raw: serde_json::Value = serde_json::from_str(OVERLAY_JSON).unwrap();
+        let patch = raw["patch"].as_object().unwrap();
+        let mut n = 0;
+        for (key, ops) in patch {
+            let Some(list) = ops.get("flag_params") else {
+                continue;
+            };
+            let mut words = key.split(' ');
+            let (verb, object) = (words.next().unwrap(), words.next().unwrap());
+            for t in list.as_array().unwrap() {
+                let t = t.as_str().unwrap();
+                let p = param(verb, object, t);
+                assert!(
+                    matches!(p.kind, ValueKind::Flag),
+                    "flag_params target {key} {t} is {:?}, not Flag",
+                    p.kind
+                );
+                n += 1;
+            }
+        }
+        assert_eq!(n, 53, "flag_params demotion population moved");
+    }
+
+    #[test]
+    fn m4_overlay_additions_never_wipe_base_docs() {
+        // add_params REPLACES the base parameter entry wholesale, and the
+        // review found 22 field copies where curated entries silently
+        // dropped the base description or its footnotes (m-4). From now
+        // on any add_params that shadows a base parameter must carry at
+        // least the base text and at least as many footnotes.
+        let base: serde_json::Value = serde_json::from_str(MODEL_JSON).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(OVERLAY_JSON).unwrap();
+        for (key, ops) in raw["patch"].as_object().unwrap() {
+            let Some(adds) = ops.get("add_params") else {
+                continue;
+            };
+            let mut words = key.split(' ');
+            let (verb, object) = (words.next().unwrap(), words.next().unwrap());
+            let cmd = &base["commands"][verb][object];
+            for a in adds.as_array().unwrap() {
+                let name = a["name"].as_str().unwrap();
+                let Some(bp) = cmd["params"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|x| x["name"].as_str() == Some(name))
+                else {
+                    continue; // genuinely new parameter: nothing to wipe
+                };
+                let doc = |v: &serde_json::Value| {
+                    v.get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("")
+                        .chars()
+                        .count()
+                };
+                let fns = |v: &serde_json::Value| {
+                    v.get("footnotes")
+                        .and_then(|f| f.as_array())
+                        .map_or(0, |a| a.len())
+                };
+                assert!(
+                    doc(a) >= doc(bp),
+                    "{key} {name}: overlay carries {} chars, base has {}",
+                    doc(a),
+                    doc(bp)
+                );
+                assert!(
+                    fns(a) >= fns(bp),
+                    "{key} {name}: overlay carries {} footnotes, base has {}",
+                    fns(a),
+                    fns(bp)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn m5_hover_prose_is_clamped_at_load() {
+        // The extractor caps parameter descriptions at DOC_LIMIT=1000,
+        // but the param_docs JSON section keeps the full reference text —
+        // so hover cards ran to 6547 chars (m-5). Model::load clamps
+        // prose now; pin that no card exceeds the budget AND that raw
+        // JSON really contains longer text (else the guard is vacuous).
+        let m = model();
+        for (name, docs) in &m.param_docs {
+            for (ctx, text) in docs {
+                assert!(
+                    text.chars().count() <= PROSE_LIMIT,
+                    "param_docs {name} ({ctx}) is {} chars, over the {PROSE_LIMIT} budget",
+                    text.chars().count()
+                );
+            }
+        }
+        let raw: serde_json::Value = serde_json::from_str(MODEL_JSON).unwrap();
+        let long = raw["param_docs"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|l| l.as_array().unwrap())
+            .filter(|e| e[1].as_str().map_or(0, |s| s.chars().count()) > PROSE_LIMIT)
+            .count();
+        assert!(long > 0, "no raw doc exceeds the budget — clamp untested");
+    }
+
+    #[test]
+    fn m7_curated_param_docs_keys_resolve() {
+        // m-7: PERSIST/PSCLRSYS/PSCTLCASE/PSMSGID hovered fabricated
+        // DEFINE SUB parameters (absent from the 2011 reference AND the
+        // 10.0.1 oracle railroad), propped up by matching replace_params
+        // entries; both halves were deleted as matched pairs. Guard the
+        // curated table's own contract: every overlay param_docs key can
+        // actually be reached by a hovered word through the same
+        // strip_no candidate chain param_doc uses — a key no command
+        // word maps to is a dead entry.
+        let m = model();
+        let mut words: std::collections::HashSet<String> = m.known_params.clone();
+        words.extend(m.known_attrs.iter().cloned());
+        for w in words.clone() {
+            words.insert(strip_no(&w));
+        }
+        let raw: serde_json::Value = serde_json::from_str(OVERLAY_JSON).unwrap();
+        for name in raw["param_docs"].as_object().unwrap().keys() {
+            let up = name.to_ascii_uppercase();
+            assert!(
+                words.contains(&up) || words.contains(&strip_no(&up)),
+                "overlay param_docs key {name} matches no parameter or attribute word"
+            );
+        }
+        for dead in ["PERSIST", "PSCLRSYS", "PSCTLCASE", "PSMSGID"] {
+            assert!(
+                !m.param_docs.contains_key(dead),
+                "fabricated DEFINE SUB doc {dead} is back"
+            );
+        }
+    }
+
+    #[test]
+    fn m9_param_doc_contexts_match_as_whole_words() {
+        // m-9: context matching was substring-based, so the CLUSQMGR
+        // section scoped onto object QMGR and ALTER QMGR DESCR showed
+        // "Description" (the clusmgr connection text). The whole-word
+        // join pins both DESCR cards to their own sections.
+        let m = model();
+        assert_eq!(m.param_doc("DESCR", "QMGR"), Some("Description."));
+        assert_eq!(m.param_doc("DESCR", "CLUSQMGR"), Some("Description"));
+    }
+
+    #[test]
+    fn m12_name_max_covers_log_and_pins_the_absences() {
+        // m-12 verdicts: the LOG page spells out a 44-character name
+        // limit, so it must be in the table; the other three suspects
+        // are deliberately absent — BUFFPOOL's "name" is a numeric id
+        // (0-15), COMMINFO postdates the 2011 reference (no page, hence
+        // no documented limit), and the 10.0.1 oracle accepted a 72-char
+        // SUB name, so SUB is not capped at 48. Absent types are never
+        // flagged by code 13 — pin that this stays deliberate.
+        let m = model();
+        assert_eq!(m.name_max_len("LOG"), Some(44));
+        assert_eq!(m.name_max_len("BUFFPOOL"), None);
+        assert_eq!(m.name_max_len("COMMINFO"), None);
+        assert_eq!(m.name_max_len("SUB"), None);
+    }
+
+    #[test]
+    fn n1_availability_rules_are_pinned_and_resolve() {
+        // command_availability has a length pin and a
+        // targets-must-resolve guard; the parameter-level `availability`
+        // section had neither (N1).
+        let m = model();
+        assert_eq!(
+            m.availability.len(),
+            1,
+            "curated parameter availability moved"
+        );
+        let r = &m.availability[0];
+        assert_eq!(r.param, "QSGDISP");
+        assert_eq!(r.platform.as_deref(), Some("zos"));
+        assert!(m.known_params.contains("QSGDISP"), "QSGDISP vanished");
+        assert!(m
+            .entries
+            .iter()
+            .any(|e| e.params.iter().any(|p| p.name == "QSGDISP")));
+        assert_eq!(
+            m.all_command_availability().len(),
+            52,
+            "command availability moved"
+        );
+    }
+
+    #[test]
+    fn n2_patch_members_are_all_known_operations() {
+        // N2: a typo'd operation inside a patch entry used to sit silently
+        // unread (serde ignored unknown members). The loader now complains
+        // about anything that is not an operation or `_`-prefixed metadata;
+        // this guard keeps that error path silent on shipped data —
+        // including inside add_params / set_params entries.
+        let raw: serde_json::Value = serde_json::from_str(OVERLAY_JSON).unwrap();
+        const PATCH_OPS: [&str; 5] = [
+            "add_params",
+            "replace_params",
+            "extend_enum",
+            "flag_params",
+            "set_params",
+        ];
+        const RAW_PARAM_FIELDS: [&str; 8] = [
+            "name",
+            "kind",
+            "values",
+            "default",
+            "optional",
+            "has_default",
+            "footnotes",
+            "description",
+        ];
+        const SET_FIELDS: [&str; 5] = ["name", "kind", "values", "optional", "description"];
+        let unknown = |keys: &serde_json::Map<String, serde_json::Value>, known: &[&str]| {
+            keys.keys()
+                .filter(|k| !known.contains(&k.as_str()) && !k.starts_with('_'))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        for (key, ops) in raw["patch"].as_object().unwrap() {
+            let u = unknown(ops.as_object().unwrap(), &PATCH_OPS);
+            assert!(u.is_empty(), "patch {key} carries unknown member(s) {u:?}");
+            for a in ops
+                .get("add_params")
+                .and_then(|v| v.as_array())
+                .map_or(&[][..], |a| &a[..])
+            {
+                let u = unknown(a.as_object().unwrap(), &RAW_PARAM_FIELDS);
+                assert!(
+                    u.is_empty(),
+                    "add_params entry in {key} has unknown field(s) {u:?}"
+                );
+            }
+            for a in ops
+                .get("set_params")
+                .and_then(|v| v.as_array())
+                .map_or(&[][..], |a| &a[..])
+            {
+                let u = unknown(a.as_object().unwrap(), &SET_FIELDS);
+                assert!(
+                    u.is_empty(),
+                    "set_params entry in {key} has unknown field(s) {u:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn n5_strip_no_candidates_are_pinned() {
+        // N5: param_doc also hovers the NO-prefixed form of a name via
+        // strip_no, whose NOT branch is the naive "T"+rest. NOTIFY thus
+        // produces the nonsense candidate TIFY and NONE the candidate NE
+        // — harmless (they simply miss the name table), but load-bearing
+        // for hover lookups, so pin the exact behavior against silent
+        // "fixes".
+        assert_eq!(strip_no("NOTIFY"), "TIFY");
+        assert_eq!(strip_no("NONE"), "NE");
+        assert_eq!(strip_no("NOREPLACE"), "REPLACE");
+        assert_eq!(strip_no("NO"), "");
+        assert_eq!(strip_no("AUTHCTL"), "AUTHCTL");
+        // and the quirk's real face: TIFY matches nothing at all, while
+        // NE IS a live key (the filter-operator docs) — the NE candidate
+        // only ever surfaces because param_doc tries the exact word
+        // first, and NONE has its own entries. Pin that precedence so a
+        // reordering can never show a hoverer of NONE the "not equal"
+        // filter card.
+        let m = model();
+        assert!(
+            !m.param_docs.contains_key("TIFY"),
+            "junk candidate TIFY became a doc key"
+        );
+        assert!(m.param_docs.contains_key("NE"), "NE is a real key");
+        let d = m.param_doc("NONE", "QMGR").expect("NONE hovers");
+        assert!(!d.contains("Not equal"), "NONE hovered as NE: {d:?}");
     }
 }
