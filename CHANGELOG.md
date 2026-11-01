@@ -8,6 +8,12 @@ and its `package-lock.json`, and is released by pushing a `vX.Y.Z` tag
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-01
+
+`WHERE(...)` filter clauses now parse and validate — every rule proven
+line-by-line against a live IBM MQ 10.0.1 `runmqsc` — and a CI privacy
+guard pins the regression-corpus handling rule.
+
 ### Added
 
 - `tools/check_privacy.py` (also a CI gate): the dmpmqcfg regression
