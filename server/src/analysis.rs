@@ -5254,4 +5254,41 @@ mod tests {
             .expect("object-slot spelling must keep the continuation hint");
         assert_eq!(d.message, want);
     }
+
+    #[test]
+    fn f2_name_equals_word_binds_the_value() {
+        // The grammar used to reduce `NAME=` to a word with an EMPTY value
+        // list whenever a word followed, so `TARGET=NOPE` degraded to two
+        // loose words (bogus code 4 + code 5, value lost). Integer/string/
+        // wildcard values already bound — only the word form regressed; the
+        // mandatory value list fixes exactly that arm.
+        assert_eq!(codes("ALTER QLOCAL(A) DESCR=hello\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER QLOCAL(A) MAXDEPTH=9\n"), Vec::<i32>::new());
+        assert_eq!(codes("ALTER QLOCAL(A) CMDSCOPE=*\n"), Vec::<i32>::new());
+        // a dangling word value now speaks through hint 12, not errors 4/5
+        assert_eq!(
+            codes("DEFINE QALIAS(A) TARGET=NOPE\n"),
+            vec![CODE_UNDEFINED_OBJECT]
+        );
+        // …and a DEFINEd sibling silences it (same join as the group form)
+        let text = "DEFINE QALIAS(A) TARGET=BOQ\n";
+        let tree = parse(text);
+        let uri = Url::parse("file:///fixture.mqsc").unwrap();
+        let ds = analyze(text, &tree, Model::load(), &uri, &sibling_defining("BOQ"));
+        assert!(ds.is_empty(), "{:?}", ds.iter().map(|d| &d.message));
+        // a bare `NAME=` with no value is AMQ8405I on the oracle (probed
+        // 10.0.1): the local syntax error plus the pending-word report.
+        let ds = diags("ALTER QLOCAL(A) DESCR=\n");
+        let cs: Vec<i32> = ds
+            .iter()
+            .filter_map(|d| match d.code {
+                Some(lsp::NumberOrString::Number(c)) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            cs.contains(&CODE_PARSE) && cs.contains(&CODE_BAD_VALUE),
+            "{cs:?}"
+        );
+    }
 }
