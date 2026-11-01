@@ -211,6 +211,12 @@ const CODE_MISSING_MANDATORY: i32 = 14;
 /// or platform (`mqsc.targetVersion` / `mqsc.platform`). Never fires when no
 /// target is configured.
 const CODE_NOT_IN_TARGET: i32 = 15;
+/// A WHERE filter clause breaks the oracle-proven filter rules: exactly one
+/// `filter-keyword operator filter-value` triple (boolean composition and
+/// parenthesised groups are AMQ8569E), an operator from the 12 filter
+/// operators, and a keyword the command can display. See
+/// `check_where_filter`.
+const CODE_WHERE_FILTER: i32 = 16;
 
 /// Friendly settings key for a diagnostic code (see README Configuration).
 pub fn diag_name(code: i32) -> &'static str {
@@ -230,6 +236,7 @@ pub fn diag_name(code: i32) -> &'static str {
         CODE_NAME_TOO_LONG => "NAME_TOO_LONG",
         CODE_MISSING_MANDATORY => "MISSING_MANDATORY",
         CODE_NOT_IN_TARGET => "NOT_IN_TARGET",
+        CODE_WHERE_FILTER => "WHERE_FILTER",
         _ => "OTHER",
     }
 }
@@ -1934,6 +1941,269 @@ fn check_command(
             }
         }
     }
+
+    check_where_filter(m, e, &items[idx..], src, lines, d);
+}
+
+/// Filter operators of a WHERE clause: the 12 words the 2011 reference's
+/// operator sections and the 10.0.1 oracle's AMQ8427I railroad agree on
+/// exactly. LIKE is NOT among them: the reference's LIKE operator is
+/// spelled LK inside a filter (LIKE(...) on the oracle is AMQ8569E).
+const FILTER_OPERATORS: [&str; 12] = [
+    "LT", "GT", "EQ", "NE", "LE", "GE", "LK", "NL", "CT", "EX", "CTG", "EXG",
+];
+
+/// Reference-stated filter exclusions ("You cannot use … as a filter
+/// keyword"); oracle-confirmed (AMQ8569E).
+const NOT_FILTER_KEYWORDS: [&str; 2] = ["CMDSCOPE", "QSGDISP"];
+
+/// Code 16: the WHERE clauses of one command. The grammar deliberately
+/// over-parses this clause (nested parens, boolean words and extra values
+/// lex fine — exactly like the real MQ parser, which then reports
+/// AMQ8569E), so the rules live here. Oracle-proven on distributed MQ
+/// 10.0.1 and matching the 2011 reference: WHERE takes exactly ONE
+/// `filter-keyword operator filter-value` triple (blank- or comma-
+/// separated — the only group in MQSC where blanks separate values);
+/// AND/OR/NOT and parenthesised groups are NOT supported (one condition
+/// per command); the operator must be one of the twelve; the keyword must
+/// name a displayable attribute of the object. The keyword vocabulary is
+/// deliberately the SUPERSET `params ∪ attrs`: the oracle's true filterable
+/// set is narrower (LISTENER `STATUS`, QSTATUS `TYPE` and flag attributes
+/// like `CLUSINFO` are proven non-filterable and no document enumerates
+/// the real set), and a superset can only miss a bad keyword — never flag
+/// a good one. Same stance as every other model-backed check here.
+/// When WHERE is not even a parameter of the command, the unknown-param
+/// walker already told the whole story; piling on would be noise.
+fn check_where_filter(
+    m: &Model,
+    e: &Command,
+    items: &[Item<'_>],
+    src: &[u8],
+    lines: &Lines,
+    d: &mut Diags,
+) {
+    if !e.by_name.contains_key("WHERE") {
+        return;
+    }
+    let mut i = 0usize;
+    while i < items.len() {
+        i += 1;
+        if matches!(&items[i - 1], Item::Word(n)
+            if node_text(*n, src).eq_ignore_ascii_case("WHERE"))
+        {
+            // A bare WHERE (no group) is the pending-value machinery's report.
+            if let Some(Item::Arg(g)) = items.get(i) {
+                validate_where_group(m, e, *g, src, lines, d);
+            }
+        }
+    }
+}
+
+fn validate_where_group(
+    m: &Model,
+    e: &Command,
+    group: Node<'_>,
+    src: &[u8],
+    lines: &Lines,
+    d: &mut Diags,
+) {
+    let vals = value_nodes(group);
+    if vals.is_empty() {
+        return; // the empty-group report covers `WHERE()`
+    }
+    let grange = lines.range(group.start_byte(), group.end_byte());
+    let triple = "WHERE takes exactly one condition: \
+                  `WHERE(filter-keyword operator filter-value)` — for example \
+                  `WHERE(MAXDEPTH GT 10)`.";
+
+    // Parenthesised sub-groups: anonymous '(' / ')' children beyond the
+    // group's own two delimiters. In practice tree-sitter's recovery wraps
+    // the extra parens in ERROR nodes before this sees them, so most
+    // nested-paren inputs take the has_error gate (or plain code 1) below;
+    // this branch stays as the better-worded answer whenever recovery does
+    // hand the parens over directly.
+    let nested = {
+        let mut cur = group.walk();
+        group
+            .children(&mut cur)
+            .filter(|k| matches!(k.kind(), "(" | ")"))
+            .count()
+            > 2
+    };
+    if nested {
+        d.push(
+            grange,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "{triple} Parentheses inside the filter group are not a filter syntax; \
+                 a real queue manager answers AMQ8569E for them."
+            ),
+        );
+        return;
+    }
+    // Any other parse error inside the group (the grammar's filter content
+    // is plain values, so an ERROR node here means genuinely unfilter-like
+    // garbage): code 1 already explains it — a triple/operator message on
+    // top of that would just contradict the parser.
+    if group.has_error() {
+        return;
+    }
+
+    // A conjunction word anywhere past the first triple: positions 0..=2
+    // are the triple itself (an operator-position mistake is the
+    // operator's own diagnosis), and `WHERE(DESCR EQ AND)` — where AND is
+    // merely the value — must not be read as boolean syntax.
+    let boolean = vals.iter().skip(3).find(|v| {
+        matches!(
+            node_text(**v, src).to_ascii_uppercase().as_str(),
+            "AND" | "OR" | "NOT"
+        )
+    });
+    if let Some(b) = boolean {
+        d.push(
+            lines.range(group.start_byte(), b.end_byte()),
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "A WHERE filter cannot combine conditions. {triple} A condition joined \
+                 with AND, OR or NOT (or grouped in parentheses) is AMQ8569E on a real \
+                 queue manager — run one DISPLAY per condition instead."
+            ),
+        );
+        return;
+    }
+    match vals.len() {
+        1 => d.push(
+            grange,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "{triple} This filter has only the keyword — the operator and the \
+                 filter value are missing."
+            ),
+        ),
+        2 => {
+            let op = node_text(vals[1], src).to_ascii_uppercase();
+            let msg = if FILTER_OPERATORS.contains(&op.as_str()) {
+                format!("The filter operator '{op}' needs a filter value. {triple}")
+            } else {
+                format!(
+                    "{triple} This filter has only two parts, and '{op}' is not one of \
+                     the filter operators ({}).",
+                    FILTER_OPERATORS.join(", ")
+                )
+            };
+            d.push(grange, DiagnosticSeverity::ERROR, CODE_WHERE_FILTER, msg);
+        }
+        n if n >= 4 => {
+            let extra = node_text(vals[3], src);
+            d.push(
+                lines.range(vals[3].start_byte(), group.end_byte()),
+                DiagnosticSeverity::ERROR,
+                CODE_WHERE_FILTER,
+                format!(
+                    "{triple} Everything from '{extra}' on is a second value, a second \
+                     condition or a boolean word — a real queue manager rejects it with \
+                     AMQ8569E. Issue one DISPLAY per condition."
+                ),
+            );
+        }
+        _ => {} // exactly three: the keyword/operator checks below
+    }
+    if vals.len() != 3 {
+        return;
+    }
+
+    // keyword
+    let kw = node_text(vals[0], src).to_ascii_uppercase();
+    let kw_is_word = vals[0]
+        .named_child(0)
+        .map(|c| c.kind() == "word")
+        .unwrap_or(false);
+    let kw_range = lines.range(vals[0].start_byte(), vals[0].end_byte());
+    if !kw_is_word {
+        d.push(
+            kw_range,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!("A WHERE filter-keyword must be a bare attribute name, not '{kw}'."),
+        );
+    } else if NOT_FILTER_KEYWORDS.contains(&kw.as_str()) {
+        d.push(
+            kw_range,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "'{kw}' cannot be used as a filter keyword — the MQSC reference rules \
+                 it out for every DISPLAY command."
+            ),
+        );
+    } else if !m.known_params.contains(&kw) && !m.known_attrs.contains(&kw) {
+        // NOT the resolved command's own vocabulary: DISPLAY QUEUE (the
+        // synonym family) legitimately carries a thinner page than the
+        // real QLOCAL, and the oracle filters `WHERE(CCSID EQ …)` on it
+        // fine — a per-command set false-flagged CCSID/MAXDEPTH/CURDEPTH
+        // the moment the probe tried it. Every displayable attribute is
+        // a DEFINE/ALTER parameter SOMEWHERE in the model (that is what
+        // "displayable" means), so the global word set is a superset of
+        // what any object can filter: it can miss a bad keyword (the
+        // oracle's true per-type set is narrower still — STATUS on
+        // LISTENER, TYPE on QSTATUS, flag attributes like CLUSINFO), but
+        // never invent a false one.
+        d.push(
+            kw_range,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "'{kw}' is not a known MQSC attribute name — a WHERE filter-keyword \
+                 must name an attribute the {} command can display.",
+                e.object
+            ),
+        );
+    }
+
+    // operator
+    let op_node = vals[1];
+    let op = node_text(op_node, src).to_ascii_uppercase();
+    let op_range = lines.range(op_node.start_byte(), op_node.end_byte());
+    if op_node.named_child(0).map(|c| c.kind()) == Some("word") {
+        if !FILTER_OPERATORS.contains(&op.as_str()) {
+            if op == "LIKE" {
+                d.push_fixes(
+                    op_range,
+                    DiagnosticSeverity::ERROR,
+                    CODE_WHERE_FILTER,
+                    "LIKE is not a filter operator — inside a WHERE clause, matching a \
+                     generic string is spelled LK: `WHERE(DESCR LK 'pattern')`. A real \
+                     queue manager answers AMQ8569E for LIKE."
+                        .into(),
+                    vec!["LK".into()],
+                );
+            } else {
+                d.push(
+                    op_range,
+                    DiagnosticSeverity::ERROR,
+                    CODE_WHERE_FILTER,
+                    format!(
+                        "'{op}' is not a filter operator; the twelve are {}.",
+                        FILTER_OPERATORS.join(", ")
+                    ),
+                );
+            }
+        }
+    } else {
+        d.push(
+            op_range,
+            DiagnosticSeverity::ERROR,
+            CODE_WHERE_FILTER,
+            format!(
+                "The WHERE filter operator must be one of {} — this position holds a \
+                 value, not an operator.",
+                FILTER_OPERATORS.join(", ")
+            ),
+        );
+    }
 }
 
 /// The literal behind a name token: a quoted string is unwrapped and `''`
@@ -2413,6 +2683,22 @@ pub fn hover(
         owner.map(|(w, _)| w).unwrap_or_default()
     } else {
         return None;
+    };
+    // A WHERE clause's FIRST token is the filter-keyword — an attribute
+    // name, not a value of WHERE. Hovering it should show THAT attribute's
+    // card, not WHERE's (the operators and the value legitimately ride on
+    // the WHERE card, matching the oracle's three-part grammar).
+    let pname = if pname == "WHERE" && node.kind() == "word" {
+        match arg {
+            Some(g)
+                if value_nodes(g).first().map(|v| v.start_byte()) == Some(node.start_byte()) =>
+            {
+                node_text(node, src).to_ascii_uppercase()
+            }
+            _ => pname,
+        }
+    } else {
+        pname
     };
     if pname.is_empty() {
         return None;
@@ -5339,5 +5625,153 @@ mod tests {
         assert_eq!(codes("ALTER TRACE IFCID(12345)\n"), Vec::<i32>::new());
         assert_eq!(codes("ALTER TRACE CLASS(02)\n"), Vec::<i32>::new());
         assert!(codes("START TRACE CLASS(BOGUS)\n").contains(&CODE_BAD_VALUE));
+    }
+
+    // ---------------------------------------------------------- WHERE clause
+    //
+    // Truth table proven line-by-line against a live IBM MQ 10.0.1 queue
+    // manager (runmqsc): accepted forms return data (AMQ8409I), rejected
+    // forms answer AMQ8569E/AMQ8405I. The LSP never flags what the oracle
+    // accepts; what the oracle rejects gets the WHERE_FILTER code where
+    // the message adds more than the generic parse error does.
+
+    #[test]
+    fn where_accepted_spellings_are_silent() {
+        // every one of these RUNS on the real queue manager:
+        for t in [
+            "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10)\n", // the canonical triple
+            "DISPLAY QLOCAL(*) where(maxdepth gt 10)\n", // lowercase
+            "DISPLAY QLOCAL(*) WHERE(CCSID, EQ, 1208)\n", // comma separators
+            "DISPLAY QLOCAL(*) WHERE (MAXDEPTH GT 10)\n", // blank before the group
+            "DISPLAY QLOCAL(*) WHERE(DESCR LK 'a*')\n",  // quoted LK pattern
+            "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10,)\n", // trailing comma
+            "DISPLAY QLOCAL(*) WHERE(DESCR EQ AND)\n",   // AND as a plain VALUE
+            "DISPLAY QLOCAL(Q1) WHEREVER\n",             // not a WHERE at all
+            "DISPLAY QLOCAL(WHERE)\n",                   // WHERE as an object name
+            "DISPLAY QLOCAL(A) DESCR('x') WHERE(CCSID NE 1)\n", // after other params
+        ] {
+            assert_eq!(codes(t), Vec::<i32>::new(), "oracle-valid: {t}");
+        }
+    }
+
+    #[test]
+    fn where_boolean_combination_is_flagged() {
+        // AMQ8569E on the oracle: one condition per WHERE, always.
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10 AND CCSID EQ 1208)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("cannot combine conditions"));
+    }
+
+    #[test]
+    fn where_nested_parens_never_pass_silently() {
+        // The oracle answers AMQ8569E; here the parser's error recovery
+        // owns the shape (see _filter_content in grammar.js), so code 1
+        // speaks — either way the user sees a diagnostic, never silence.
+        let t = "DISPLAY QLOCAL(*) WHERE((MAXDEPTH GT 10))\n";
+        assert!(codes(t).contains(&CODE_PARSE), "{:?}", codes(t));
+    }
+
+    #[test]
+    fn where_like_gets_the_lk_quickfix() {
+        // LIKE is the reference's LIKE operator, but inside a filter the
+        // spelling is LK (LIKE(...) is AMQ8569E); the fix is one click.
+        let t = "DISPLAY QLOCAL(*) WHERE(DESCR LIKE TEST)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        let diags = analyze(
+            t,
+            &parse(t),
+            Model::load(),
+            &Url::parse("file:///t.mqsc").unwrap(),
+            &Definitions::default(),
+        );
+        let d = diags
+            .iter()
+            .find(|d| d.code == Some(lsp::NumberOrString::Number(CODE_WHERE_FILTER)))
+            .expect("LIKE must be flagged");
+        assert!(d.message.contains("LIKE is not a filter operator"));
+        assert_eq!(
+            d.data.as_ref().and_then(|v| v.get("quickfixes")),
+            Some(&serde_json::json!(["LK"])),
+            "{:?}",
+            d.data
+        );
+    }
+
+    #[test]
+    fn where_operator_and_keyword_vocabulary() {
+        // unknown operator in an otherwise perfect triple:
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH ZZ 10)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("'ZZ' is not a filter operator"));
+        // unknown keyword:
+        let t = "DISPLAY QLOCAL(*) WHERE(BOGUSATTR GT 1)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("BOGUSATTR"));
+        // reference-stated exclusions (both AMQ8569E on the oracle):
+        for kw in ["CMDSCOPE", "QSGDISP"] {
+            let t = format!("DISPLAY QLOCAL(*) WHERE({kw} EQ X)\n");
+            assert!(
+                codes(&t).contains(&CODE_WHERE_FILTER),
+                "{kw} slipped through"
+            );
+        }
+        // synonym-gate false-positive guard: CCSID/MAXDEPTH are not
+        // DISPLAY QLOCAL parameters by name, yet the filter keywords are
+        // QUEUE-family attributes — and they must stay silent (this exact
+        // shape false-flagged once, via the QUEUE synonym).
+        assert_eq!(
+            codes("DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10)\n"),
+            Vec::<i32>::new()
+        );
+    }
+
+    #[test]
+    fn where_incomplete_and_overlong_triples() {
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("only the keyword"));
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("needs a filter value"));
+        // a fourth value is AMQ8569E on the oracle:
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10 20)\n";
+        assert!(codes(t).contains(&CODE_WHERE_FILTER));
+        assert!(msg(t, CODE_WHERE_FILTER).contains("second value"));
+    }
+
+    #[test]
+    fn where_lands_in_the_regular_parameter_machinery() {
+        // WHERE belongs to DISPLAY/CLEAR family commands only: ALTER flags
+        // it as an unknown parameter (code 4, oracle AMQ8404W)...
+        let t = "ALTER QLOCAL(Q1) WHERE(MAXDEPTH GT 1)\n";
+        assert!(codes(t).contains(&CODE_UNKNOWN_PARAM));
+        // ...a repeated WHERE is the ordinary duplicate (code 6)...
+        let t = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10) WHERE(CCSID EQ 1)\n";
+        assert!(codes(t).contains(&CODE_DUPLICATE));
+        // ...and an empty group is the ordinary empty-group warning (5).
+        let t = "DISPLAY QLOCAL(*) WHERE()\n";
+        assert!(codes(t).contains(&CODE_BAD_VALUE));
+    }
+
+    #[test]
+    fn where_keyword_hover_shows_the_attribute_card() {
+        // The first filter token is an ATTRIBUTE name, not a WHERE value:
+        // hovering MAXDEPTH must show MAXDEPTH's card, hovering the
+        // operator falls back to the ordinary WHERE parameter card.
+        let text = "DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10)\n";
+        let m = Model::load();
+        let tree = parse(text);
+        let md_of = |h: Hover| match h.contents {
+            HoverContents::Markup(mk) => mk.value,
+            _ => panic!("expected markup"),
+        };
+        let md = md_of(
+            hover(text, &tree, m, Position::new(0, 26), &Default::default()).expect("keyword"),
+        );
+        assert!(md.contains("MAXDEPTH"), "{md}");
+        let md = md_of(
+            hover(text, &tree, m, Position::new(0, 34), &Default::default()).expect("operator"),
+        );
+        assert!(md.contains("WHERE"), "{md}");
     }
 }

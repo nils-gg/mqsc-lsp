@@ -8,6 +8,35 @@ and its `package-lock.json`, and is released by pushing a `vX.Y.Z` tag
 
 ## [Unreleased]
 
+### Fixed
+
+- `WHERE` filter clauses on DISPLAY/CLEAR (`WHERE(MAXDEPTH GT 10)`) died
+  as parse errors: the grammar's groups accepted only comma-separated
+  values, but the MQ filter is one blank-separated
+  `keyword operator value` triple, so the common spelling was flagged and
+  the whole command degraded into cascading nonsense ("`MAXDEPTH` is not
+  a command"). `argument` now carries a second, blank-separated content
+  alternative (`_filter_content`) — deliberately inside the same rule:
+  every separate-rule/external-token/precedence variant was built and
+  measured, and each either failed to parse the triple or shifted LALR
+  error recovery so unrelated broken regions swallowed the following
+  command. Comma separators, a trailing comma and blanks before the
+  group are accepted spellings, like the 10.0.1 queue manager's.
+- There was no WHERE semantics at all: new diagnostic **code 16
+  `WHERE_FILTER`** enforces the single-condition triple (AND/OR/NOT and
+  parenthesised groups are AMQ8569E on a real queue manager — one
+  DISPLAY per condition), the twelve filter operators
+  (`LT GT EQ NE LE GE LK NL CT EX CTG EXG` — `LIKE` is not one; that
+  diagnostic carries a one-click `LK` fix), and the filter-keyword
+  vocabulary (a displayable attribute of the object family; reference-
+  stated `CMDSCOPE`/`QSGDISP` excluded). Hovering WHERE's first token
+  shows that attribute's card. Every rule was proven line-by-line
+  against a live IBM MQ 10.0.1 `runmqsc`; the accepted-forms battery is
+  false-positive-free and the dmpmqcfg corpus (zero WHERE usages)
+  changed only in three unterminated-string regions those commands are
+  themselves AMQ8405I on the oracle — with CORPUS-E's recovery improved
+  (HEAD's parser swallowed the following clean `DEFINE CHANNEL`).
+
 ## [0.2.0] - 2026-11-01
 
 The full sweep of the 2026-10-31 review (47 findings). Every behavior fix

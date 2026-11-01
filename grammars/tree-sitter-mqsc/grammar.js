@@ -52,6 +52,14 @@ module.exports = grammar({
   // extra it parses cleanly and the language server flags it (code 7).
   extras: ($) => [/[ \t\r]+/, '+', $.dangling_continuation, $.comment],
 
+  // A single-value group `(A)` fits BOTH `argument` content alternatives
+  // (a one-item comma list vs a one-value filter). Declared rather than
+  // resolved because the two derivations emit the IDENTICAL tree —
+  // `(argument (value (word)))` — so whichever the parser keeps, no
+  // consumer can tell. Undeclared, the generator refuses to build the
+  // table ("conflict: `argument`, `_value_item`").
+  conflicts: ($) => [[$.argument, $._value_item], [$.argument, $._value_element]],
+
   externals: ($) => [
     $.comment,
     $._continuation,
@@ -98,10 +106,36 @@ module.exports = grammar({
         )
       ),
 
-    // A parenthesised argument group: (value, value...). The first group of
-    // a command usually carries the object name; later groups carry parameter
-    // values and pair positionally with the word that precedes them.
-    argument: $ => seq('(', optional($._value_list), ')'),
+    // A parenthesised argument group. The first group of a command usually
+    // carries the object name; later groups carry parameter values and pair
+    // positionally with the word that precedes them. Two content shapes:
+    // the ordinary comma-led list, or the WHERE clause's blank-separated
+    // filter triple.
+    //
+    // Both alternatives live INSIDE this one rule on purpose. A separate
+    // `filter_argument` rule reached through its own command-level arm puts
+    // the parser in front of an unresolvable decision after any command
+    // word: reduce the word into the ordinary word arm, or keep it open for
+    // a filter group. The table resolves that reduce-first (the NAME= arm
+    // below documents the same resolution), so `WHERE(A GT 1)` never parses
+    // — and worse, the added states shift LALR error recovery enough that
+    // an unrelated broken region (CORPUS-E.mqsc's unterminated string in the
+    // dmpmqcfg corpus) starts swallowing the NEXT command's verb. Widening
+    // `argument` adds no fork at all: every group still lands in this rule
+    // exactly as before and the content itself picks the alternative —
+    // `(A B)` only fits filter_content, `(A, B)` only fits the comma list.
+    argument: $ => seq('(', optional(choice($._value_list, $._filter_content)), ')'),
+
+    // The WHERE clause's content: `filter-keyword operator filter-value`
+    // written BLANK-separated, oracle-proven on 10.0.1 (AMQ8409I — the
+    // filter really ran). A plain comma list rejects this (`DESCR(A B)` is
+    // AMQ8405I), which is why it needs its own content rule. The grammar
+    // accepts any flat run of values; the server's model-backed validator
+    // enforces the triple, the twelve operator words and the keyword set.
+    // Deliberately NO commas (the other alternative owns those), NO line
+    // continuation and NO nested parens — the oracle answers AMQ8569E for
+    // both, so falling into the generic parse-error path matches MQ.
+    _filter_content: $ => repeat1(choice(',', $.value)),
 
     // Value lists tolerate repeated commas ("multiple commas are equivalent
     // to a single comma") and line continuations after commas/values.
