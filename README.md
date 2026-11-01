@@ -350,8 +350,9 @@ python3 tools/workspace_index_smoke.py           # assertive session against a t
                                                  # create/change/delete reindexing, and the
                                                  # enabled=false gate — exit != 0 on FAIL
 python3 tools/check_model.py                     # model is byte-identical to extractor output
-                                                 # (skips cleanly without the IBM reference)
-python3 tools/check_versions.py                  # Cargo.toml and package.json declare one version
+                                                 # (LOCAL-ONLY guarantee: without the gitignored
+                                                 # IBM reference it skips, and CI never has it)
+python3 tools/check_versions.py                  # Cargo.toml, package.json and package-lock.json declare one version
 node tools/extension_resolve_test.js             # extension finds its server the documented way
 cd server
 echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol

@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: release versions agree (Cargo.toml vs extension package.json)
         run: python3 tools/check_versions.py
@@ -37,12 +37,12 @@ jobs:
       - name: extension settings plumbing behavior (stubbed vscode host)
         run: node tools/extension_config_test.js
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -121,7 +121,15 @@ jobs:
         run: python3 tools/workspace_index_smoke.py server/target/release/mqsc-lsp
 
       - name: model regeneration guard (skips without the IBM reference)
-        run: python3 tools/check_model.py
+        run: |
+          # C4 (REVIEW 2026-10-31): the byte-comparison can NEVER run here —
+          # the IBM reference is copyrighted and gitignored, so this step
+          # always SKIPs on CI. Say it as an annotation instead of letting
+          # the skip scroll by unnoticed: the guard is a local guarantee.
+          if [ ! -f MQSC_ScriptCommandReference.md ]; then
+            echo "::notice title=Model guard is local-only::the IBM reference is absent on CI runners; byte-reproducibility is verified by local runs, not by this job"
+          fi
+          python3 tools/check_model.py
 
       - name: --check CLI end-to-end
         run: |
@@ -145,11 +153,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -169,11 +177,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -194,7 +202,14 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # C3 (REVIEW 2026-10-31): under bash -e, a `tail` on a log that
+          # was never written (failure BEFORE the cargo step — precisely
+          # when the annotation matters most) aborted this script and the
+          # public ::error:: never shipped. Stay tolerant; the publisher
+          # handles the missing file itself.
+          { echo "## cargo test --locked (tail)"; echo '```'
+            tail -c 20000 test-output.log 2>/dev/null \
+              || echo '(no test-output.log: the job failed before cargo test ran)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"
 
   macos:
@@ -202,11 +217,11 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
 
@@ -219,5 +234,12 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          { echo "## cargo test --locked (tail)"; echo '```'; tail -c 20000 test-output.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # C3 (REVIEW 2026-10-31): under bash -e, a `tail` on a log that
+          # was never written (failure BEFORE the cargo step — precisely
+          # when the annotation matters most) aborted this script and the
+          # public ::error:: never shipped. Stay tolerant; the publisher
+          # handles the missing file itself.
+          { echo "## cargo test --locked (tail)"; echo '```'
+            tail -c 20000 test-output.log 2>/dev/null \
+              || echo '(no test-output.log: the job failed before cargo test ran)'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python3 tools/ci_publish_failure.py test-output.log "cargo test --locked"

@@ -324,10 +324,16 @@ DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: a
   runners — linux x86_64, linux aarch64 (`ubuntu-24.04-arm`), windows msvc,
   macos aarch64 + x86_64 (cross on the arm `macos-14` runner) — packages
   the VSIX (`npm ci` + vsce, `package-lock.json` is committed) and
-  publishes one Release with a `SHA256SUMS`; the tag is the version gate:
-  `tools/check_versions.py` fails if tag / Cargo.toml / extension
-  package.json diverge, so a version bump touches all three plus
-  CHANGELOG in one commit. The extension finds its server in
+  publishes one Release with a `SHA256SUMS` covering **every** asset
+  (`demo.gif` is copied from the tagged tree into `dist/`; a post-publish
+  step diffs the live asset list against the checksums both ways, so a
+  manually uploaded or silently dropped asset fails the job). Every
+  `uses:` in both workflows is pinned to a full commit SHA with a `# vN`
+  comment — an upstream tag move cannot change what CI executes. The tag
+  is the version gate: `tools/check_versions.py` fails if tag /
+  Cargo.toml / extension package.json / package-lock.json root entry
+  diverge (the lock joined after R1 found it stranded at 0.1.0), so a
+  version bump touches all four plus CHANGELOG in one commit. The extension finds its server in
   `client/extension.js` `resolveServer` (explicit path honored exactly or
   failing loudly with guidance → PATH → fixed candidate list → release-
   page guidance); that candidate list is documented in three places

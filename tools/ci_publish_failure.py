@@ -9,10 +9,14 @@ on failure, run this tool over it (the full tail still goes to the step
 summary for logged-in readers).
 
 Usage: ci_publish_failure.py <logfile> <label>
-Never fails: a broken digest must not mask the job's real failure.
+Never fails: a broken digest must not mask the job's real failure. A
+missing logfile is its own case (C3, REVIEW 2026-10-31): the job died
+before the tee step produced anything, and the annotation must still
+name the situation instead of an open() traceback.
 """
 import re
 import sys
+from pathlib import Path
 
 
 def digest(text: str) -> str:
@@ -30,8 +34,13 @@ def digest(text: str) -> str:
 
 def main() -> None:
     try:
-        text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
         label = sys.argv[2] if len(sys.argv) > 2 else "failed step"
+        path = Path(sys.argv[1])
+        if not path.is_file():
+            print(f"::error::{label}: no captured log ({path}) — the job "
+                  "failed before this output was recorded")
+            return
+        text = path.read_text(encoding="utf-8", errors="replace")
         blob = digest(text) or text[-3000:]
         blob = re.sub(r"\x1b\[[0-9;]*m", "", blob)  # CARGO_TERM_COLOR=always
         blob = blob.replace("%", "%25").replace("\r", "").replace("\n", "%0A")

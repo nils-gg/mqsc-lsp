@@ -24,7 +24,7 @@ jobs:
     name: tag / Cargo.toml / package.json agree
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: versions agree with the tag
         run: python3 tools/check_versions.py "$GITHUB_REF_NAME"
 
@@ -33,11 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-version
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
       - name: Build release binary
@@ -50,7 +50,7 @@ jobs:
           strip server/target/release/mqsc-lsp
           tar -C server/target/release -czf \
             "mqsc-lsp-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" mqsc-lsp
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: linux-x86_64
           path: mqsc-lsp-*-x86_64-unknown-linux-gnu.tar.gz
@@ -60,11 +60,11 @@ jobs:
     runs-on: ubuntu-24.04-arm
     needs: check-version
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
       - name: Build release binary (native on the arm runner)
@@ -77,7 +77,7 @@ jobs:
           strip server/target/release/mqsc-lsp
           tar -C server/target/release -czf \
             "mqsc-lsp-${GITHUB_REF_NAME}-aarch64-unknown-linux-gnu.tar.gz" mqsc-lsp
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: linux-aarch64
           path: mqsc-lsp-*-aarch64-unknown-linux-gnu.tar.gz
@@ -87,11 +87,11 @@ jobs:
     runs-on: windows-latest
     needs: check-version
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
       - name: Build release binary
@@ -100,9 +100,13 @@ jobs:
       - name: "Package (zip: the Windows convention)"
         shell: pwsh
         run: |
+          # C1 (REVIEW 2026-10-31): no ${{ }} interpolation into the script —
+          # read the env like every other step does. The braces matter: a
+          # hyphen is a legal PowerShell variable character, so bare
+          # $env:GITHUB_REF_NAME-x86_64 would look up a bogus variable name.
           Compress-Archive -Path server\target\release\mqsc-lsp.exe `
-            -DestinationPath "mqsc-lsp-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip"
-      - uses: actions/upload-artifact@v4
+            -DestinationPath "mqsc-lsp-${env:GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: windows-x86_64
           path: mqsc-lsp-*-x86_64-pc-windows-msvc.zip
@@ -112,12 +116,12 @@ jobs:
     runs-on: macos-14
     needs: check-version
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master
         with:
           toolchain: 1.75.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
       # macos-14 is an arm64 runner: aarch64 is native, x86_64 cross-builds
@@ -142,7 +146,7 @@ jobs:
             tar -C "server/target/${arch}-apple-darwin/release" -czf \
               "mqsc-lsp-${GITHUB_REF_NAME}-${arch}-apple-darwin.tar.gz" mqsc-lsp
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: macos
           path: mqsc-lsp-*-apple-darwin.tar.gz
@@ -152,8 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-version
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 20
       - name: Install extension dependencies
@@ -167,7 +171,7 @@ jobs:
       - name: Rename to carry the release tag
         working-directory: editors/vscode/extension
         run: mv mqsc-lsp-vscode-*.vsix "mqsc-lsp-${GITHUB_REF_NAME}-vscode.vsix"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: vscode-vsix
           path: editors/vscode/extension/mqsc-lsp-*-vscode.vsix
@@ -179,17 +183,47 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: dist
           merge-multiple: true
       - name: One checksum file for everything
         run: |
+          # C2 (REVIEW 2026-10-31): v0.1.3 carried a MANUALLY uploaded
+          # demo.gif that this file could not vouch for, which made the
+          # step name a lie. The gif now ships from the tagged tree, so
+          # SHA256SUMS really covers every published asset.
+          cp docs/demo.gif dist/
           cd dist
-          sha256sum mqsc-lsp-* > SHA256SUMS
+          sha256sum * > SHA256SUMS
           cat SHA256SUMS
       - name: GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: dist/*
           generate_release_notes: true
+      - name: Every published asset is checksummed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The other half of C2: after publishing, diff the live asset
+          # list against the checksum file, both directions. A manual
+          # upload (the demo.gif incident) or a silently dropped asset
+          # fails the release job instead of shipping an unverifiable
+          # Release page. LC_ALL=C because sort/comm must agree on the
+          # collation; and $2 (not cut -d' ') because sha256sum separates
+          # hash from name with TWO spaces.
+          { awk '{print $2}' dist/SHA256SUMS; echo SHA256SUMS; } \
+            | LC_ALL=C sort > /tmp/expected
+          gh release view "$GITHUB_REF_NAME" --json assetNames \
+            --jq '.assetNames[]' | LC_ALL=C sort > /tmp/actual
+          extra=$(LC_ALL=C comm -13 /tmp/expected /tmp/actual | tr '\n' ' ')
+          if [ -n "$extra" ]; then
+            echo "::error::release asset(s) not covered by SHA256SUMS: $extra"; exit 1
+          fi
+          lost=$(LC_ALL=C comm -23 /tmp/expected /tmp/actual | tr '\n' ' ')
+          if [ -n "$lost" ]; then
+            echo "::error::SHA256SUMS lists asset(s) missing from the release: $lost"; exit 1
+          fi
+          echo "OK: release assets and SHA256SUMS describe the same set"
