@@ -118,7 +118,7 @@ jobs:
 
   macos:
     name: binaries apple-darwin (x86_64 + aarch64)
-    runs-on: macos-14
+    runs-on: macos-15
     needs: check-version
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -129,7 +129,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: server
-      # macos-14 is an arm64 runner: aarch64 is native, x86_64 cross-builds
+      # macos-15 is an arm64 runner (macos-14 retired 2026-11-02): aarch64 is
+      # native, x86_64 cross-builds
       # against the same SDK (one clang, -arch handled by cargo's target).
       - name: Build both release binaries
         working-directory: server

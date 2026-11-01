@@ -367,7 +367,9 @@ DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: a
 - **PR 10 release/distribution facts** (all enforced, none inferable from
   the code): `release.yml` builds five MSRV-pinned binaries on their own
   runners — linux x86_64, linux aarch64 (`ubuntu-24.04-arm`), windows msvc,
-  macos aarch64 + x86_64 (cross on the arm `macos-14` runner) — packages
+  macos aarch64 + x86_64 (cross on the arm `macos-15` runner — `macos-14`
+  was retired by GitHub on 2026-11-02 and jobs on it die cancelled within
+  seconds; never move release macOS back) — packages
   the VSIX (`npm ci` + vsce, `package-lock.json` is committed) and
   publishes one Release with a `SHA256SUMS` covering **every** asset
   (`demo.gif` is copied from the tagged tree into `dist/`; a post-publish
