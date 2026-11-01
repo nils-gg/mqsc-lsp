@@ -101,10 +101,14 @@ jobs:
       - name: "Package (zip: the Windows convention)"
         shell: pwsh
         run: |
-          # C1 (REVIEW 2026-10-31): no ${{ }} interpolation into the script —
-          # read the env like every other step does. The braces matter: a
-          # hyphen is a legal PowerShell variable character, so bare
-          # $env:GITHUB_REF_NAME-x86_64 would look up a bogus variable name.
+          # C1 (REVIEW 2026-10-31): no expression interpolation into the
+          # script — read the env like every other step does. (Never write
+          # a literal dollar-brace-brace expression here, not even in a
+          # comment: Actions evaluates expressions over the raw file and
+          # an empty one invalidates the whole workflow — PR #1 release
+          # incident.) The braces below matter: a hyphen is a legal
+          # PowerShell variable character, so bare $env:GITHUB_REF_NAME-x86_64
+          # would look up a bogus variable name.
           Compress-Archive -Path server\target\release\mqsc-lsp.exe `
             -DestinationPath "mqsc-lsp-${env:GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
