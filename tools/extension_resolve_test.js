@@ -167,7 +167,17 @@ async function main() {
         0,
         `host is not mqsc-free: PATH still finds ${pathProbe.stdout.trim()}`
     );
+    // ...and no candidate binary pre-exists on the host either — scenario 6
+    // virtualizes exactly these paths, a real one would resolve for the
+    // wrong reason (T8's isolation contract).
+    for (const dir of ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin']) {
+        assert.ok(
+            !fs.existsSync(path.join(dir, 'mqsc-lsp')),
+            `host already ships ${path.join(dir, 'mqsc-lsp')}; scenarios cannot own it`
+        );
+    }
     let scenarios = 0;
+    try {
 
     // 1. nothing anywhere -> guidance, no client
     await freshActivate({ serverPath: undefined });
@@ -246,6 +256,44 @@ async function main() {
     assert.ok(/refused/.test(state.errors[0]), state.errors[0]);
     scenarios += 1;
 
+    // 10. win32 behavior (T8): the resolver's Windows branch IS reachable
+    //     from this host — EXE and candidatePaths() read process.platform
+    //     at (re)load/consult time, so flipping it before the fresh
+    //     require() drives the win32 candidate list for real.
+    const realPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+        process.env.LOCALAPPDATA = '/fake-win/Local';
+        // nothing installed anywhere -> guidance (also proves the win32
+        // PATH probe ('where') misses, which it must on a unix host)
+        await freshActivate({ serverPath: undefined });
+        assert.strictEqual(state.startedWith.length, 0);
+        assert.strictEqual(state.warnings.length, 1);
+        scenarios += 1;
+        // %LOCALAPPDATA%\Programs\mqsc-lsp\mqsc-lsp.exe is probed (the
+        // expected string is the resolver's own path.join expression,
+        // posix-joined on this host — the pin is the LOCATION and the
+        // .exe name, not the separator).
+        const la = path.join(process.env.LOCALAPPDATA, 'Programs', 'mqsc-lsp', 'mqsc-lsp.exe');
+        virtualFiles.add(la);
+        await freshActivate({ serverPath: undefined });
+        assert.deepStrictEqual(state.startedWith, [la],
+            'win32 auto mode must probe %LOCALAPPDATA%\\Programs\\mqsc-lsp');
+        scenarios += 1;
+        // and ~/.local/bin with the Windows exe name as second candidate
+        virtualFiles.clear();
+        const hb = path.join(emptyHome, '.local', 'bin', 'mqsc-lsp.exe');
+        virtualFiles.add(hb);
+        await freshActivate({ serverPath: undefined });
+        assert.deepStrictEqual(state.startedWith, [hb],
+            'win32 auto mode must also probe ~/.local/bin (mqsc-lsp.exe)');
+        virtualFiles.clear();
+        delete process.env.LOCALAPPDATA;
+        scenarios += 1;
+    } finally {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+    }
+
     // --- the four-place sync contract (V1) -------------------------------
     const cand = sourceCandidates();
     assert.deepStrictEqual(
@@ -264,12 +312,19 @@ async function main() {
     assert.ok(errList, 'resolver error text still lists its directories');
     assertCarriesAll('resolver error message', errList[1]);
 
-    process.env.PATH = realPath;
-    process.env.HOME = realHome;
     console.log(
         `PASS: all ${scenarios} resolution scenarios and the four-place ` +
             'candidate sync behave as documented'
     );
+    } finally {
+        // T9 (REVIEW 2026-10-31): env restore and the sandbox removal must
+        // happen on FAIL too — the old tail-only restore leaked a temp dir
+        // (and a hijacked env for the exit path) on every failure.
+        process.env.PATH = realPath;
+        process.env.HOME = realHome;
+        virtualFiles.clear();
+        fs.rmSync(emptyHome, { recursive: true, force: true });
+    }
 }
 
 main().catch((e) => {

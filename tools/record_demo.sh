@@ -30,6 +30,17 @@ if [ "$RECORD" = 1 ]; then
   mkdir -p "$(dirname "$OUT")"
 fi
 
+# T9 (REVIEW 2026-10-31): the trap used to be installed AFTER mktemp and
+# ln -s — a failure in that window leaked the temp dir. Guard the empty
+# WORK, and let cleanup itself never fail under set -e.
+WORK=""
+cleanup() {
+  tmux kill-session -t "$SESS" 2>/dev/null || true
+  [ -n "$WORK" ] && rm -rf "$WORK"
+  return 0
+}
+trap cleanup EXIT
+
 WORK="$(mktemp -d)"
 cp "$DEMO_DIR/fixture.mqsc" "$WORK/demo.mqsc"
 # Stage config and a binary link inside the work dir: whatever gets typed is
@@ -37,8 +48,6 @@ cp "$DEMO_DIR/fixture.mqsc" "$WORK/demo.mqsc"
 # paths — no home paths, no usernames.
 cp "$DEMO_DIR/init.lua" "$WORK/init.lua"
 ln -s "$BIN" "$WORK/mqsc-lsp"
-cleanup() { tmux kill-session -t "$SESS" 2>/dev/null || true; rm -rf "$WORK"; }
-trap cleanup EXIT
 
 P() { sleep "$(awk -v b="$1" -v s="$SCALE" 'BEGIN{printf "%.2f", b*s}')"; }
 S() { tmux send-keys -t "$SESS" "$@"; }     # named keys
@@ -56,8 +65,26 @@ wait_pane() { # wait_pane blurb pattern [pattern...]
     sleep 0.2
   done
 }
-wait_file() { grep -qF -- "$1" "$WORK/demo.mqsc" \
-  || { echo "FAIL: saved file lacks '$1'"; exit 1; }; }
+wait_pane_gone() { # wait_pane_gone blurb pattern  — T6 negative assertion
+  local blurb="$1" pat="$2" cap end=$((SECONDS + 25))
+  while :; do
+    cap="$(tmux capture-pane -p -t "$SESS")"
+    grep -qF -- "$pat" <<<"$cap" || return 0
+    [ "$SECONDS" -lt "$end" ] || { echo "FAIL ($blurb): pane still shows '$pat'"
+      echo "----- pane -----"; echo "$cap"; echo "----------------"; exit 1; }
+    sleep 0.2
+  done
+}
+# T6 (REVIEW 2026-10-31): was a single grep after a fixed sleep — a slow
+# :w flush raced it. Poll to a timeout like wait_pane does.
+wait_file() {
+  local end=$((SECONDS + 15))
+  until grep -qF -- "$1" "$WORK/demo.mqsc" 2>/dev/null; do
+    [ "$SECONDS" -lt "$end" ] \
+      || { echo "FAIL: saved file still lacks '$1' after 15s"; exit 1; }
+    sleep 0.2
+  done
+}
 
 tmux -f "$DEMO_DIR/tmux.demo.conf" new-session -d -s "$SESS" -x "$W" -y "$H"
 
@@ -90,6 +117,9 @@ wait_pane "code action picker" "Code actions:" "Change to \`MAXMSGL\`"
 P 0.9; S 1 Enter
 wait_pane "fixed line" "MAXMSGL(10)"
 L ":w"; S Enter; P 0.5; wait_file "MAXMSGL(10)"
+# T6: the positive grep alone would pass while the OLD diagnostic still
+# hung on screen — the server must actually clear it after the edit.
+wait_pane_gone "quickfixed diagnostic cleared" "is not a parameter"
 
 echo "[3] completion: new command gets defined names inside TARGET()"
 S 1 0 G o
@@ -155,8 +185,15 @@ L "ORDERS.INPUT"; S Enter
 wait_pane "renamed definition" "QLOCAL(ORDERS.INPUT)"
 P 1.0
 L ":w"; S Enter; P 0.5
-[ "$(grep -o "ORDERS\.INPUT" "$WORK/demo.mqsc" | wc -l)" -ge 4 ] \
-  || { echo "FAIL: rename did not reach all references"; exit 1; }
+# T6: -ge 4 passed a rename that DUPLICATED a site. The exact count:
+# the fixture has four ORDERS.IN sites (DEFINE, LIKE, TARGET, ALTER) and
+# step [3] completed a fifth TARGET(ORDERS.IN) — so after a correct
+# rename the file holds exactly five ORDERS.INPUT and zero leftover
+# ORDERS.IN.
+[ "$(grep -o "ORDERS\.INPUT" "$WORK/demo.mqsc" | wc -l)" -eq 5 ] \
+  || { echo "FAIL: rename did not rewrite exactly the 5 reference sites"; exit 1; }
+[ "$(grep -oE '\bORDERS\.IN\b' "$WORK/demo.mqsc" | wc -l)" -eq 0 ] \
+  || { echo "FAIL: an ORDERS.IN site survived the rename"; exit 1; }
 wait_file "ALTER QLOCAL(ORDERS.INPUT)"
 
 echo "[8] references: all uses of the queue in a quickfix window"
@@ -168,25 +205,47 @@ L ":cclose"; S Enter; P 0.4
 
 echo "[9] folds from the server (continuation chains, comment blocks)"
 S z M
-wait_pane "closed folds" "lines"
+# T6 (REVIEW 2026-10-31): the old assert grepped the bare word "lines" —
+# prose in a statusline or float carried it too. Pin the REAL fold
+# decoration: the foldtext marker, its exact line count, and the folded
+# command itself (the '+' continuation pair under the renamed queue).
+wait_pane "closed folds" "+--" "2 lines:" "DEFINE QLOCAL(ORDERS.INPUT)"
 P 1.1
 S z R; P 0.6
+# ...and zR must actually re-reveal the hidden continuation line.
+wait_pane "folds reopened" "DESCR('Order feed queue')"
 
 echo "[10] final view; quit"
 S g g; P 1.2
 L "/ORDERS.INPUT"; S Enter; P 1.0
 L ":q"; S Enter
 
+# T6 (REVIEW 2026-10-31): the header check used to be a WARN and only
+# looked at the width. The asciinema v2 header IS the rendering contract
+# (agg sizes the gif from it) — both dims must match, or it is a FAIL.
+check_cast_header() {
+  local hdr
+  hdr="$(head -c 200 "$1" | head -1)"
+  printf '%s' "$hdr" | grep -Eq "\"width\": *$W([^0-9]|$)" \
+    && printf '%s' "$hdr" | grep -Eq "\"height\": *$H([^0-9]|$)"
+}
+
 if [ "$RECORD" = 1 ]; then
   wait "$REC_PID" || { echo "FAIL: asciinema rec exited non-zero"; exit 1; }
-  head -c 200 "$OUT" | head -1 | grep -q "\"width\": *$W" \
-    || { echo "WARN: cast header does not match ${W}x${H}; check before uploading"; }
+  check_cast_header "$OUT" \
+    || { echo "FAIL: cast header does not declare ${W}x${H} — agg would render a mis-sized gif"; exit 1; }
   echo
   echo "cast written: $OUT"
   echo "review it:    asciinema play --include-output a --out-format raw $OUT | less -R"
   echo "  (or just)   asciinema play $OUT"
   echo "then commit and, if publishing: asciinema upload $OUT"
 else
+  # The plain run is the staleness gate for the COMMITTED cast: its
+  # header is part of what ships, so gate it too when it exists.
+  if [ -f "$OUT" ]; then
+    check_cast_header "$OUT" \
+      || { echo "FAIL: committed cast ($OUT) header does not declare ${W}x${H}"; exit 1; }
+  fi
   echo
   echo "verify tour completed (add --record to capture $OUT)"
 fi

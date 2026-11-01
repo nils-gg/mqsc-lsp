@@ -81,7 +81,10 @@ def run_check(binary, files):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dir", nargs="?",
-                    default=os.path.expanduser("~/Code/esql-lsp/dmpmqcfg"))
+                    # T7: the corpus lives inside this repo (gitignored);
+                    # the old ~/Code/esql-lsp/dmpmqcfg default no longer
+                    # exists and a bare invocation died with a traceback.
+                    default=os.path.join(REPO, "dmpmqcfg"))
     ap.add_argument("--probe",
                     default=os.path.join(REPO, "server/target/debug/examples/probe"))
     ap.add_argument("--check", help="use mqsc-lsp --check instead of probe")

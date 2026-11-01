@@ -73,11 +73,42 @@ def file_uri(p):
     return "file://" + p
 
 
+SESSIONS = []
+
+import atexit
+
+
+def _cleanup():
+    """T9: every exit path — including a raised assertion mid-session —
+    kills any still-live server, removes its log, and deletes the temp
+    workspace."""
+    for s in SESSIONS:
+        try:
+            if s.proc.poll() is None:
+                s.proc.kill()
+                s.proc.wait(timeout=5)
+        except Exception:
+            pass  # already reaped by shutdown(), or wedged beyond killing
+        try:
+            os.remove(s.log)
+        except OSError:
+            pass
+    shutil.rmtree(WS, ignore_errors=True)
+
+
+atexit.register(_cleanup)
+
+
 class Session:
     """One server process over stdio, with a buffered LSP framer."""
 
     def __init__(self, tag, scan_enabled, cross_file=None):
         self.tag = tag
+        # T9 (REVIEW 2026-10-31): registered for atexit cleanup the moment
+        # it exists — a mid-script crash used to leave the server process
+        # and the temp workspace behind (shutdown() only runs on the
+        # happy path).
+        SESSIONS.append(self)
         self.log = os.path.join(tempfile.gettempdir(), f"mqsc-wssmoke-{tag}-{os.getpid()}.log")
         if os.path.exists(self.log):
             os.remove(self.log)
