@@ -219,10 +219,27 @@ jobs:
           # Release page. LC_ALL=C because sort/comm must agree on the
           # collation; and $2 (not cut -d' ') because sha256sum separates
           # hash from name with TWO spaces.
+          #
+          # Reading the live list is guarded three ways (the v0.2.0 run
+          # lesson): `assets` is the real gh JSON field (`assetNames` does
+          # not exist — gh printed "Unknown JSON field", the | sort pipe
+          # swallowed its exit code because bash steps have no pipefail,
+          # and an empty list made every asset look "missing"); `if !`
+          # checks gh's own status without a pipe; and the zero-asset
+          # guard turns even a future silent emptiness into a clear
+          # failure instead of a wrong diff.
           { awk '{print $2}' dist/SHA256SUMS; echo SHA256SUMS; } \
             | LC_ALL=C sort > /tmp/expected
-          gh release view "$GITHUB_REF_NAME" --json assetNames \
-            --jq '.assetNames[]' | LC_ALL=C sort > /tmp/actual
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[].name' > /tmp/actual; then
+            echo "::error::could not read the live release's asset list"
+            exit 1
+          fi
+          if [ ! -s /tmp/actual ]; then
+            echo "::error::the live release reports zero assets"
+            exit 1
+          fi
+          LC_ALL=C sort -o /tmp/actual /tmp/actual
           extra=$(LC_ALL=C comm -13 /tmp/expected /tmp/actual | tr '\n' ' ')
           if [ -n "$extra" ]; then
             echo "::error::release asset(s) not covered by SHA256SUMS: $extra"; exit 1
