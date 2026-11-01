@@ -13,7 +13,12 @@ fn main() {
         .map(std::path::PathBuf::from)
         .collect();
     let roots = if roots.is_empty() {
-        vec![std::path::PathBuf::from("../dmpmqcfg")]
+        // T12: pinned to the repo layout, not the cwd — `cargo run --example
+        // ws_scan` from server/ and a direct binary call now agree.
+        vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crate dir has a parent")
+            .join("dmpmqcfg")]
     } else {
         roots
     };

@@ -1,5 +1,6 @@
 use tower_lsp::lsp_types::Position;
 fn main() {
+    let mut panics = 0;
     let doc = "DEFINE QLOCAL(DEAD.QUEUE) REPLACE\nDEFINE CHANNEL(SYSTEM.DEF.SDR) CHLTYPE(SDR) TRPTYPE(TCP) CONNAME('9.20.4.20(1412)') SEQWRAP(9999999)\nDISPLAY QLOCAL(*) WHERE(CURRENT_QS)\nALTER QLOCAL(NEW1) MAXMSGS\nDEF QL(X)\nDEFINE QLOCAL(Q1) DESCR('It works')\nDEFINE \nDEFINE     \nALTER \nDISPLAY QUEUE \nDEF \nSET \nDEFINE Q\nDISPLAY QLOCAL \nALTER QLOCAL \nADD \nDEFINE QLOCAL(Q1) REPLACE \nDISPLAY SUB SUB1 \nDEFINE QLOCAL Q\nDEFINE QLOCAL(Q3) +\nDESCR('a')\n";
     for (line, ch) in [
         (0, 0),
@@ -67,7 +68,16 @@ fn main() {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Err(_) => println!("({line},{ch}) -> PANIC"),
+            Err(_) => {
+                panics += 1;
+                println!("({line},{ch}) -> PANIC")
+            }
         }
+    }
+    // a PANIC line is a regression, not output to eyeball: exit non-zero so
+    // callers (and a future CI step) actually fail on it (REVIEW T2)
+    if panics > 0 {
+        eprintln!("complete: {panics} completion call(s) PANICKED");
+        std::process::exit(1);
     }
 }

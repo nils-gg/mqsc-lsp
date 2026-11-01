@@ -2,16 +2,17 @@
 # Merge into ~/.config/helix/languages.toml and adjust paths.
 #
 # Helix requires a tree-sitter grammar (for parsing/highlighting) IN ADDITION
-# to the language server. Install the mqsc grammar first:
+# to the language server. The helix grammar registry has no mqsc entry, so
+# `:grammar install mqsc` cannot work — the manual source recipe is the only
+# way to get the grammar:
 #
-#   # on helix >= 24.03, with the grammar published (or use a local source):
-#   :grammar install mqsc
-#
-#   # manual alternative: symlink/copy grammars/tree-sitter-mqsc into
-#   #   ~/.config/helix/runtime/grammars/sources/mqsc
-#   # and run  :grammar install  — helix compiles parser.c + scanner.c itself.
-#   # The queries live in grammars/tree-sitter-mqsc/queries/highlights.scm;
-#   # copy them into that folder as helix expects queries/highlights.scm.
+#   1. symlink (or copy) this repository's grammars/tree-sitter-mqsc to
+#        ~/.config/helix/runtime/grammars/sources/mqsc
+#   2. make sure that folder carries queries/highlights.scm (copy it from
+#        grammars/tree-sitter-mqsc/queries/highlights.scm
+#      — where this repository keeps its highlighting queries),
+#   3. run  :grammar install  in helix — it then compiles the committed
+#      src/parser.c + src/scanner.c from that source tree itself.
 
 [[language]]
 name = "mqsc"

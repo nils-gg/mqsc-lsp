@@ -77,7 +77,9 @@
     "param_docs adds hover text for parameters/attributes the 2011",
     "reference does not document; generic_values holds meanings for the",
     "value words shared across many parameters (hover falls back to it",
-    "only inside enum-valued parameters)."
+    "only inside enum-valued parameters).",
+    "patch key 'DISPLAY QMGR': the 2011 page renders every displayable attribute as bare [ WORD ] (live railroad); the extractor read each following run of attribute names as the parameter's enum — 36 fabricated value lists, gone",
+    "value_docs AUTHTYPE carries no NONE: AUTHTYPE(NONE) is documented nowhere — not on the 2011 reference page (values CRLLDAP/OCSP/IDPWOS/IDPWLDAP only), not in current IBM docs (9.2-9.4), and the 10.0.1 distributed oracle rejects it (AMQ8405I; railroad prints exactly those four). NONE is a CHCKCLNT/CHCKLOCL value; a curation slip put it under AUTHTYPE, where the anti-fabrication guard's escape hatch could not see it. The hatch is gone (m-6): every curated value must pin to model data."
   ],
   "commands": {
     "SET": {
@@ -1457,20 +1459,13 @@
           "description": "Does not harden the backout indication on get-with-backout (oracle MQ 10.0.1)"
         },
         {
-          "name": "DEFPRESP",
-          "kind": "enum",
-          "values": [
-            "SYNC",
-            "ASYNC"
-          ],
-          "optional": true,
-          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
-        },
-        {
           "name": "CLUSTER",
           "kind": "string",
           "optional": true,
-          "description": "The name of the cluster to which this topic belongs. ' ' publish/subscribe cluster-connected queue managers. string The topic belongs to this cluster. Leave this parameter blank on the system topics SYSTEM.BASE.TOPIC and SYSTEM.DEFAULT.TOPIC, except in special circumstances to do with migration, documented elsewhere."
+          "description": "The name of the cluster to which this topic belongs. ' ' publish/subscribe cluster-connected queue managers. string The topic belongs to this cluster. Leave this parameter blank on the system topics SYSTEM.BASE.TOPIC and SYSTEM.DEFAULT.TOPIC, except in special circumstances to do with migration, documented elsewhere.",
+          "footnotes": [
+            "Valid only on AIX®, HP-UX, z/OS, i5/OS®, Solaris, and Windows."
+          ]
         }
       ],
       "extend_enum": {
@@ -1686,18 +1681,6 @@
           "kind": "string",
           "optional": true,
           "description": "Stream queue carrying cluster publications for this queue (railroad: q_name; oracle MQ 10.0.1)"
-        },
-        {
-          "name": "DEFPRESP",
-          "kind": "enum",
-          "values": [
-            "SYNC",
-            "ASYNC",
-            "ENABLED",
-            "DISABLED"
-          ],
-          "optional": true,
-          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
         }
       ],
       "extend_enum": {
@@ -1781,7 +1764,10 @@
           "name": "CLUSNL",
           "kind": "string",
           "optional": true,
-          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs."
+          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs.",
+          "footnotes": [
+            "Valid only on AIX®, HP-UX, z/OS, i5/OS®, Solaris, and Windows."
+          ]
         }
       ],
       "extend_enum": {
@@ -1849,20 +1835,13 @@
           "description": "Capacity-expression expiry interval, the expiry used when a put's EXPIRY is set to CAP (railroad: NOLIMIT | integer; oracle MQ 10.0.1)"
         },
         {
-          "name": "DEFPRESP",
-          "kind": "enum",
-          "values": [
-            "SYNC",
-            "ASYNC"
-          ],
-          "optional": true,
-          "description": "Specifies the behavior to be used by applications when the put response type, within the MQPMO options, is set to MQPMO_RESPONSE_AS_Q_DEF."
-        },
-        {
           "name": "CLUSNL",
           "kind": "string",
           "optional": true,
-          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs."
+          "description": "The name of the namelist that specifies the list of clusters to which the channel belongs.",
+          "footnotes": [
+            "Valid only on AIX®, HP-UX, z/OS®, i5/OS®, Solaris, and Windows."
+          ]
         }
       ],
       "extend_enum": {
@@ -2132,37 +2111,71 @@
           "name": "MSGDATA",
           "kind": "string",
           "optional": true,
-          "description": "Channel message exit user data."
+          "description": "Channel message exit user data.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "Valid only on HP OpenVMS."
+          ]
         },
         {
           "name": "MSGEXIT",
           "kind": "string",
           "optional": true,
-          "description": "Channel message exit names."
+          "description": "Channel message exit names.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "Valid only on HP OpenVMS."
+          ]
         },
         {
           "name": "RCVDATA",
           "kind": "string",
           "optional": true,
-          "description": "Channel receive exit user data."
+          "description": "Channel receive exit user data.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "This is the default supplied with WebSphere® MQ, but your installation might have changed it.",
+            "Valid only on HP OpenVMS."
+          ]
         },
         {
           "name": "RCVEXIT",
           "kind": "string",
           "optional": true,
-          "description": "Channel receive exit names."
+          "description": "Channel receive exit names.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "This is the default supplied with WebSphere® MQ, but your installation might have changed it.",
+            "Valid only on HP OpenVMS."
+          ]
         },
         {
           "name": "SENDDATA",
           "kind": "string",
           "optional": true,
-          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ "
+          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ in the cluster- sender channel definition. This facility applies to AIX®, HP-UX, Linux, i5/OS®, Solaris, and Windows only. For a full explanation of this facility, see WebSphere MQ Queue Manager Clusters. The name must not be the same as any existing channel defined on this queue manager (unless REPLACE or ALTER is specified). On z/OS, client-connection channel names can duplicate others.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "This is the default supplied with WebSphere® MQ, but your installation might have changed it.",
+            "Valid only on HP OpenVMS."
+          ]
         },
         {
           "name": "SENDEXIT",
           "kind": "string",
           "optional": true,
-          "description": "Channel send exit names."
+          "description": "Channel send exit names.",
+          "footnotes": [
+            "Valid only on WebSphere MQ for z/OS when the queue manager is a member of a queue-sharing group.",
+            "Valid only on z/OS.",
+            "This is the default supplied with WebSphere® MQ, but your installation might have changed it.",
+            "Valid only on HP OpenVMS."
+          ]
         }
       ],
       "extend_enum": {
@@ -2368,7 +2381,7 @@
           "name": "SENDDATA",
           "kind": "string",
           "optional": true,
-          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ "
+          "description": "(channel-name) The name of the new channel definition. This parameter is required on all types of channel. On CLUSSDR channels, it can take a different form to the other channel types. If your convention for naming cluster-sender channels includes the name of the queue manager, you can define a cluster-sender channel using the +QMNAME+ construction. After connection to the matching cluster-receiver channel, WebSphere® MQ substitutes the correct repository queue manager name in place of +QMNAME+ in the cluster- sender channel definition. This facility applies to AIX®, HP-UX, Linux, i5/OS®, Solaris, and Windows only. For a full explanation of this facility, see WebSphere MQ Queue Manager Clusters. The name must not be the same as any existing channel defined on this queue manager (unless REPLACE or ALTER is specified). On z/OS, client-connection channel names can duplicate others."
         },
         {
           "name": "SENDEXIT",
@@ -2443,7 +2456,8 @@
             "DISABLED",
             "ENABLED"
           ],
-          "optional": true
+          "optional": true,
+          "description": "Whether configuration events are generated:"
         },
         {
           "name": "PERFMEV",
@@ -2452,7 +2466,8 @@
             "DISABLED",
             "ENABLED"
           ],
-          "optional": true
+          "optional": true,
+          "description": "Whether performance-related events are generated:"
         },
         {
           "name": "SUITEB",
@@ -2692,7 +2707,11 @@
         {
           "name": "LDAPUSER",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "Distinguished Name of the user on the LDAP server. Applies only to objects with AUTHTYPE(CRLLDAP).",
+          "footnotes": [
+            "This is the default supplied with WebSphere® MQ, but your installation might have changed it."
+          ]
         },
         {
           "name": "GRPFIELD",
@@ -2720,7 +2739,8 @@
         {
           "name": "OCSPURL",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "The URL of the OCSP responder used to check for certificate revocation. This must be an HTTP URL containing the host name and port number of the OCSP responder. If the OCSP responder is using port 80, which is the default for HTTP, then the port number can be omitted. HTTP URLs are defined in RFC 1738. This field is case-senstive. It must start with the string http:// in lower case. The rest of the URL might be case- sensitive, depending on the OCSP server implementation. To preserve case, use single quotation marks to specify the OCSPURL parameter value, for example: OCSPURL('http://ocsp.example.ibm.com') This parameter is applicable only for AUTHTYPE(OCSP), when it is mandatory."
         },
         {
           "name": "AUTHENMD",
@@ -2846,7 +2866,8 @@
         {
           "name": "LDAPUSER",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "Distinguished Name of the user on the LDAP server. Applies only to objects with AUTHTYPE(CRLLDAP)."
         },
         {
           "name": "GRPFIELD",
@@ -2874,7 +2895,8 @@
         {
           "name": "OCSPURL",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "The URL of the OCSP responder used to check for certificate revocation. This must be an HTTP URL containing the host name and port number of the OCSP responder. If the OCSP responder is using port 80, which is the default for HTTP, then the port number can be omitted. HTTP URLs are defined in RFC 1738. This field is case-senstive. It must start with the string http:// in lower case. The rest of the URL might be case- sensitive, depending on the OCSP server implementation. To preserve case, use single quotation marks to specify the OCSPURL parameter value, for example: OCSPURL('http://ocsp.example.ibm.com') This parameter is applicable only for AUTHTYPE(OCSP), when it is mandatory."
         },
         {
           "name": "AUTHENMD",
@@ -2964,12 +2986,20 @@
         {
           "name": "LOCLNAME",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "The NetBIOS local name that the listener uses.",
+          "footnotes": [
+            "This is the default supplied with WebSphere MQ, but your installation might have changed it."
+          ]
         },
         {
           "name": "IPADDR",
           "kind": "string",
-          "optional": true
+          "optional": true,
+          "description": "The listener's IP address.",
+          "footnotes": [
+            "This is the default supplied with WebSphere MQ, but your installation might have changed it."
+          ]
         }
       ]
     },
@@ -3022,35 +3052,6 @@
             "integer",
             "UNLIMITED"
           ]
-        },
-        {
-          "name": "PERSIST",
-          "kind": "enum",
-          "values": [
-            "NO",
-            "YES"
-          ],
-          "optional": true
-        },
-        {
-          "name": "PSCLRSYS",
-          "kind": "enum",
-          "values": [
-            "ALL",
-            "NONE",
-            "PUB"
-          ],
-          "optional": true
-        },
-        {
-          "name": "PSCTLCASE",
-          "kind": "string",
-          "optional": true
-        },
-        {
-          "name": "PSMSGID",
-          "kind": "string",
-          "optional": true
         },
         {
           "name": "PSPROP",
@@ -3822,7 +3823,6 @@
       ]
     },
     "DISPLAY QMGR": {
-      "_why": "the 2011 page renders every displayable attribute as bare [ WORD ] (live railroad); the extractor read each following run of attribute names as the parameter's enum — 36 fabricated value lists, gone",
       "flag_params": [
         "ACCTQ",
         "ACTIVREC",
@@ -3873,21 +3873,6 @@
           "SERVICE"
         ]
       }
-    },
-    "DISPLAY SBSTATUS": {
-      "add_params": [
-        {
-          "name": "DURABLE",
-          "kind": "enum",
-          "values": [
-            "ALL",
-            "NO",
-            "YES"
-          ],
-          "optional": true,
-          "description": "Specify this attribute to restrict the type of subscriptions which are displayed."
-        }
-      ]
     },
     "DISPLAY QSTATUS": {
       "add_params": [
@@ -3958,6 +3943,76 @@
           "description": "Specifies whether to commit or back out the in-doubt messages (this is required):"
         }
       ]
+    },
+    "DISPLAY SBSTATUS": {
+      "set_params": [
+        {
+          "name": "SUBTYPE",
+          "optional": true,
+          "_why": "the z/OS SBSTATUS dotted diagram prints SUBTYPE without a ? bracket; the extractor read that as must-give (M-1). The live railroad and the reference page show it as one optional selector among DURABLE/USER/PROXY/ADMIN/API; DISPLAY SBSTATUS(*) is complete MQSC."
+        }
+      ]
+    },
+    "RESET CLUSTER": {
+      "set_params": [
+        {
+          "name": "QMID",
+          "optional": true,
+          "_why": "same optional:false artifact (M-1): the oracle's distributed RESET CLUSTER railroad takes ACTION/QMNAME/QUEUES and names no must-give parameter, and QMID is the z/OS-side reset selector — RESET CLUSTER(CL1) alone is valid MQSC."
+        }
+      ]
+    },
+    "START TRACE": {
+      "set_params": [
+        {
+          "name": "CLASS",
+          "kind": "integer",
+          "values": [],
+          "_why": "the page documents CLASS( integer ) — 'Any number in the class column of the table that follows' — plus the m:n range; the base model's values ['integer','integer:integer'] are those placeholder words captured as enum members, so CLASS(18) was rejected (M-2). Integer kind accepts the number and the range (both digit groups); CLASS(*) stays unaccepted until a z/OS-side probe confirms the documented CLASS(*)."
+        },
+        {
+          "name": "IFCID",
+          "kind": "integer",
+          "values": [],
+          "_why": "diagram sub-line '3.1 ifcid' — 'Reserved for IBM service' takes an IFCID number; the pooled placeholder ['ifcid'] made START TRACE(2) IFCID(18), the canonical spelling, warn (M-2)."
+        }
+      ]
+    },
+    "STOP TRACE": {
+      "set_params": [
+        {
+          "name": "CLASS",
+          "kind": "integer",
+          "values": [],
+          "_why": "the page documents CLASS( integer ) — 'Any number in the class column of the table that follows' — plus the m:n range; the base model's values ['integer','integer:integer'] are those placeholder words captured as enum members, so CLASS(18) was rejected (M-2). Integer kind accepts the number and the range (both digit groups); CLASS(*) stays unaccepted until a z/OS-side probe confirms the documented CLASS(*)."
+        }
+      ]
+    },
+    "DISPLAY TRACE": {
+      "set_params": [
+        {
+          "name": "CLASS",
+          "kind": "integer",
+          "values": [],
+          "_why": "the page documents CLASS( integer ) — 'Any number in the class column of the table that follows' — plus the m:n range; the base model's values ['integer','integer:integer'] are those placeholder words captured as enum members, so CLASS(18) was rejected (M-2). Integer kind accepts the number and the range (both digit groups); CLASS(*) stays unaccepted until a z/OS-side probe confirms the documented CLASS(*)."
+        }
+      ]
+    },
+    "ALTER TRACE": {
+      "set_params": [
+        {
+          "name": "CLASS",
+          "kind": "integer",
+          "values": [],
+          "_why": "same placeholder debris as START/STOP/DISPLAY TRACE, plus a pooled '*'; CLASS(*) is page-attested on this command but star-kind would also silence CLASS(BOGUS), so * acceptance waits for a z/OS-side probe."
+        },
+        {
+          "name": "IFCID",
+          "kind": "star",
+          "values": [],
+          "_why": "diagram 'IFCID( * | ifcid )': the value is an opaque service number or *, and no keyword set exists to check — Star kind accepts exactly that shape."
+        }
+      ]
     }
   },
   "name_max": {
@@ -3976,7 +4031,8 @@
     "SERVICE": 48,
     "CMDSERV": 48,
     "CFSTRUCT": 48,
-    "CHANNEL": 1024
+    "CHANNEL": 1024,
+    "LOG": 44
   },
   "mandatory": {
     "QALIAS": [
@@ -4698,12 +4754,6 @@
         "z/OS only: load module containing the queue manager initialization parameters used by START QMGR; the default is CSQZPARM."
       ]
     ],
-    "PERSIST": [
-      [
-        "",
-        "Early publish/subscribe parameter on subscription definitions (values NO, YES). The IBM reference carries no explanation of this parameter."
-      ]
-    ],
     "PMGSDLV": [
       [
         "",
@@ -4722,28 +4772,10 @@
         "Object name or generic name pattern identifying the profile the authorization record applies to; the class of object comes from OBJTYPE."
       ]
     ],
-    "PSCLRSYS": [
-      [
-        "",
-        "Early publish/subscribe parameter on subscription definitions (values ALL, NONE, PUB). The IBM reference carries no explanation of this parameter."
-      ]
-    ],
-    "PSCTLCASE": [
-      [
-        "",
-        "Early publish/subscribe parameter on subscription definitions. The IBM reference carries no explanation of this parameter."
-      ]
-    ],
     "PSID": [
       [
         "",
         "Page set identifier (two digits, 00 through 99). On DISPLAY it limits output to queues actively associated with that page set; on STGCLASS objects it names the page set assigned to the storage class. z/OS only."
-      ]
-    ],
-    "PSMSGID": [
-      [
-        "",
-        "Early publish/subscribe parameter on subscription definitions. The IBM reference carries no explanation of this parameter."
       ]
     ],
     "PUBACCT": [
@@ -5127,7 +5159,6 @@
         "AUTHINFO"
       ],
       "values": {
-        "NONE": "no authentication service information (the default)",
         "IDPWOS": "identity provisioned by the operating system — user IDs checked against platform credentials",
         "IDPWLDAP": "identity provisioned from LDAP — user IDs checked with an LDAP bind",
         "CRLLDAP": "certificate revocation lists fetched from LDAP",

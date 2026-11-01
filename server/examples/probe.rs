@@ -4,8 +4,14 @@ use tower_lsp::lsp_types::Url;
 fn main() {
     // Lossy decode: real dmpmqcfg dumps contain the odd non-UTF-8 byte
     // (DESCR text written on Windows boxes); a probe must never panic.
+    // An unreadable stdin is an IO error, not a crash: exit 2 like the
+    // --check CLI's IO contract, never the 101 a panic would print
+    // (REVIEW T2).
     let mut buf = Vec::new();
-    std::io::stdin().read_to_end(&mut buf).unwrap();
+    if let Err(e) = std::io::stdin().read_to_end(&mut buf) {
+        eprintln!("probe: cannot read stdin: {e}");
+        std::process::exit(2);
+    }
     let text = String::from_utf8_lossy(&buf).into_owned();
     eprintln!("probing {} bytes", text.len());
     let now = Instant::now();

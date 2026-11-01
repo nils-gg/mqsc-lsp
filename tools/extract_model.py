@@ -124,7 +124,11 @@ def grab_railroad_section(lines, start, end):
 # ---------------------------------------------------------------- dotted parse
 
 MAIN_RE = re.compile(r"^(\d+)([!?]?)\s*(.*)$")
-SUB_RE = re.compile(r"^(\d+)\.(\d+)([+?]?)\s*(.*)$")
+# `!` belongs in the modifier class (m-1): a sub-line `N.1! VALUE` is a
+# must-give variant just like MAIN_RE's `N!`; without it the marker was
+# not consumed and the raw `! VALUE` landed in the enum value list
+# (the six `!`-prefixed tokens the committed model carries).
+SUB_RE = re.compile(r"^(\d+)\.(\d+)([+?!]?)\s*(.*)$")
 ENUM_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9_/$#%.@-]*$")
 VALUE_SPLIT_RE = re.compile(r"^([A-Z][A-Z0-9_/-]*)\s*(?:\((.*)\)|=\s*(.+)|\($)?$", re.S)
 
@@ -237,7 +241,9 @@ def parse_dotted(section_raw, footnotes):
             text2, fns = strip_footnotes(text2)
             cur.append({"num": num, "marker": marker, "text": text2, "fns": fns})
             continue
-        if re.match(r"^[A-Z][A-Za-z0-9 ()/-]*$", s) and not s.startswith(("+", "|", ">")):
+        if re.match(r"^[A-Z][A-Za-z0-9 ()/-]*$", s):
+            # (N3) the old `and not s.startswith(("+", "|", ">"))` clause was
+            # unreachable: every such line already fails the ^[A-Z] pattern.
             key = s.lower()
             subgroups.setdefault(key, [])
             cur = subgroups[key]

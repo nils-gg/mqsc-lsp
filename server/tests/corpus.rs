@@ -4,12 +4,18 @@
 //!
 //! The corpus file (`grammars/tree-sitter-mqsc/test/corpus/*.txt`) uses the
 //! standard tree-sitter layout: `===` separator, title, `===` separator,
-//! source, `---` separator, expected S-expression. Each case must (a) parse
-//! with zero ERROR/MISSING nodes and (b) produce exactly the expected tree.
+//! source, `---` separator, expected S-expression. Two modes, picked by the
+//! expected tree itself: a case whose expected tree contains ERROR or
+//! MISSING nodes is a REPAIR case (G1: unclosed groups, stray `)`,
+//! newline-bounded strings — the error-recovery contracts the server's
+//! code-1 syntax-error messages read) and is only compared structurally;
+//! every other case must additionally parse with zero ERROR/MISSING nodes.
 //!
 //! S-expression comparison mirrors what the tree-sitter CLI does: node-field
 //! labels (`verb: `) and anonymous/extra tokens (`"+"`) are stripped, so the
 //! comparison is over named node structure, matching the corpus convention.
+//! MISSING nodes — anonymous in the tree — are rendered as `(MISSING ")"`)
+//! exactly like the corpus writes them.
 
 use tree_sitter::Node;
 
@@ -132,10 +138,58 @@ fn assert_clean(n: Node<'_>, title: &str, src: &str) {
     }
 }
 
+/// Render a tree to an S-expression under the same conventions `norm`
+/// compares by: named nodes keep their kind (no field labels), anonymous
+/// tokens are skipped — except MISSING ones, which are the whole point of
+/// the repair cases and are written `(MISSING ")")` like the corpus does.
+/// (The stock `to_sexp` prints neither the missing flag nor a stable form,
+/// so repair cases could not pin the inserted token through `norm`.)
+fn render(n: Node<'_>, out: &mut String) {
+    if n.is_missing() {
+        // anonymous in the tree, yet it must speak: it IS the repair
+        out.push_str(&format!("(MISSING \"{}\")", n.kind()));
+        return;
+    }
+    if !n.is_named() {
+        return; // anonymous `(`, `)`, `+` …: stripped by `norm` anyway
+    }
+    let mut kids = String::new();
+    for i in 0..n.child_count() {
+        let c = n.child(i).unwrap();
+        let mut s = String::new();
+        render(c, &mut s);
+        if !s.is_empty() {
+            kids.push(' ');
+            kids.push_str(&s);
+        }
+    }
+    out.push('(');
+    out.push_str(n.kind());
+    out.push_str(&kids);
+    out.push(')');
+}
+
+fn render_sexp(n: Node<'_>) -> String {
+    let mut s = String::new();
+    render(n, &mut s);
+    s
+}
+
+/// Cases committed in `test/corpus/*.txt` as of the 2026-10-31 review.
+/// Discovery once floor-asserted `>= 20`, so a moved/emptied corpus dir
+/// (0 cases found) still "passed" 2/3 of the contract; a bare `>= N` with
+/// no relation to reality also let cases silently disappear (REVIEW T5).
+/// Bump this WHEN adding cases; the parse test below walks every one.
+/// G1 added the robustness.txt repair cases plus the F2 binding case.
+const CORPUS_CASES: usize = 36;
+
 #[test]
 fn corpus_cases_are_discovered() {
     let n = cases().len();
-    assert!(n >= 20, "expected the full corpus (>=20 cases), found {n}");
+    assert!(
+        n >= CORPUS_CASES,
+        "expected the full corpus (>={CORPUS_CASES} cases), found {n}"
+    );
     // the stray-mid-line-plus case from T-9 must be among them
     assert!(cases().iter().any(|(t, _, _)| t.contains("mid-line plus")));
 }
@@ -148,19 +202,27 @@ fn corpus_parses_match_expected_trees() {
         .expect("server links the mqsc grammar");
     let mut count = 0;
     for (title, source, expected) in cases() {
+        // G1 repair mode: an expected tree that carries ERROR/MISSING nodes
+        // pins the recovery shape, so the clean-parse rule must not apply.
+        let repair = expected.contains("ERROR") || expected.contains("MISSING");
         let src = format!("{source}\n");
         let tree = parser
             .parse(&src, None)
             .unwrap_or_else(|| panic!("case {title:?}: parser returned None"));
-        assert_clean(tree.root_node(), &title, &source);
+        if !repair {
+            assert_clean(tree.root_node(), &title, &source);
+        }
         assert_eq!(
-            norm(&tree.root_node().to_sexp()),
+            norm(&render_sexp(tree.root_node())),
             norm(&expected),
             "corpus case {title:?}: tree mismatch"
         );
         count += 1;
     }
-    assert!(count >= 20);
+    assert!(
+        count >= CORPUS_CASES,
+        "only {count} of the corpus's {CORPUS_CASES}+ cases were parsed"
+    );
 }
 
 #[test]
