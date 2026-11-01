@@ -207,6 +207,7 @@ python3 tools/lsp_smoke_test.py                     # repo root; assertive full 
 python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session (52)
 python3 tools/check_model.py                        # model byte-reproducibility guard
 python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json = package-lock (= tag) guard
+python3 tools/check_workflows.py                    # workflow contracts: every uses: is SHA-pinned (# ref comment) and every rust-toolchain pin names its toolchain explicitly (the @stable ref-name shorthand dies with the SHA pin — PR #1 lesson)
 node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
 node tools/extension_config_test.js                 # extension settings plumbing (faithful stub: get() THROWS on non-string sections — array keys once killed activation; the resolve test's permissive stub cannot catch that, this one can)
 tools/record_demo.sh                     # repo root; 10-step tmux/nvim tour, asserts every beat (e2e UI test)

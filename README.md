@@ -42,6 +42,7 @@ tools/extract_model.py        extracts the command model from the reference mark
 tools/lsp_smoke_test.py       protocol-level end-to-end test client
 tools/workspace_index_smoke.py  end-to-end test for the workspace index (scan + watching)
 tools/check_versions.py       release version agreement (Cargo.toml / package.json / tag)
+tools/check_workflows.py      CI contracts: actions SHA-pinned, toolchain inputs explicit
 tools/extension_resolve_test.js  VS Code server-lookup behavior (stubbed host, no deps)
 tools/record_demo.sh          drives/records the feature demo (docs/demo.cast)
 model/mqsc-model.json         the extracted model (128 commands, 1336 params, docs, attrs, synonyms)
@@ -353,6 +354,7 @@ python3 tools/check_model.py                     # model is byte-identical to ex
                                                  # (LOCAL-ONLY guarantee: without the gitignored
                                                  # IBM reference it skips, and CI never has it)
 python3 tools/check_versions.py                  # Cargo.toml, package.json and package-lock.json declare one version
+python3 tools/check_workflows.py                 # actions SHA-pinned + toolchain inputs explicit
 node tools/extension_resolve_test.js             # extension finds its server the documented way
 cd server
 echo 'ALTER QLOCAL(NEW1) MAXMSGS' | cargo run --example probe   # analyze text from stdin, no protocol

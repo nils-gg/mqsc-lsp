@@ -28,8 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - name: release versions agree (Cargo.toml vs extension package.json)
+      - name: release versions agree (Cargo.toml / package.json / lock)
         run: python3 tools/check_versions.py
+
+      - name: workflow pin contracts (SHA pins + explicit toolchain inputs)
+        run: python3 tools/check_workflows.py
 
       - name: extension server-resolution behavior (stubbed vscode host)
         run: node tools/extension_resolve_test.js
@@ -156,6 +159,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
@@ -180,6 +187,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
@@ -220,6 +231,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # stable
+        with:
+          # the SHA pin erases the `@stable` ref-name shorthand (PR #1);
+          # tools/check_workflows.py insists every pin names its toolchain
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
