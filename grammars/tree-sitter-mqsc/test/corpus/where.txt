@@ -1,0 +1,216 @@
+================================================================================
+WHERE filter clause: the one group that is blank-separated, not comma-led
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))))
+
+================================================================================
+WHERE clause with comma separators (oracle-accepted spelling)
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE(CCSID, EQ, 1208)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))))
+
+================================================================================
+Boolean words are ordinary filter VALUES to the grammar: a flat run of
+five values parses cleanly, and the server reports the AMQ8569E
+"cannot combine conditions" diagnostic for it
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE(MAXDEPTH GT 10 AND CCSID EQ 1208)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer))
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))))
+
+================================================================================
+Parenthesised filter sub-groups are a parse error: the oracle answers
+AMQ8569E for them, and the grammar gives them the generic error path
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE((MAXDEPTH GT 10) AND (CCSID EQ 1208))
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (ERROR)
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))
+    (ERROR)))
+
+================================================================================
+WHERE clause with a quoted filter value (LK pattern)
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE(DESCR LK 'a*')
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (string)))))
+
+================================================================================
+WHERE clause in lowercase, and blanks before the group
+================================================================================
+
+DISPLAY QLOCAL(*) where (maxdepth gt 10)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)
+    (argument
+      (value
+        (word))
+      (value
+        (word))
+      (value
+        (integer)))))
+
+================================================================================
+WHEREVER is one word: the scanner keyword only fires before '('
+================================================================================
+
+DISPLAY QLOCAL(Q1) DESCR WHEREVER
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))
+    (word)
+    (word)))
+
+================================================================================
+A trailing bare WHERE stays an ordinary word (its missing value is the
+server's job, not a parse error)
+================================================================================
+
+DISPLAY QLOCAL(*) WHERE
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (wildcard)))
+    (word)))
+
+================================================================================
+WHERE inside a value list is data: only command position starts a clause
+================================================================================
+
+DISPLAY QLOCAL(WHERE)
+
+--------------------------------------------------------------------------------
+
+(program
+  (command
+    (verb)
+    (word)
+    (argument
+      (value
+        (word)))))

@@ -6,6 +6,45 @@ the full picture; this file only lists what is easy to get wrong.
 
 ## Architecture facts you can't infer from filenames
 
+- **WHERE support is a grammar+server pair, and the grammar shape is
+  load-bearing**: `argument` carries TWO content alternatives — the
+  ordinary comma-led `_value_list` and the blank-separated
+  `_filter_content: repeat1(choice(',', $.value))` (the oracle accepts
+  commas and a trailing comma inside the filter; blank content can only
+  be the filter, comma-led content only the list) — with declared
+  conflicts `[argument,_value_item]` + `[argument,_value_element]`
+  because a single-value group fits both (identical trees). Do NOT
+  refactor this into a separate `filter_argument` rule or a dedicated
+  command-level arm: every alternative was built and measured. A
+  separate arm puts the parser before a word-reduce-vs-`(`-shift
+  decision that resolves reduce (WHERE never parses) AND shifts LALR
+  error recovery so VCC240.mqsc's unterminated string swallows the
+  NEXT command's verb; an external `where` token perturbs recovery the
+  same way in every externals position; an internal `token(prec(...))`
+  regex splits `WHEREVER` (precedence outranks longest match). Keeping
+  both shapes inside `argument` adds no fork: the content decides. The
+  `WHERE(A B)`-after-any-word acceptance is the documented superset (an
+  oracle AMQ8405I parses silently, same stance as z/OS shapes). Server
+  side, code 16 `WHERE_FILTER` (`check_where_filter`/
+  `validate_where_group`) reads Word(WHERE)+Arg adjacency: triple rule,
+  the 12 `FILTER_OPERATORS` (LIKE is not one — its diagnostic carries
+  the LK quickfix), keyword vocabulary = model-GLOBAL known_params ∪
+  known_attrs (per-command sets false-flag oracle-valid CCSID/MAXDEPTH
+  through the QUEUE synonym), and `NOT_FILTER_KEYWORDS`. It gates
+  itself off `group.has_error()` (code 1 owns parse-error garbage; the
+  nested-parens branch is recovery insurance that usually never fires
+  — recovery wraps extra parens in ERROR). Hover shows the ATTRIBUTE's
+  card for WHERE's first token, not WHERE's. The dmpmqcfg baseline
+  moved when this grammar landed: 3 unterminated-string regions
+  (VCC150T:73, VCC221:74, VCC240:171 — all AMQ8405I on the oracle
+  itself) report differently, net +1 line, and VCC240's recovery
+  improved; byte-identity holds against the post-fix baseline, and the
+  corpus contains zero WHERE usages. **tree-sitter CLI cache trap**:
+  the CLI compiles parser.c under a content-keyed cache — after
+  swapping parser.c by hand, verify `tree-sitter parse` actually
+  rebuilt (a stale cache once showed HEAD "cleanly" parsing what HEAD
+  in fact rejected, and sent the investigation down a wrong branch).
+
 - **Grammar = syntax only** (`verb` + flat word/group list). Which word is the
   object type, a parameter, or a value is resolved against the model in
   `server/src/analysis.rs`. Validation behavior belongs in the server, not
@@ -200,8 +239,8 @@ the full picture; this file only lists what is easy to get wrong.
 
 ```sh
 cd server && cargo build --release                  # the only real build step
-cd server && cargo test                             # 168 unit + 3 grammar-corpus tests (no CLI needed)
-cd grammars/tree-sitter-mqsc && tree-sitter test    # 36 corpus tests (works with CLI 0.27.x)
+cd server && cargo test                             # 176 unit + 3 grammar-corpus tests (no CLI needed)
+cd grammars/tree-sitter-mqsc && tree-sitter test    # 45 corpus tests (works with CLI 0.27.x)
 tree-sitter generate --abi 14                       # only after editing grammar.js
 python3 tools/lsp_smoke_test.py                     # repo root; assertive full LSP session (95 checks)
 python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session (52)

@@ -180,6 +180,7 @@ page when it finds nothing instead of failing silently.
 | 13 | Warning | DEFINE/ALTER/DELETE object name exceeds its maximum length — 48 characters for queues, processes, topics, listeners…, 1024 for channels; only object types with a curated limit in `model/mqsc-overlay.json` (`name_max`) are checked, pattern names with `*`/`+`/`?` are exempt |
 | 14 | Warning | `DEFINE` missing a mandatory property the reference marks required — `TARGET` on QALIAS, `RNAME`/`RQMNAME` on QREMOTE, `CHLTYPE` (and `XMITQ` for sender/server channels) on CHANNEL, `TOPICSTR` on TOPIC, the topic + `DEST` on SUB, `BUFFERS` on BUFFPOOL. Curated in `model/mqsc-overlay.json` (`mandatory`): the railroad diagrams bracket everything, so the model's `optional` flag cannot carry it; `SYSTEM.*` definitions and documented intentional-blank forms (cluster alias qremotes, `XMITQ(' ')`) are exempt, `LIKE` counts everywhere a template copies the attribute |
 | 15 | Warning | parameter or command not available for the configured MQ target — fires only when `mqsc.targetVersion` and/or `mqsc.platform` is set, against curated availability (`availability` for parameters, `command_availability` for whole `VERB OBJECT` commands, both in `model/mqsc-overlay.json`): too old for `targetVersion`, removed by it, or belonging to the other platform (e.g. `QSGDISP` is z/OS-only, `DEFINE CFSTRUCT` is a z/OS family, `SET CHLAUTH` starts at MQ 9.0 — all verified against a live 10.0.1 parser). With no target configured the check is completely dormant; hover and completion show the curated availability facts regardless |
+| 16 | Error | invalid `WHERE` filter clause — a real MQSC filter is exactly one `keyword operator value` triple written blank-separated (`WHERE(MAXDEPTH GT 10)`; conditions joined with `AND`/`OR`/`NOT` or grouped in parentheses are AMQ8569E on a queue manager — one DISPLAY per condition), the operator is one of the twelve `LT GT EQ NE LE GE LK NL CT EX CTG EXG` (`LIKE` is not a filter operator — it gets a one-click `LK` fix), and the keyword must name an attribute the command's object family has, with `CMDSCOPE`/`QSGDISP` excluded per the reference rules. Comma separators and a trailing comma inside the group are accepted spellings, like the queue manager's. Every rule verified line-by-line against a live 10.0.1 `runmqsc` |
 
 Messages follow an Elm-compiler-style contract: every one quotes the
 offending token, says what belongs there instead, and names the concrete fix
@@ -389,9 +390,13 @@ non-zero when a check fails.
   comments after it — the command is truncated: the parser lexes the marker
   as a visible `dangling_continuation` token and the server reports the
   same code 7 at the marker.
-- **MQ 9.x-only constructs are out of scope**: `WHERE`/`SELECT`/`FROM`
-  clauses on DISPLAY are accepted as plain parameters (the reference predates
-  them), but they are not validated. The reference is also not z/OS-current:
+- **The 2011 reference predates the `WHERE` filter clause, but WHERE is
+  validated all the same**: the grammar parses its one blank-separated
+  group shape (`WHERE(MAXDEPTH GT 10)`, comma spellings included) and the
+  server checks the triple rule, the twelve filter operators and the
+  keyword vocabulary — every rule proven against a live 10.0.1 `runmqsc`
+  (see code 16). `SELECT`/`FROM` remain unvalidated plain parameters.
+  The reference is also not z/OS-current:
   `RUN`/`REPLACE` `REPLMSG`/`REPLSTR` parameter families are not in the model.
   What real usage proved necessary lives in `model/mqsc-overlay.json`, a
   clearly-labelled curated add-on merged over the extracted model at load
