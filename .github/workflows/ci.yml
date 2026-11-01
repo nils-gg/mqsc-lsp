@@ -34,6 +34,9 @@ jobs:
       - name: workflow pin contracts (SHA pins + explicit toolchain inputs)
         run: python3 tools/check_workflows.py
 
+      - name: privacy guard (no corpus-derived identifiers in content or history)
+        run: python3 tools/check_privacy.py
+
       - name: extension server-resolution behavior (stubbed vscode host)
         run: node tools/extension_resolve_test.js
 

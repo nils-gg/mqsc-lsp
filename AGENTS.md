@@ -246,6 +246,7 @@ python3 tools/lsp_smoke_test.py                     # repo root; assertive full 
 python3 tools/workspace_index_smoke.py              # repo root; assertive workspace scan+watch session (52)
 python3 tools/check_model.py                        # model byte-reproducibility guard
 python3 tools/check_versions.py [vX.Y.Z]            # Cargo.toml = package.json = package-lock (= tag) guard
+python3 tools/check_privacy.py                       # customer-data guard: no corpus-derived identifier (qm/object/company names) in any tracked file, commit or tag message — placeholders CORPUS-A/B/C/… only
 python3 tools/check_workflows.py                    # workflow contracts: every uses: is SHA-pinned (# ref comment), every rust-toolchain pin names its toolchain explicitly (the @stable ref-name shorthand dies with the SHA pin — PR #1 lesson), no empty ${{ }} expression anywhere (Actions evaluates expressions over the RAW file — even a comment carrying one invalidates the whole workflow; PR #1 release incident), and the release verifier reads the live asset list exactly as `--json assets --jq '.assets[].name'` under `if !` with a zero-asset refusal (v0.2.0 incident: `assetNames` is not a gh field, gh's exit-1 was swallowed by a `| sort` pipe — bash steps run bash -e WITHOUT pipefail — and the empty list made the verifier flag all 8 correctly-published assets as missing; the release itself was fine, only its self-check lied)
 node tools/extension_resolve_test.js                # extension server-lookup behavior (stubs)
 node tools/extension_config_test.js                 # extension settings plumbing (faithful stub: get() THROWS on non-string sections — array keys once killed activation; the resolve test's permissive stub cannot catch that, this one can)
@@ -303,6 +304,10 @@ DEMO_SCALE=2 tools/record_demo.sh --record   # re-record docs/demo.cast (then: a
   `complete` and `fold` use hardcoded fixture text inside the example files.
 - Real-world regression corpus (sibling checkout): `~/Code/esql-lsp/
   dmpmqcfg/*.mqsc`. `probe` must show no panics and stable diagnostic counts.
+  **The corpus is CUSTOMER DATA**: queue-manager names, object names and the
+  company's names/domains must NEVER appear in a commit message, doc,
+  comment or release note — refer to corpus files as CORPUS-A/B/C/… ;
+  `tools/check_privacy.py` (CI) enforces it.
 
 ## Model regeneration quirks
 

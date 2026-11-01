@@ -8,6 +8,15 @@ and its `package-lock.json`, and is released by pushing a `vX.Y.Z` tag
 
 ## [Unreleased]
 
+### Added
+
+- `tools/check_privacy.py` (also a CI gate): the dmpmqcfg regression
+  corpus is customer data, so no customer-derived identifier —
+  queue-manager names, object names, company names or domains — may
+  appear in tracked files, commit messages or tag messages; corpus files
+  are referenced by neutral placeholders only. (Repository history was
+  rewritten to scrub earlier accidental mentions.)
+
 ### Fixed
 
 - `WHERE` filter clauses on DISPLAY/CLEAR (`WHERE(MAXDEPTH GT 10)`) died
