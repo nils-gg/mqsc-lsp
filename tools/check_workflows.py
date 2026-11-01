@@ -9,6 +9,12 @@
    REF NAME, which a SHA pin erases — PR #1's matrix jobs died with
    "'toolchain' is a required input" exactly there. CI must fail here,
    locally, in seconds, not in a red matrix.
+3. No EMPTY `${{ }}` expression anywhere in the raw file — Actions
+   evaluates expressions over the whole file content, comments and
+   run-block script comments included, so an empty one makes the entire
+   workflow invalid and every trigger produces a 0-second, job-less
+   failure (the PR #1 release-blocking incident: a prose comment
+   illustrating "no ${{ }} interpolation" broke it by existing).
 
 Stdlib-only (the CI runner's python has no guaranteed PyYAML): this is a
 line scanner over files the repo controls, not a YAML parser — it reads
@@ -34,6 +40,9 @@ USES = re.compile(
     r"^(?P<indent>\s*)(?:-\s+)?uses:\s*(?P<repo>[^@\s]+)@(?P<ref>[^\s#]+)"
     r"(?:\s+#\s*(?P<comment>\S+))?\s*$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+# An expression with nothing in it — invalid wherever it appears, even
+# inside a comment (Actions evaluates over the raw file).
+EMPTY_EXPR = re.compile(r"\$\{\{\s*\}\}")
 
 
 def _next_meaningful(lines, i):
@@ -52,6 +61,12 @@ def check(path: str) -> int:
     with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
     for i, line in enumerate(lines):
+        if EMPTY_EXPR.search(line):
+            problems.append(
+                f"{path}:{i + 1}: empty " + "${{ }} expression"
+                " — Actions evaluates expressions over the RAW file "
+                "(comments included), so this invalidates the whole "
+                "workflow (PR #1 incident)")
         if re.match(r"^\s*-? ?uses:", line) and not USES.match(line):
             problems.append(f"{path}:{i + 1}: unclassifiable uses: line")
             continue
