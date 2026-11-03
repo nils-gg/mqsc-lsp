@@ -17,7 +17,7 @@ reference, context-aware completion, symbols, folding, and semantic tokens.
 
 ## Demo
 
-![asciicast](docs/demo.gif)
+![asciicast](https://github.com/nils-gg/mqsc-lsp/releases/latest/download/demo.gif)
 
 The ~75-second recording drives real Neovim against the real server
 ([`tools/demo/`](tools/demo/) holds its throwaway config and a fixture full
